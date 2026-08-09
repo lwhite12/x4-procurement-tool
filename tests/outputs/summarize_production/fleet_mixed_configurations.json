@@ -1,0 +1,19 @@
+﻿{
+  "build_focus": "Universal",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Universal": {
+      "parts": {
+        "energycells": 12540.0,
+        "hullparts": 31750.0,
+        "ship_bor_s_heavyfighter_01_a": 5,
+        "engine_bor_s_allround_01_mk1": 5
+      },
+      "ware_count": 4,
+      "resolution_log": []
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "build_focus": "Boron",
+  "search_depth": 1,
+  "wares": [
+    {
+      "count": 1,
+      "wares_list": [
+        {
+          "ware_id": "ship_bor_m_gunboat_01_a",
+          "amount": 1
+        },
+        {
+          "ware_id": "turret_arg_m_flak_01_mk1",
+          "amount": 8
+        }
+      ]
+    }
+  ]
+}

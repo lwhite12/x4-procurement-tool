@@ -1,0 +1,31 @@
+﻿{
+  "build_focus": "Teladi",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Teladi": {
+      "parts": {
+        "energycells": 3890.18,
+        "methane": 1439.91,
+        "ore": 8812.24
+      },
+      "ware_count": 3,
+      "resolution_log": [
+        {
+          "ware_id": "ship_tel_l_trans_container_03_a",
+          "requested_method": "Teladi",
+          "used_method": "Universal",
+          "depth": 0
+        },
+        {
+          "ware_id": "graphene",
+          "requested_method": "Teladi",
+          "used_method": "Universal",
+          "depth": 2
+        }
+      ]
+    }
+  }
+}

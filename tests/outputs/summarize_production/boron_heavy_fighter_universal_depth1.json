@@ -1,0 +1,16 @@
+﻿{
+  "build_focus": "Universal",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Universal": {
+      "parts": {
+        "ship_bor_s_heavyfighter_01_a": 1
+      },
+      "ware_count": 1,
+      "resolution_log": []
+    }
+  }
+}

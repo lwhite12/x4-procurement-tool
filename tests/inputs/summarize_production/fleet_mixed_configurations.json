@@ -1,0 +1,21 @@
+{
+  "build_focus": "Universal",
+  "search_depth": 1,
+  "wares": [
+    {
+      "count": 5,
+      "wares_list": [
+        {"ware_id": "ship_bor_s_heavyfighter_01_a", "amount": 1},
+        {"ware_id": "engine_bor_s_allround_01_mk1", "amount": 1},
+        {"ware_id": "energycells", "amount": 2}
+      ]
+    },
+    {
+      "count": 10,
+      "wares_list": [
+        {"ware_id": "ship_tel_l_trans_container_03_a", "amount": 1},
+        {"ware_id": "energycells", "amount": 3}
+      ]
+    }
+  ]
+}

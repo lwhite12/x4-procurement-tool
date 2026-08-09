@@ -1,0 +1,15 @@
+{
+  "build_focus": "Boron",
+  "search_depth": 1,
+  "wares": [
+    {
+      "count": 1,
+      "wares_list": [
+        {
+          "ware_id": "ship_bor_s_heavyfighter_01_a",
+          "amount": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "build_focus": "Boron",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Boron": {
+      "parts": {
+        "energycells": 25497.02,
+        "methane": 5115.07,
+        "ore": 13370.68,
+        "ice": 3763.73,
+        "hydrogen": 111.89,
+        "helium": 2131.32,
+        "silicon": 4378.82
+      },
+      "ware_count": 7
+    }
+  }
+}

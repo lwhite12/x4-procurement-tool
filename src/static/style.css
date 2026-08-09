@@ -1,0 +1,1096 @@
+/* Dark navy/blue theme modeled on X4: Foundations' own ship-loadout UI --
+   near-black blue page background, progressively lighter blue-tinted
+   panels for nested boxes/cards, a brighter blue for interactive/accent
+   elements (buttons, active states, borders), white default text. */
+:root {
+  --bg-page: #0a0e16;
+  --bg-section: #0e1826;
+  --bg-panel: #142238;
+  --bg-panel-hover: #1c2f4d;
+  --bg-tier: #1a2c48;
+  --border-blue: #2a4468;
+  --border-blue-soft: #1c3050;
+  --accent-blue: #2f6fb3;
+  --accent-blue-bright: #4d9fe8;
+  --text-primary: #ffffff;
+  --text-muted: #9fb4cc;
+  --success: #4ade80;
+  --danger: #ff6b6b;
+  --danger-dim: #5c2a2a;
+  /* Matches the amber/gold used by X4's own shipyard UI for its
+     non-blocking "Warnings" banner (e.g. "Currently edited ship has not
+     been added to the shopping list."). */
+  --warning: #e8a33d;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  /* Wider than a typical form layout so the Ware Cost List's comparison
+     table (potentially many saved-list columns) has real room to grow
+     before its own horizontal scroll (see #ware-cost-list-table-wrapper)
+     kicks in -- capped so it doesn't stretch unreasonably on very wide
+     monitors, and still shrinks to fit smaller viewports via the vw term. */
+  max-width: min(1800px, 96vw);
+  margin: 2rem auto;
+  padding: 0 1rem;
+  background: var(--bg-page);
+  color: var(--text-primary);
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+section {
+  border: 1px solid var(--border-blue);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  background: var(--bg-section);
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.hidden {
+  display: none;
+}
+
+.summary-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.summary-subheader {
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.summary-slot-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.picker-section {
+  margin-bottom: 1rem;
+}
+
+.picker-section-title {
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 2px solid var(--accent-blue);
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+/* Lets a section's title share its own row with extra controls (e.g. the
+   Software section's High/Minimum Preset buttons) without disturbing
+   .picker-section-title's own border-bottom rule -- flex: 1 on the title
+   keeps that border spanning the full row width instead of shrinking to
+   just the text, same look as a plain section with no extra controls. */
+.picker-section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.picker-section-heading-row .picker-section-title {
+  flex: 1;
+}
+
+.software-preset-btn {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+}
+
+.group-card {
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--bg-panel);
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.group-row label {
+  width: 220px;
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.group-row + .group-row {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border-blue-soft);
+}
+
+.required-marker {
+  /* Warning-colored, not danger -- omitting one of these no longer blocks
+     adding the ship to the procurement list, it just surfaces a warning
+     under the ship's name there instead (see .cart-ship-warning). */
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.cart-ship-warning {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.bonus-shield-row {
+  margin-left: 1.25rem;
+  padding-left: 0.5rem;
+  border-left: 3px solid var(--success);
+}
+
+.bonus-shield-row label {
+  color: var(--success);
+}
+
+.group-row select {
+  flex: 1;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border-blue-soft);
+  /* Baseline background for every table cell app-wide -- low enough
+     specificity (plain type selector) that any more specific row-type
+     class (tier/method/category/name-row below) still wins normally, but
+     high enough that every cell is always opaque -- required for the Ware
+     Cost List's frozen row/column cells (see the sticky rules further
+     down) to properly occlude horizontally scrolled-away content
+     underneath them. */
+  background: var(--bg-section);
+}
+
+/* All three collapsible header levels in the Ware Cost List -- tier
+   (Credit Cost/Production Wares/Raw Materials), sub-section (a build
+   focus's own Production Wares Price/Raw Materials Price, or Market
+   Purchase Price), and component-type category -- deliberately look
+   identical (bold, same text color, same background): nothing but indent
+   (padding-left) tells a section apart from what it's nested under. All
+   three set padding-left explicitly (tier-title included, even though its
+   own value happens to match the generic th/td rule further down) so the
+   step from level to level is the same fixed amount (1.5rem) every time,
+   rather than leaving tier-title's indent to an unrelated default that
+   doesn't actually line up evenly with the others. See
+   .ware-cost-list-method-row/.ware-cost-list-category-row below for the
+   two nested levels. */
+.ware-cost-list-tier-title {
+  font-weight: 700;
+  font-size: 1rem;
+  background: var(--bg-tier);
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+  padding-left: 0.6rem;
+}
+
+.ware-cost-list-category-row {
+  font-weight: 700;
+  background: var(--bg-tier);
+  padding-left: 3.6rem;
+}
+
+.ware-cost-list-collapsible {
+  cursor: pointer;
+  user-select: none;
+  /* Every collapsible header (Credit Cost/Raw Materials/Production Wares
+     tiers, build-method sub-headers, component-type category sub-headers)
+     puts its label in a single-column first cell (see
+     appendCollapsibleHeader() in app.js -- a second, plain cell spans the
+     rest of the row for background continuity). A <td> whose own colSpan
+     already covers the table's entire width doesn't reliably freeze via
+     `position: sticky` in browsers -- only a genuinely narrower,
+     first-of-several cell does, the same pattern the ware/price label
+     column already uses successfully, which is why the label lives in its
+     own cell instead of one big spanning cell. Each specific header
+     type's own background (tier/method/category rules above) keeps it
+     opaque over scrolled-away columns. */
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+
+.ware-cost-list-collapsible-filler {
+  cursor: pointer;
+}
+
+.ware-cost-list-collapsible:hover {
+  background: var(--bg-panel-hover);
+}
+
+.ware-cost-list-arrow {
+  display: inline-block;
+  width: 1em;
+  color: var(--text-muted);
+}
+
+.ware-cost-list-method-row {
+  font-weight: 700;
+  background: var(--bg-tier);
+  padding-left: 2.1rem;
+}
+
+.ware-cost-list-price-missing-label,
+.ware-cost-list-price-missing {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--danger);
+}
+
+.ware-cost-list-name-row th {
+  border-bottom: 2px solid var(--accent-blue);
+}
+
+.ware-cost-list-name-row th:not(:first-child) {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ware-cost-list-remove-column-btn {
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--danger);
+  border-color: var(--danger-dim);
+}
+
+.ware-cost-list-set-active-btn {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.ware-cost-list-build-focus-btn {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  border-color: var(--border-blue);
+}
+
+.ware-cost-list-build-focus-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+/* Vertical divider between adjacent columns -- excluded from collapsible
+   header rows ([colspan], set via cell.colSpan = ... in app.js), which
+   span every column as a single cell and shouldn't get a stray line
+   through their middle. */
+#ware-cost-list-table th:not(:last-child):not([colspan]),
+#ware-cost-list-table td:not(:last-child):not([colspan]) {
+  border-right: 1px solid var(--border-blue-soft);
+}
+
+/* Horizontal scroll for the comparison table -- lets it hold many more
+   saved-list columns than the page itself is wide, rather than squishing
+   every column down to fit. */
+#ware-cost-list-table-wrapper {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+#ware-cost-list-table {
+  /* Overrides the generic `table { width: 100% }` -- this table needs to
+     grow past its wrapper's width (triggering the scrollbar above) rather
+     than always shrinking its columns to fit. */
+  width: max-content;
+  min-width: 100%;
+  /* Overrides the generic `table { border-collapse: collapse }` too --
+     collapsed borders are a well-known Chromium bug that silently breaks
+     `position: sticky` on <td>/<th> entirely (the frozen ware column and
+     the frozen headers both depend on it). border-spacing: 0 keeps cells
+     flush against each other so it still looks collapsed despite not
+     technically being so. */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* The Ware/List Name column stays put while the rest of the table scrolls
+   horizontally underneath it, like a frozen column in a spreadsheet.
+   Excluded from collapsible header rows ([colspan]), same reasoning as the
+   divider rule above -- those span every column as one cell, so "the first
+   column" doesn't meaningfully exist for them to freeze. No explicit
+   background needed here -- the generic `th, td` rule (and any more
+   specific row-type class) already guarantees an opaque one, which is all
+   sticky positioning needs to occlude scrolled-away columns underneath. */
+#ware-cost-list-table th:first-child:not([colspan]),
+#ware-cost-list-table td:first-child:not([colspan]) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.ware-cost-list-diff {
+  display: block;
+  font-size: 0.75rem;
+}
+
+.ware-cost-list-diff-up {
+  color: var(--success);
+}
+
+.ware-cost-list-diff-down {
+  color: var(--danger);
+}
+
+.ware-cost-list-diff-none {
+  color: inherit;
+}
+
+input[type="number"].qty-input {
+  width: 3.5rem;
+  text-align: center;
+  /* Only the custom +/- qty-btn buttons (built alongside every qty-input --
+     see buildAmmoRow()/buildDroneRow()/etc. in app.js) should be usable for
+     stepping a value; the native spinner is redundant with those and hidden
+     here instead. */
+  -moz-appearance: textfield;
+}
+
+input[type="number"].qty-input::-webkit-outer-spin-button,
+input[type="number"].qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.qty-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.qty-btn {
+  padding: 0.15rem 0.55rem;
+  line-height: 1;
+}
+
+.edit-btn {
+  margin-right: 0.4rem;
+}
+
+#cart-name-input {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Modeled on the in-game ship builder's own shopping-list panel: bold
+   white category headings, green indented item lines underneath each --
+   see appendGroupedLoadout() in app.js. */
+.cart-loadout-category-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cart-loadout-category {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.cart-loadout-toggle-btn {
+  padding: 0 0.4rem;
+  line-height: 1.3;
+  font-size: 0.8rem;
+}
+
+.cart-loadout-item {
+  color: var(--success);
+}
+
+.cart-ship-note {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+#cart-toolbar,
+#ware-cost-list-toolbar,
+#analysis-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.save-for-comparison-warning {
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.file-input-label {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent-blue);
+  background: var(--accent-blue);
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.file-input-label:hover {
+  background: var(--accent-blue-bright);
+  border-color: var(--accent-blue-bright);
+}
+
+button {
+  cursor: pointer;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent-blue);
+  background: var(--accent-blue);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+button:hover {
+  background: var(--accent-blue-bright);
+  border-color: var(--accent-blue-bright);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.remove-btn {
+  color: var(--danger);
+  background: var(--bg-panel);
+  border-color: var(--danger-dim);
+}
+
+.remove-btn:hover {
+  background: var(--danger-dim);
+  border-color: var(--danger);
+}
+
+/* Discards the ship builder's current picker state (see resetShipPicker())
+   -- one copy next to Load (top) and one next to Add to procurement list
+   (bottom), same action either way. Muted/secondary rather than the
+   .remove-btn danger color -- clearing an unsaved form is low-stakes, not
+   destructive the way removing an already-added cart entry is. */
+.clear-ship-btn {
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border-color: var(--border-blue-soft);
+}
+
+.clear-ship-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-blue);
+  margin: 0.75rem 0;
+}
+
+.tab-btn {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.4rem 0.9rem;
+  margin-bottom: -1px;
+}
+
+.tab-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+#ship-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid var(--border-blue);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  min-width: 140px;
+  background: var(--bg-panel);
+}
+
+.filter-group legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0.25rem;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.filter-actions button {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.filter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.filter-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+  font-size: 0.9rem;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.loadout-manager-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.import-raw-xml-loadout-textarea {
+  width: 100%;
+  min-height: 40vh;
+  font-family: monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.filter-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Ship-class symbol icons (data/images/ships/symbols/, served under
+   /images/... -- see generate_ship_icons.py). One shared small size used
+   everywhere a symbol appears next to a ship/type name: the type filter
+   checkboxes, the ship picker list, the loaded ship's own heading, and the
+   procurement list table. */
+.ship-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.type-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* Custom listbox replacing a native <select> for the ship picker -- a
+   native <option> can't render an <img>, but every ship here needs its own
+   class symbol shown inline, so this is a plain scrollable list of
+   clickable rows instead. */
+.ship-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: var(--bg-panel);
+  margin-bottom: 0.5rem;
+}
+
+.ship-option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.ship-option-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.ship-option-row.selected {
+  background: var(--accent-blue);
+}
+
+.ship-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ship-option-name {
+  color: var(--text-primary);
+}
+
+.ship-option-race {
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding-left: 1em;
+}
+
+/* Solid backing panels for faction-colored text whose color is too hard
+   to read as plain text against this app's dark background -- see
+   FACTION_BG_CLASS in app.js for which faction gets which. A light
+   "silver" panel behind the darker colors (Argon/Paranid/Split/Xenon), a
+   lighter steel-grey "slate" panel behind every light color (Boron,
+   Teladi, Terran, Kha'ak, Yaki) -- still dark enough to stay under even
+   the lightest of those (Terran's pale blue) with a clear margin. */
+.faction-bg-silver,
+.faction-bg-slate {
+  padding: 0 0.3em;
+  border-radius: 3px;
+}
+
+.faction-bg-silver {
+  background: #c0c0c0;
+}
+
+.faction-bg-slate {
+  background: #4a5a66;
+}
+
+.ship-options-empty {
+  padding: 0.4rem 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.ship-name-icon {
+  margin-right: 0.5rem;
+}
+
+.cart-ship-icon {
+  margin-right: 0.4rem;
+}
+
+input[type="text"],
+input[type="number"],
+select {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-blue);
+  border-radius: 4px;
+  padding: 0.3rem;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-blue-bright);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent-blue);
+}
+
+.ammo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+}
+
+.ammo-row label {
+  width: 220px;
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0;
+}
+
+.ammo-summary-line {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-weight: 600;
+  background: var(--bg-panel);
+}
+
+.ammo-summary-line.over-capacity {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+/* Build Method modal (see openBuildMethodModal() in app.js) -- a plain
+   fixed-position overlay + centered box, the simplest modal shape that
+   works for this app's single, non-nested use of it. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+/* .hidden alone loses this fight: both are single-class selectors, so
+   without this the LATER rule in the file wins regardless of which
+   element actually has "hidden" applied -- since .modal-overlay comes
+   after the generic .hidden rule, its own "display: flex" would otherwise
+   override "display: none" and show the modal on every page load. This
+   compound selector's higher specificity fixes that regardless of source
+   order. */
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal {
+  background: var(--bg-section);
+  border: 1px solid var(--border-blue);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  width: min(420px, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modal h3 {
+  margin-top: 0;
+}
+
+.modal-section-title {
+  margin: 1rem 0 0.4rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.modal-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.import-loadouts-status {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-size: 0.85rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.import-loadouts-status.status-error {
+  color: var(--danger);
+}
+
+.import-loadouts-status ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.select-game-loadout-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.3rem;
+}
+
+.select-game-loadout-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.select-game-loadout-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.select-game-loadout-row-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.select-game-loadout-row-ship {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.select-game-loadout-row-warning-count {
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+
+#ship-detail {
+  margin-top: 0.5rem;
+}
+
+.ship-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.ship-name-row h3 {
+  margin: 0;
+}
+
+.imported-loadout-warnings {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--warning);
+  font-size: 0.85rem;
+}
+
+.imported-loadout-warnings ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.build-method-fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: var(--bg-panel);
+}
+
+.build-method-fallback-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem;
+}
+
+.build-method-fallback-row label {
+  flex: 1;
+  margin-bottom: 0;
+  font-weight: normal;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.build-method-fallback-row input[type="checkbox"] {
+  width: auto;
+}
+
+.build-method-reorder-btn {
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+#site-footer {
+  margin: 2rem 0 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-blue-soft);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+#site-footer p {
+  margin: 0.3rem 0;
+}
+
+#site-footer a {
+  color: var(--text-muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* Wider variant of .modal for the equipment picker, which needs room for
+   a multi-column table rather than .modal's own narrow form-field width. */
+.modal-wide {
+  width: min(1100px, 95vw);
+}
+
+/* The button that replaces a group's native <select> (still present in
+   the DOM, just hidden -- see buildGroupRow() in app.js -- so every
+   existing piece of logic that reads/sets its .value, .options, and
+   dispatches/listens for its "change" event keeps working unchanged).
+   Left-aligned and ellipsis-truncated since it shows a full equipment
+   name, not a short action label. */
+.group-select-btn {
+  flex: 1;
+  text-align: left;
+  background: var(--bg-panel);
+  border-color: var(--border-blue-soft);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-select-btn:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--accent-blue);
+}
+
+.group-select-btn-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.equipment-picker-apply-all-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.equipment-picker-apply-all-label input[type="checkbox"] {
+  width: auto;
+}
+
+.equipment-picker-apply-all-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-blue-soft);
+  font-size: 0.75rem;
+  cursor: help;
+}
+
+.equipment-picker-modal-status {
+  padding: 0.5rem 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Scrolls both directions independently of the modal itself, since the
+   table's dynamic "level 1 wares" columns can easily outgrow .modal-wide's
+   own width, and the option list can run to several dozen rows. */
+.equipment-picker-table-wrapper {
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+}
+
+#equipment-picker-table {
+  /* Same reasoning as #ware-cost-list-table: grow past the wrapper's
+     width instead of squeezing columns to fit, and border-collapse:
+     separate since collapsed borders break `position: sticky` on
+     <th>/<td> in Chromium. */
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#equipment-picker-thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-tier);
+  z-index: 1;
+}
+
+.equipment-picker-row {
+  cursor: pointer;
+}
+
+.equipment-picker-row:hover td {
+  background: var(--bg-panel-hover);
+}
+
+.equipment-picker-row.selected td {
+  background: var(--accent-blue);
+}
+
+.equipment-picker-clear-row td {
+  font-style: italic;
+  color: var(--text-muted);
+}

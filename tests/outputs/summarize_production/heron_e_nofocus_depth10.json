@@ -1,0 +1,18 @@
+﻿{
+  "build_focus": null,
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Universal": {
+      "parts": {
+        "energycells": 5566.46,
+        "methane": 1439.91,
+        "ore": 8246.75
+      },
+      "ware_count": 3,
+      "resolution_log": []
+    }
+  }
+}

@@ -1,0 +1,17 @@
+﻿{
+  "build_focus": null,
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Universal": {
+      "parts": {
+        "energycells": 1250.0,
+        "hullparts": 3175.0
+      },
+      "ware_count": 2,
+      "resolution_log": []
+    }
+  }
+}

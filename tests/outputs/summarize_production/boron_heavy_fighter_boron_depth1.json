@@ -1,0 +1,18 @@
+﻿{
+  "build_focus": "Boron",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Boron": {
+      "parts": {
+        "energycells": 278.0,
+        "hullparts": 362.0,
+        "water": 168.0
+      },
+      "ware_count": 3,
+      "resolution_log": []
+    }
+  }
+}

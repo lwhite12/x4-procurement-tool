@@ -1,0 +1,27 @@
+{
+  "build_focus": "Boron",
+  "search_depth": 1,
+  "wares": [
+    {
+      "count": 5,
+      "wares_list": [
+        {"ware_id": "ship_bor_s_heavyfighter_01_a", "amount": 1},
+        {"ware_id": "engine_bor_s_allround_01_mk1", "amount": 1},
+        {"ware_id": "shield_bor_s_standard_01_mk1", "amount": 3},
+        {"ware_id": "weapon_bor_s_arc_01_mk1", "amount": 3},
+        {"ware_id": "weapon_gen_s_dumbfire_02_mk1", "amount": 1}
+      ]
+    },
+    {
+      "count": 1,
+      "wares_list": [
+        {"ware_id": "ship_bor_m_gunboat_01_a", "amount": 1},
+        {"ware_id": "engine_bor_m_allround_01_mk1", "amount": 2},
+        {"ware_id": "shield_bor_m_standard_01_mk1", "amount": 2},
+        {"ware_id": "turret_bor_m_arc_01_mk1", "amount": 8},
+        {"ware_id": "weapon_bor_m_railgun_01_mk1", "amount": 1},
+        {"ware_id": "weapon_gen_m_dumbfire_02_mk1", "amount": 2}
+      ]
+    }
+  ]
+}

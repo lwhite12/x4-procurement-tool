@@ -1,0 +1,656 @@
+﻿{
+  "ships": [
+    {
+      "input": "Barracuda",
+      "name": "Barracuda",
+      "ware_id": "ship_bor_s_heavyfighter_01_a",
+      "components": {
+        "engines": [
+          {
+            "ware_id": "engine_arg_s_allround_01_mk1",
+            "name": "ARG S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_allround_01_mk2",
+            "name": "ARG S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_allround_01_mk3",
+            "name": "ARG S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_combat_01_mk1",
+            "name": "ARG S Combat Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_combat_01_mk2",
+            "name": "ARG S Combat Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_combat_01_mk3",
+            "name": "ARG S Combat Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_travel_01_mk1",
+            "name": "ARG S Travel Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_travel_01_mk2",
+            "name": "ARG S Travel Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_arg_s_travel_01_mk3",
+            "name": "ARG S Travel Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_bor_s_allround_01_mk1",
+            "name": "BOR S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_bor_s_allround_01_mk2",
+            "name": "BOR S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_bor_s_allround_01_mk3",
+            "name": "BOR S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_allround_01_mk1",
+            "name": "PAR S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_allround_01_mk2",
+            "name": "PAR S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_allround_01_mk3",
+            "name": "PAR S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_combat_01_mk1",
+            "name": "PAR S Combat Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_combat_01_mk2",
+            "name": "PAR S Combat Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_combat_01_mk3",
+            "name": "PAR S Combat Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_travel_01_mk1",
+            "name": "PAR S Travel Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_travel_01_mk2",
+            "name": "PAR S Travel Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_par_s_travel_01_mk3",
+            "name": "PAR S Travel Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_allround_01_mk1",
+            "name": "SPL S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_allround_01_mk2",
+            "name": "SPL S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_allround_01_mk3",
+            "name": "SPL S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_combat_01_mk1",
+            "name": "SPL S Combat Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_combat_01_mk2",
+            "name": "SPL S Combat Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_combat_01_mk3",
+            "name": "SPL S Combat Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_combat_01_mk4",
+            "name": "SPL S Combat Engine Mk4",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_travel_01_mk1",
+            "name": "SPL S Travel Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_travel_01_mk2",
+            "name": "SPL S Travel Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_spl_s_travel_01_mk3",
+            "name": "SPL S Travel Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_allround_01_mk1",
+            "name": "TEL S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_allround_01_mk2",
+            "name": "TEL S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_allround_01_mk3",
+            "name": "TEL S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_combat_01_mk1",
+            "name": "TEL S Combat Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_combat_01_mk2",
+            "name": "TEL S Combat Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_combat_01_mk3",
+            "name": "TEL S Combat Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_travel_01_mk1",
+            "name": "TEL S Travel Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_travel_01_mk2",
+            "name": "TEL S Travel Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_tel_s_travel_01_mk3",
+            "name": "TEL S Travel Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_allround_01_mk1",
+            "name": "TER S All-round Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_allround_01_mk2",
+            "name": "TER S All-round Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_allround_01_mk3",
+            "name": "TER S All-round Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_combat_01_mk1",
+            "name": "TER S Combat Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_combat_01_mk2",
+            "name": "TER S Combat Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_combat_01_mk3",
+            "name": "TER S Combat Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_virtual_01_mk1",
+            "name": "TER S Frontier Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_travel_01_mk1",
+            "name": "TER S Travel Engine Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_travel_01_mk2",
+            "name": "TER S Travel Engine Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_s_travel_01_mk3",
+            "name": "TER S Travel Engine Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          }
+        ],
+        "shields": [
+          {
+            "ware_id": "shield_arg_s_standard_01_mk1",
+            "name": "ARG S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_arg_s_standard_01_mk2",
+            "name": "ARG S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_arg_s_standard_01_mk3",
+            "name": "ARG S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_bor_s_standard_01_mk1",
+            "name": "BOR S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_bor_s_standard_01_mk2",
+            "name": "BOR S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_bor_s_standard_01_mk3",
+            "name": "BOR S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_par_s_standard_01_mk1",
+            "name": "PAR S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_par_s_standard_01_mk2",
+            "name": "PAR S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_par_s_standard_01_mk3",
+            "name": "PAR S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_spl_s_standard_01_mk1",
+            "name": "SPL S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_spl_s_standard_01_mk2",
+            "name": "SPL S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_spl_s_standard_01_mk3",
+            "name": "SPL S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_tel_s_standard_01_mk1",
+            "name": "TEL S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_tel_s_standard_01_mk2",
+            "name": "TEL S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_tel_s_standard_01_mk3",
+            "name": "TEL S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_s_virtual_01_mk1",
+            "name": "TER S Frontier Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_s_standard_01_mk1",
+            "name": "TER S Shield Generator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_s_standard_01_mk2",
+            "name": "TER S Shield Generator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_s_standard_01_mk3",
+            "name": "TER S Shield Generator Mk3",
+            "size": "s",
+            "compatibility": "advanced"
+          }
+        ],
+        "turrets": [],
+        "weapons": [
+          {
+            "ware_id": "weapon_arg_s_ion_01_mk1",
+            "name": "ARG S Ion Blaster Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_arg_s_ion_01_mk2",
+            "name": "ARG S Ion Blaster Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_bor_s_arc_01_mk1",
+            "name": "BOR S Arc Gun Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_bor_s_gatling_01_mk1",
+            "name": "BOR S Ion Gatling Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_bor_s_laser_01_mk1",
+            "name": "BOR S Phase Gun Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_par_s_railgun_01_mk1",
+            "name": "PAR S Mass Driver Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_par_s_railgun_01_mk2",
+            "name": "PAR S Mass Driver Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_beam_01_mk1",
+            "name": "S Beam Emitter Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_beam_01_mk2",
+            "name": "S Beam Emitter Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_cannon_01_mk1",
+            "name": "S Blast Mortar Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_cannon_01_mk2",
+            "name": "S Blast Mortar Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_gatling_01_mk1",
+            "name": "S Bolt Repeater Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_gatling_01_mk2",
+            "name": "S Bolt Repeater Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_burst_01_mk1",
+            "name": "S Burst Ray Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_burst_01_mk2",
+            "name": "S Burst Ray Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_plasma_01_mk1",
+            "name": "S Plasma Cannon Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_plasma_01_mk2",
+            "name": "S Plasma Cannon Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_laser_01_mk1",
+            "name": "S Pulse Laser Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_laser_01_mk2",
+            "name": "S Pulse Laser Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_shotgun_01_mk1",
+            "name": "S Shard Battery Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_gen_s_shotgun_01_mk2",
+            "name": "S Shard Battery Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_railgun_01_mk1",
+            "name": "SPL S Boson Lance Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_railgun_01_mk2",
+            "name": "SPL S Boson Lance Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_gatling_01_mk1",
+            "name": "SPL S Neutron Gatling Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_gatling_01_mk2",
+            "name": "SPL S Neutron Gatling Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_shotgun_01_mk1",
+            "name": "SPL S Tau Accelerator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_shotgun_01_mk2",
+            "name": "SPL S Tau Accelerator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_sticky_01_mk1",
+            "name": "SPL S Thermal Disintegrator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_spl_s_sticky_01_mk2",
+            "name": "SPL S Thermal Disintegrator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_tel_s_charge_01_mk1",
+            "name": "TEL S Muon Disintegrator Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_tel_s_charge_01_mk2",
+            "name": "TEL S Muon Disintegrator Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_ter_s_laser_02_mk1",
+            "name": "TER S Electromagnetic Gun Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_ter_s_laser_01_mk1",
+            "name": "TER S Pulse Laser Mk1",
+            "size": "s",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "weapon_ter_s_laser_01_mk2",
+            "name": "TER S Pulse Laser Mk2",
+            "size": "s",
+            "compatibility": "advanced"
+          }
+        ],
+        "missile_launchers": [
+          {
+            "ware_id": "weapon_gen_s_dumbfire_02_mk1",
+            "name": "S Dumbfire Launcher",
+            "size": "s",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "weapon_gen_s_torpedo_02_mk1",
+            "name": "S Torpedo Launcher",
+            "size": "s",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "weapon_gen_s_guided_02_mk1",
+            "name": "S Tracking Launcher",
+            "size": "s",
+            "compatibility": "missile"
+          }
+        ]
+      }
+    }
+  ]
+}

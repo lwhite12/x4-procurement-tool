@@ -1,0 +1,440 @@
+﻿{
+  "ships": [
+    {
+      "input": "ship_bor_l_destroyer_01_a",
+      "name": "Ray",
+      "ware_id": "ship_bor_l_destroyer_01_a",
+      "components": {
+        "engines": [
+          {
+            "ware_id": "engine_bor_l_travel_01_mk1",
+            "name": "BOR L All-round Engine Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "engine_ter_l_allround_02_mk1",
+            "name": "TER L Frontier Engine Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          }
+        ],
+        "shields": [
+          {
+            "ware_id": "shield_bor_l_standard_01_mk1",
+            "name": "BOR L Shield Generator Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_bor_l_standard_01_mk2",
+            "name": "BOR L Shield Generator Mk2",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_bor_l_standard_01_mk3",
+            "name": "BOR L Shield Generator Mk3",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_l_standard_02_mk1",
+            "name": "TER L Frontier Shield Generator Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_l_standard_02_mk2",
+            "name": "TER L Frontier Shield Generator Mk2",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "shield_ter_l_standard_02_mk3",
+            "name": "TER L Frontier Shield Generator Mk3",
+            "size": "l",
+            "compatibility": "advanced"
+          }
+        ],
+        "turrets": [
+          {
+            "ware_id": "turret_arg_l_dumbfire_01_mk1",
+            "name": "ARG L Dumbfire Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_arg_l_guided_01_mk1",
+            "name": "ARG L Tracking Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_arg_m_beam_01_mk1",
+            "name": "ARG M Beam Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_gatling_01_mk1",
+            "name": "ARG M Bolt Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_dumbfire_02_mk1",
+            "name": "ARG M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_arg_m_flak_01_mk1",
+            "name": "ARG M Flak Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_plasma_01_mk1",
+            "name": "ARG M Plasma Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_laser_01_mk1",
+            "name": "ARG M Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_gen_m_shieldpierce_01_mk1",
+            "name": "ARG M Scalar Aperture Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_shotgun_01_mk1",
+            "name": "ARG M Shard Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_arg_m_guided_02_mk1",
+            "name": "ARG M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_bor_l_flak_01_mk1",
+            "name": "BOR L Ion Flak Turret Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_l_disruptor_01_mk1",
+            "name": "BOR L Kinetic Ion Railgun Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_l_laser_01_mk1",
+            "name": "BOR L Phase Turret Mk1",
+            "size": "l",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_arc_01_mk1",
+            "name": "BOR M Arc Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_arc_02_mk1",
+            "name": "BOR M Arc Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_dumbfire_01_mk1",
+            "name": "BOR M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_bor_m_railgun_01_mk1",
+            "name": "BOR M Ion Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_railgun_02_mk1",
+            "name": "BOR M Ion Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_laser_01_mk1",
+            "name": "BOR M Phase Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_laser_02_mk1",
+            "name": "BOR M Phase Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_bor_m_guided_01_mk1",
+            "name": "BOR M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_gen_m_gatling_01_mk1",
+            "name": "M Autocannon Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_l_dumbfire_01_mk1",
+            "name": "PAR L Dumbfire Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_par_l_guided_01_mk1",
+            "name": "PAR L Tracking Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_par_m_shotgun_01_mk1",
+            "name": "PAR M Blast Mortar Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_m_gatling_01_mk1",
+            "name": "PAR M Bolt Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_m_dumbfire_02_mk1",
+            "name": "PAR M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_par_m_beam_01_mk1",
+            "name": "PAR M Mass Driver Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_m_plasma_01_mk1",
+            "name": "PAR M Plasma Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_m_laser_01_mk1",
+            "name": "PAR M Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_par_m_guided_02_mk1",
+            "name": "PAR M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_spl_l_dumbfire_01_mk1",
+            "name": "SPL L Dumbfire Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_spl_l_guided_01_mk1",
+            "name": "SPL L Tracking Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_spl_m_beam_01_mk1",
+            "name": "SPL M Boson Lance Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_dumbfire_02_mk1",
+            "name": "SPL M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_spl_m_flak_01_mk1",
+            "name": "SPL M Flak Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_gatling_01_mk1",
+            "name": "SPL M Neutron Gatling Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_plasma_01_mk1",
+            "name": "SPL M Plasma Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_laser_01_mk1",
+            "name": "SPL M Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_shotgun_01_mk1",
+            "name": "SPL M Tau Accelerator Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_spl_m_guided_02_mk1",
+            "name": "SPL M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_tel_l_dumbfire_01_mk1",
+            "name": "TEL L Dumbfire Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_tel_l_guided_01_mk1",
+            "name": "TEL L Tracking Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_tel_m_beam_01_mk1",
+            "name": "TEL M Beam Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_tel_m_gatling_01_mk1",
+            "name": "TEL M Bolt Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_gen_m_disabler_01_mk1",
+            "name": "TEL M Distortion Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_tel_m_dumbfire_02_mk1",
+            "name": "TEL M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_tel_m_shotgun_01_mk1",
+            "name": "TEL M Muon Blaster Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_tel_m_plasma_01_mk1",
+            "name": "TEL M Plasma Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_tel_m_laser_01_mk1",
+            "name": "TEL M Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_tel_m_guided_02_mk1",
+            "name": "TEL M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_ter_l_dumbfire_01_mk1",
+            "name": "TER L Dumbfire Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_ter_l_guided_01_mk1",
+            "name": "TER L Tracking Turret Mk1",
+            "size": "l",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_ter_m_dumbfire_02_mk1",
+            "name": "TER M Dumbfire Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          },
+          {
+            "ware_id": "turret_ter_m_laser_03_mk1",
+            "name": "TER M Electromagnetic Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_ter_m_laser_04_mk1",
+            "name": "TER M Electromagnetic Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_ter_m_beam_01_mk1",
+            "name": "TER M Meson Stream Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_ter_m_gatling_01_mk1",
+            "name": "TER M Proton Barrage Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_ter_m_laser_01_mk1",
+            "name": "TER M Pulse Turret Mk1",
+            "size": "m",
+            "compatibility": "advanced"
+          },
+          {
+            "ware_id": "turret_ter_m_guided_02_mk1",
+            "name": "TER M Tracking Turret Mk1",
+            "size": "m",
+            "compatibility": "missile"
+          }
+        ],
+        "weapons": [
+          {
+            "ware_id": "weapon_bor_l_beam_01_mk1",
+            "name": "BOR Ray Ion Projector",
+            "size": "l",
+            "compatibility": "advanced"
+          }
+        ],
+        "missile_launchers": []
+      }
+    }
+  ]
+}

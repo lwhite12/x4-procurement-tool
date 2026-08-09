@@ -1,0 +1,38 @@
+﻿{
+  "build_focus": "Boron",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Boron": {
+      "parts": {
+        "energycells": 7517.0,
+        "hullparts": 3083.0,
+        "water": 1430.0,
+        "engineparts": 55.0,
+        "shieldcomponents": 40.0,
+        "advancedelectronics": 462.0,
+        "weaponcomponents": 472.0,
+        "advancedcomposites": 34.0,
+        "fieldcoils": 10.0,
+        "turretcomponents": 136.0
+      },
+      "ware_count": 10,
+      "resolution_log": [
+        {
+          "ware_id": "weapon_gen_s_dumbfire_02_mk1",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 0
+        },
+        {
+          "ware_id": "weapon_gen_m_dumbfire_02_mk1",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 0
+        }
+      ]
+    }
+  }
+}

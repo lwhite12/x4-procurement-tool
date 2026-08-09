@@ -1,0 +1,44 @@
+﻿{
+  "build_focus": "Boron",
+  "fallback_build_methods": [
+    "Universal",
+    "Recycling"
+  ],
+  "methods": {
+    "Boron": {
+      "parts": {
+        "energycells": 822.37,
+        "methane": 164.17,
+        "ore": 940.26,
+        "ice": 278.55
+      },
+      "ware_count": 4,
+      "resolution_log": [
+        {
+          "ware_id": "hullparts",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 1
+        },
+        {
+          "ware_id": "graphene",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 2
+        },
+        {
+          "ware_id": "refinedmetals",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 2
+        },
+        {
+          "ware_id": "water",
+          "requested_method": "Boron",
+          "used_method": "Universal",
+          "depth": 1
+        }
+      ]
+    }
+  }
+}

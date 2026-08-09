@@ -1,0 +1,30 @@
+# Extracted/compiled X4 game data -- not this project's own content, and
+# not something to redistribute in bulk via a public repo (see TODO.md's
+# "Copyright/attribution notice" section for the reasoning). Regenerable by
+# anyone with a legitimate X4 install by running extract_game_data.py then
+# generate_ships_table.py against their own copy of the game.
+data/
+src/csv/*.csv
+
+# Third-party tool, not authored by this project -- see TODO.md's
+# "Additional information page" item for linking to it instead of bundling
+# it here.
+XTools_1.11/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code's own local (machine-specific) settings -- permission
+# allowlist entries reference this machine's temp paths, not meant to be
+# shared/tracked (unlike a team-shared .claude/settings.json, if one is
+# ever added).
+.claude/settings.local.json

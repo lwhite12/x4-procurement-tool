@@ -1,0 +1,14 @@
+{
+  "search_depth": 10,
+  "wares": [
+    {
+      "count": 1,
+      "wares_list": [
+        {
+          "ware_id": "ship_tel_l_trans_container_03_a",
+          "amount": 1
+        }
+      ]
+    }
+  ]
+}

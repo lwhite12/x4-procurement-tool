@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>X4 Procurement Planner</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <h1>X4 Procurement Planner</h1>
+
+  <section id="picker-section">
+    <h2>1. Pick a ship</h2>
+    <div id="ship-filters">
+      <fieldset class="filter-group">
+        <legend>Size</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="size-filter">All</button>
+          <button type="button" class="filter-none-btn" data-filter="size-filter">None</button>
+        </div>
+        <div id="size-filter-options" class="filter-options"></div>
+      </fieldset>
+      <fieldset class="filter-group">
+        <legend>Type</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="type-filter">All</button>
+          <button type="button" class="filter-none-btn" data-filter="type-filter">None</button>
+        </div>
+        <div id="type-filter-options" class="filter-options"></div>
+      </fieldset>
+      <fieldset class="filter-group loadout-manager-group">
+        <legend>Loadout Manager</legend>
+        <div class="loadout-manager-actions">
+          <button id="import-loadouts-btn" type="button">Import game loadouts</button>
+          <button id="import-raw-xml-loadout-btn" type="button">Import raw XML loadout</button>
+          <button id="export-loadouts-btn" type="button" disabled>Export loadouts</button>
+          <button id="clear-loadouts-btn" type="button" disabled>Clear loadouts</button>
+        </div>
+      </fieldset>
+      <p class="filter-hint">Check none in a group to include every value for it.</p>
+    </div>
+    <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship"></div>
+    <button id="load-ship-btn" disabled>Load</button>
+    <button id="clear-ship-btn-top" type="button" class="clear-ship-btn">Clear</button>
+    <button id="select-game-loadout-btn" type="button" disabled>Select saved loadout</button>
+
+    <div id="ship-detail" class="hidden">
+      <div class="ship-name-row">
+        <h3 id="ship-name"></h3>
+        <button id="select-chassis-loadout-btn" type="button" disabled>Select loadout</button>
+      </div>
+      <div id="imported-loadout-warnings" class="imported-loadout-warnings hidden"></div>
+
+      <div id="ship-summary" class="summary-panel"></div>
+
+      <div id="groups-container"></div>
+
+      <div id="ammunition-container"></div>
+
+      <div id="drone-container"></div>
+
+      <div id="deployable-container"></div>
+
+      <div id="countermeasure-container"></div>
+
+      <div id="crew-container"></div>
+
+      <label>
+        Loadout Name
+        <input id="ship-note-input" type="text" placeholder="e.g. Boron Border Patrol" />
+      </label>
+
+      <button id="add-to-cart-btn">Add to procurement list</button>
+      <button id="add-to-saved-loadouts-btn" type="button">Add to Saved Loadouts</button>
+      <button id="clear-ship-btn-bottom" type="button" class="clear-ship-btn">Clear</button>
+      <div id="add-to-saved-loadouts-status" class="import-loadouts-status hidden"></div>
+    </div>
+  </section>
+
+  <section id="cart-section">
+    <h2>2. Procurement List</h2>
+    <label>
+      Procurement list name
+      <input id="cart-name-input" type="text" placeholder="e.g. Sector Defense Fleet" />
+    </label>
+    <div id="cart-toolbar">
+      <button id="save-cart-btn">Download procurement list…</button>
+      <label class="file-input-label">
+        Upload procurement list…
+        <input id="load-cart-input" type="file" accept="application/json,.json" class="hidden" />
+      </label>
+    </div>
+    <table id="cart-table">
+      <thead>
+        <tr>
+          <th>Ship</th>
+          <th>Loadout</th>
+          <th>Qty</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="cart-body"></tbody>
+    </table>
+    <p id="cart-empty-msg">Procurement list is empty.</p>
+  </section>
+
+  <section id="calculate-section">
+    <h2>3. Calculate production</h2>
+    <label>
+      Analysis file name
+      <input id="analysis-file-name-input" type="text" placeholder="e.g. fleet_comparison" />
+    </label>
+    <div id="analysis-toolbar">
+      <button id="download-analysis-btn">Download Analysis…</button>
+      <label class="file-input-label">
+        Upload Analysis…
+        <input id="upload-analysis-input" type="file" accept="application/json,.json" class="hidden" />
+      </label>
+    </div>
+
+    <div id="ware-cost-list" class="hidden">
+      <h3>Ware Cost List</h3>
+      <div id="ware-cost-list-toolbar">
+        <button id="save-for-comparison-btn">Save for comparison</button>
+        <span id="save-for-comparison-warning" class="save-for-comparison-warning"></span>
+      </div>
+      <div id="ware-cost-list-tabs" class="tab-bar">
+        <button type="button" class="tab-btn active" data-ware-cost-list-tab="total">Total Cost Breakdown</button>
+        <button type="button" class="tab-btn" data-ware-cost-list-tab="component_type">Component Type Cost Breakdown</button>
+      </div>
+      <div id="ware-cost-list-table-wrapper">
+        <table id="ware-cost-list-table">
+          <thead id="ware-cost-list-thead"></thead>
+          <tbody id="ware-cost-list-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div id="build-method-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Build Method</h3>
+      <label>
+        Build focus
+        <select id="build-method-modal-focus-select"></select>
+      </label>
+      <div class="modal-section-title">Fallback methods (tried in order, top to bottom)</div>
+      <div id="build-method-modal-fallback-list" class="build-method-fallback-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="build-method-modal-cancel-btn">Cancel</button>
+        <button type="button" id="build-method-modal-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="equipment-picker-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3 id="equipment-picker-modal-title">Select Equipment</h3>
+      <label class="equipment-picker-apply-all-label">
+        <input type="checkbox" id="equipment-picker-apply-all-checkbox" />
+        Apply to all matching slots on this ship
+        <span
+          class="equipment-picker-apply-all-hint"
+          title="Applies this choice to every other slot of the same type and size (bonus/surface element shields only apply to other bonus shields, main shields only to other main shields). A slot where this item isn't actually a valid option is left unchanged."
+          >?</span
+        >
+      </label>
+      <div id="equipment-picker-modal-status" class="equipment-picker-modal-status hidden"></div>
+      <div id="equipment-picker-table-wrapper" class="equipment-picker-table-wrapper">
+        <table id="equipment-picker-table">
+          <thead id="equipment-picker-thead"></thead>
+          <tbody id="equipment-picker-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="equipment-picker-clear-btn">Clear selection</button>
+        <button type="button" id="equipment-picker-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="import-loadouts-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Import Game Loadouts</h3>
+      <p class="modal-hint">
+        Reads a player-saved <code>loadouts.xml</code> (not a savegame itself -- typically under
+        <code>Documents\Egosoft\X4\&lt;id&gt;\loadouts.xml</code>) and matches each saved ship loadout against this
+        app's own data. Station-module loadouts (turret/shield/storage modules, not ships) are skipped
+        automatically. This never modifies the file itself.
+      </p>
+      <label>
+        Path to loadouts.xml (read directly by this app's own server)
+        <input id="import-loadouts-path-input" type="text" placeholder="C:\Users\...\Documents\Egosoft\X4\...\loadouts.xml" />
+      </label>
+      <p class="modal-hint">...or upload the file instead:</p>
+      <label>
+        <input id="import-loadouts-file-input" type="file" accept=".xml" />
+      </label>
+      <div id="import-loadouts-status" class="import-loadouts-status hidden"></div>
+      <div class="modal-actions">
+        <button type="button" id="import-loadouts-cancel-btn">Cancel</button>
+        <button type="button" id="import-loadouts-run-btn">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="import-raw-xml-loadout-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3>Import Raw XML Loadout</h3>
+      <p class="modal-hint">
+        Paste a single <code>&lt;loadout ...&gt;...&lt;/loadout&gt;</code> element, or a full
+        <code>&lt;loadouts&gt;...&lt;/loadouts&gt;</code> block containing several -- the same shape found in a saved
+        <code>loadouts.xml</code>. Parsed ship loadout(s) are added to this app's own working set of imported
+        loadouts (see "Select game loadout") alongside anything already imported, rather than replacing it. This
+        never writes to any file.
+      </p>
+      <textarea id="import-raw-xml-loadout-textarea" class="import-raw-xml-loadout-textarea" placeholder="<loadout id=&quot;...&quot; name=&quot;...&quot; macro=&quot;...&quot;>...</loadout>" spellcheck="false"></textarea>
+      <div id="import-raw-xml-loadout-status" class="import-loadouts-status hidden"></div>
+      <div class="modal-actions">
+        <button type="button" id="import-raw-xml-loadout-cancel-btn">Cancel</button>
+        <button type="button" id="import-raw-xml-loadout-confirm-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="select-game-loadout-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="select-game-loadout-modal-title">Select Saved Loadout</h3>
+      <div id="select-game-loadout-list" class="select-game-loadout-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="select-game-loadout-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <footer id="site-footer">
+    <p>
+      This is an unofficial fan project. It is not affiliated with, endorsed, or supported by Egosoft. Egosoft
+      assumes no technical support or liability (e.g., for corrupted save games). Use at your own risk. All names,
+      trademarks, and content related to X4: Foundations are the property of Egosoft or their respective owners.
+    </p>
+    <p>
+      <a href="https://store.steampowered.com/app/392160/X4_Foundations/" target="_blank" rel="noopener"
+        >X4: Foundations on Steam</a
+      >
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
