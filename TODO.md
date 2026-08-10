@@ -16,12 +16,12 @@ Large ideas not yet scheduled. Pick one up whenever; check items off as they lan
   - **Confirmed fragile**: spot-checked the "ares_test" example against the live cache -- weapon slot indices 13/29 decoded to the wrong ware (a consistent +1 offset from what the exported loadout XML actually has). Root cause: the test loadout's `<patches>` list DLC version "800", but `get_ship.js`'s own changelog says "20/6/2026 - Updated for v9.0 stuff" -- the live cache reflects a newer weapon roster than whatever was live when the link was generated, and nothing in the link itself records which cache snapshot to decode against. Any reader/generator we build carries the same exposure: correct only against whichever cache snapshot is live *at the moment of use*, with no way to detect drift after the fact.
   - **Planned approach** (once unblocked): (1) fetch the target ship's Roguey page and parse its embedded `ship_data` for per-slot size/compatibility/mlauncher; (2) fetch Roguey's own reference-data cache files for the exact iteration order -- both are public static assets already served to every visitor, nothing gated or scraped past what a browser already loads; (3) reimplement `populate_equipment()`'s filter independently, in our own code against our own data model, rather than copying their JS/cache files verbatim -- interoperable without copying; (4) to generate a link: map each of our own selected ware_ids to its computed index in the replicated per-slot filtered list, zero-pad, assemble the URL; (5) to read a link: reverse that -- parse the codes, look up each index in the same replicated filtered list.
 
-## 3. Ship compare UI cleanup
+## 3. Ship compare UI cleanup - DONE
 - [x] Build methods lister and defaults -- each comparison column has its own build focus (dropdown) and its own editable, reorderable fallback-methods list, via a real modal under the column name; defaults to the backend's curated, ordered BUILD_METHODS list
 - [x] Comparing prices between different build methods
 - [x] Re-running the comparison updater
 
-## 4. Procurement list / builder cleanup
+## 4. Procurement list / builder cleanup - DONE
 - [x] Shift-click to max/min/fill remaining
 - [x] "Minimize loadout" option in the procurement list
 - [x] Optional notes list, shown under the ship type name in the list
@@ -40,13 +40,20 @@ Large ideas not yet scheduled. Pick one up whenever; check items off as they lan
 
 ## 7. Underlying data explorer and SQL query runner
 
+## 8. Support for different mods from game files
+- [ ] Since this app generates the entire database including production wares and the front end from the game files, it might be possible to add support for mods like SWI, VRO, XR Ship pack, etc. out of the box. Then a user could clone the repo, set any custom mods list they prefer on their system, and generate the sql database and local explorer UI which they can run on their own machine.
+  - Start with a mod which only adds ships without adding classes or other new features that would probably require additional handling. My guess off hand is that XR Ship Pack is a good candidate, I believe it is only intended to add new ships from the previous games so it should just be a big ship list without feature changes.
+- [ ] Installer with DB manager for multiple install support? This would be used to allow different DLC sets, including mods. In a perfect world you could open the installer, view various "installs" which have different configurations. For example, one for base game with DLCs, one for SWI, one for VRO, one for XR Ship Pack, etc. Obviously this would require ensuring the game file reader / database generator / aggregator and front end can dynamically support whatever changes those mods incorporate. This is a huge amount of work, so the installer is a low priority.
+
 ## 8. Additional information page
 - [ ] Bug reports
 - [ ] GitHub source link
-- [ ] Links to required tools (e.g. XRCatTool)
-
+- [ ] Installation instructions with links to required tools (e.g. XRCatTool)
 ## 9. Material efficiency analysis tab
-- [ ] New tab in the Ware Cost List's tab bar, alongside "Component Type Cost Breakdown" -- compares different materials' production efficiency against price
+- [ ] New tab in the Ware Cost List's tab bar, alongside "Component Type Cost Breakdown" -- compares different materials' production efficiency against price, add other more significant analysis.
 
 ## 10. Persist browser state across refresh
-- [ ] Cookies to remember ship builder / procurement list / comparison state across a page refresh
+- [ ] Cookies to remember ship builder / procurement list / comparison state across a page refresh - low priority or maybe reject since cookies are icky
+
+## 11. Clean up the AI generated code
+- [ ] Have some self respect

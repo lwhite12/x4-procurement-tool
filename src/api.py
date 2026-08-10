@@ -250,6 +250,12 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # enforcement (that's the check inside import_loadouts_endpoint() below).
 IS_REMOTE = bool(os.environ.get("FLY_APP_NAME"))
 
+# Single source of truth for the app's version -- a plain-text VERSION file
+# at the repo root (baked into the Docker image alongside src/ and data/)
+# rather than a hardcoded string here, so CHANGELOG.md and this endpoint
+# can't drift out of sync with each other.
+VERSION = (ROOT / "VERSION").read_text().strip()
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -619,7 +625,7 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
 
 @app.get("/api/config")
 def config_endpoint() -> dict:
-    return {"remote_mode": IS_REMOTE}
+    return {"remote_mode": IS_REMOTE, "version": VERSION}
 
 
 @app.post("/api/import_loadouts")

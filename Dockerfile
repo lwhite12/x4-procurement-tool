@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 COPY data/ data/
+COPY VERSION .
 
 # Matches how this app is run everywhere else in this project (README/
 # local dev) -- `python src/api.py` adds src/'s own directory to sys.path,

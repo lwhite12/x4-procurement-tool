@@ -1,0 +1,4 @@
+# Normalize all text files to LF in the repository itself, regardless of
+# each contributor's local core.autocrlf setting -- matches the Linux
+# container this project is built and deployed into (see Dockerfile).
+* text=auto eol=lf

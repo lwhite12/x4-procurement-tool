@@ -289,6 +289,7 @@ const shipNameEl = document.getElementById("ship-name");
 const importedLoadoutWarningsEl = document.getElementById("imported-loadout-warnings");
 const shipSummaryEl = document.getElementById("ship-summary");
 const groupsContainer = document.getElementById("groups-container");
+const ammoInfoBoxContainer = document.getElementById("ammo-info-box-container");
 const ammunitionContainer = document.getElementById("ammunition-container");
 const countermeasureContainer = document.getElementById("countermeasure-container");
 const droneContainer = document.getElementById("drone-container");
@@ -406,53 +407,34 @@ function buildIconImg(icon, className) {
   return img;
 }
 
-// One representative icon per ship_type, for the type filter checkboxes --
-// icons are actually keyed by (size, purpose) rather than by ship_type
-// alone (see generate_ships_table.py's ships_base.icon docstring), so a
-// single type can have ships using more than one icon (e.g. "destroyer" at
-// L vs XL). Picks whichever icon the most ships of that type actually use
-// (a majority vote), not just whichever happens to sort first -- e.g.
-// "carrier" is 11 XL ships sharing one icon plus a single lone L-size
-// outlier (Guppy) with its own; picking "first in array order" is fragile
-// (it depends on allShips' current sort, e.g. size-first would put that
-// one L-size outlier ahead of every XL carrier) where picking "most common"
-// gives a stable, actually-representative symbol regardless of sort order.
-function typeIconMap() {
-  const iconCounts = {}; // ship_type -> {icon -> count}
-  for (const ship of allShips) {
-    iconCounts[ship.ship_type] ??= {};
-    iconCounts[ship.ship_type][ship.icon] = (iconCounts[ship.ship_type][ship.icon] ?? 0) + 1;
-  }
-  const map = {};
-  for (const [type, counts] of Object.entries(iconCounts)) {
-    map[type] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-  }
-  return map;
-}
-
 // Real size progression (ships_base.size), not alphabetical order (which
 // would read "l, m, s, xl") -- used for the Size filter's own checkbox
-// order.
+// order (smallest first).
 const SIZE_ORDER = ["s", "m", "l", "xl"];
 
+// The ship picker list's own size priority -- deliberately the reverse of
+// SIZE_ORDER (largest first, XL at the top) per explicit request, even
+// though the Size filter checkboxes themselves stay smallest-first.
+const SHIP_LIST_SIZE_ORDER = ["xl", "l", "m", "s"];
+
 // ships_base.ship_type values grouped into the three broad roles X4's own
-// ship-class menus conventionally use -- Combat (small to large), Civilian
-// (small to large), then a small Other/Utility bucket for the ones that
-// don't fit either (tug, scavenger, envoy, expeditionary, compactor). Any
-// ship_type not listed here (shouldn't happen -- every value currently in
-// ships_base is accounted for) falls back to sorting after all three
-// groups rather than being silently dropped from the filter.
-const SHIP_TYPE_CATEGORY_ORDER = ["combat", "civilian", "other"];
+// ship-class menus conventionally use -- Military (small to large), Civilian
+// (small to large), then a small Utility bucket for the ones that don't fit
+// either (tug, scavenger, envoy, expeditionary, compactor). Any ship_type
+// not listed here (shouldn't happen -- every value currently in ships_base
+// is accounted for) falls back to sorting after all three groups rather
+// than being silently dropped from the filter.
+const SHIP_TYPE_CATEGORY_ORDER = ["military", "civilian", "utility"];
 const SHIP_TYPE_CATEGORY = {
-  scout: "combat",
-  fighter: "combat",
-  heavyfighter: "combat",
-  gunboat: "combat",
-  corvette: "combat",
-  frigate: "combat",
-  destroyer: "combat",
-  battleship: "combat",
-  carrier: "combat",
+  scout: "military",
+  fighter: "military",
+  heavyfighter: "military",
+  gunboat: "military",
+  corvette: "military",
+  frigate: "military",
+  destroyer: "military",
+  battleship: "military",
+  carrier: "military",
   courier: "civilian",
   transporter: "civilian",
   freighter: "civilian",
@@ -460,11 +442,11 @@ const SHIP_TYPE_CATEGORY = {
   largeminer: "civilian",
   builder: "civilian",
   resupplier: "civilian",
-  tug: "other",
-  scavenger: "other",
-  envoy: "other",
-  expeditionary: "other",
-  compactor: "other",
+  tug: "utility",
+  scavenger: "utility",
+  envoy: "utility",
+  expeditionary: "utility",
+  compactor: "utility",
 };
 
 // Primary: broad role category (SHIP_TYPE_CATEGORY_ORDER). Secondary:
@@ -477,16 +459,85 @@ function compareShipTypes(a, b) {
   return categoryDelta !== 0 ? categoryDelta : a.localeCompare(b);
 }
 
-// Ship picker list order: 1) size (SIZE_ORDER), 2) role category
-// (SHIP_TYPE_CATEGORY_ORDER) and 3) specific ship_type alphabetically
-// (both via compareShipTypes -- the same grouping the Type filter's own
-// checkboxes use), then 4) ship name as the final tiebreaker once type
-// itself can't distinguish two ships further.
+// Ship picker list order: 1) size, largest first (SHIP_LIST_SIZE_ORDER --
+// note this is the *opposite* direction from the Size filter's own
+// checkbox order), 2) role category and 3) specific ship_type
+// alphabetically (both via compareShipTypes), then 4) ship name as the
+// final tiebreaker once type itself can't distinguish two ships further.
+// Each ship's own real `size` field drives step 1 directly -- see
+// buildTypeFilterEntries() below for the Type filter's own, different need
+// (a checkbox per *type*, several of which span more than one size).
 function compareShips(a, b) {
-  const sizeDelta = SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size);
+  const sizeDelta = SHIP_LIST_SIZE_ORDER.indexOf(a.size) - SHIP_LIST_SIZE_ORDER.indexOf(b.size);
   if (sizeDelta !== 0) return sizeDelta;
   const typeDelta = compareShipTypes(a.ship_type, b.ship_type);
   return typeDelta !== 0 ? typeDelta : a.name.localeCompare(b.name);
+}
+
+// Checkable entries for the Type filter: {value, label, icon}. Most
+// ship_types are a single size, and get one plain checkbox (e.g.
+// "Fighter"). Some aren't -- "miner" is 20 M ships plus 6 S ones, "carrier"
+// is 11 XL ships plus a single lone L outlier (Guppy), "destroyer" is 16 L
+// plus one XL outlier, "heavyfighter" is mostly S with a couple of M,
+// "scavenger" is one L and one M. A single "Miner" checkbox spanning both
+// sizes gives no way to pick just the S ones (or just the M ones) from the
+// Type filter alone -- only by also reaching for the separate Size filter,
+// which isn't obvious and easy to forget -- so any type with more than one
+// size present is split into one checkbox per (type, size) pair instead,
+// e.g. "Miner (S)"/"Miner (M)", each an independently checkable filter
+// value (see shipMatchesTypeValue()) rather than a cosmetic label only.
+// Sorted the same way as the ship list itself (size largest-first, then
+// role category, then alphabetically) -- a split type's two checkboxes
+// naturally land in their own respective size groups rather than staying
+// adjacent, which is correct: size is still the top sort priority.
+function buildTypeFilterEntries() {
+  const sizesByType = {};
+  for (const ship of allShips) {
+    sizesByType[ship.ship_type] ??= new Set();
+    sizesByType[ship.ship_type].add(ship.size);
+  }
+
+  const entries = [];
+  for (const [type, sizesSet] of Object.entries(sizesByType)) {
+    const sizes = [...sizesSet];
+    if (sizes.length === 1) {
+      entries.push({ value: type, label: type, ship_type: type, size: sizes[0] });
+    } else {
+      for (const size of sizes) {
+        entries.push({ value: `${type}:${size}`, label: `${type} (${size.toUpperCase()})`, ship_type: type, size });
+      }
+    }
+  }
+
+  // Icon per entry -- majority vote among exactly that entry's own ships
+  // (same "most common wins" reasoning typeIconMap() used before splitting
+  // existed, just scoped to the split (type, size) pair now instead of the
+  // whole type, since a single (type, size) bucket could still in
+  // principle use more than one icon).
+  for (const entry of entries) {
+    const counts = {};
+    for (const ship of allShips) {
+      if (ship.ship_type !== entry.ship_type || ship.size !== entry.size) continue;
+      counts[ship.icon] = (counts[ship.icon] ?? 0) + 1;
+    }
+    entry.icon = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  }
+
+  entries.sort((a, b) => {
+    const sizeDelta = SHIP_LIST_SIZE_ORDER.indexOf(a.size) - SHIP_LIST_SIZE_ORDER.indexOf(b.size);
+    return sizeDelta !== 0 ? sizeDelta : compareShipTypes(a.ship_type, b.ship_type);
+  });
+
+  return entries;
+}
+
+// Matches a Type filter checkbox's value against a ship -- either a plain
+// ship_type (unsplit types) or "<ship_type>:<size>" (split types, see
+// buildTypeFilterEntries()).
+function shipMatchesTypeValue(ship, value) {
+  const sep = value.indexOf(":");
+  if (sep === -1) return ship.ship_type === value;
+  return ship.ship_type === value.slice(0, sep) && ship.size === value.slice(sep + 1);
 }
 
 async function loadShips() {
@@ -533,25 +584,22 @@ async function loadBuildMethods() {
 // with zero matches. Multiple checkboxes in the same group can be checked
 // at once; none checked means "don't filter on that dimension".
 function populateFilterOptions() {
-  const sizes = [...new Set(allShips.map((ship) => ship.size))].sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b));
-  const types = [...new Set(allShips.map((ship) => ship.ship_type))].sort(compareShipTypes);
-
   // Sizes are stored/filtered on as their raw lowercase abbreviation
   // (ship.size, e.g. "s"/"m"/"l"/"xl" -- same value renderShipSummary()
-  // already .toUpperCase()s for display elsewhere) -- formatLabel only
-  // changes what's shown next to the checkbox, not the value it filters
-  // on, so sizeValues.includes(ship.size) in renderShipOptions() still
-  // matches correctly.
-  buildCheckboxGroup(sizeFilterOptions, "size-filter", sizes, (value) => value.toUpperCase());
-  buildCheckboxGroup(typeFilterOptions, "type-filter", types, (value) => value, typeIconMap());
+  // already .toUpperCase()s for display elsewhere), matching
+  // sizeValues.includes(ship.size) in renderShipOptions().
+  const sizeEntries = [...new Set(allShips.map((ship) => ship.size))]
+    .sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b))
+    .map((size) => ({ value: size, label: size.toUpperCase() }));
+
+  buildCheckboxGroup(sizeFilterOptions, "size-filter", sizeEntries);
+  buildCheckboxGroup(typeFilterOptions, "type-filter", buildTypeFilterEntries());
 }
 
-function buildCheckboxGroup(container, name, values, formatLabel = (value) => value, iconLookup = null) {
+function buildCheckboxGroup(container, name, entries) {
   container.innerHTML = "";
-  for (const value of values) {
-    container.appendChild(
-      buildCheckboxOption(name, value, formatLabel(value), iconLookup ? iconLookup[value] : null),
-    );
+  for (const entry of entries) {
+    container.appendChild(buildCheckboxOption(name, entry.value, entry.label, entry.icon ?? null));
   }
 }
 
@@ -606,7 +654,7 @@ function renderShipOptions() {
   const filtered = allShips.filter(
     (ship) =>
       (sizeValues.length === 0 || sizeValues.includes(ship.size)) &&
-      (typeValues.length === 0 || typeValues.includes(ship.ship_type)),
+      (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value))),
   );
 
   if (filtered.length === 0) {
@@ -692,12 +740,6 @@ function applyShipSelection(wareId) {
     row.classList.toggle("selected", row.dataset.wareId === wareId);
   }
   loadShipBtn.disabled = !wareId;
-}
-
-function resetFilters() {
-  for (const input of document.querySelectorAll('input[name="size-filter"], input[name="type-filter"]')) {
-    input.checked = false;
-  }
 }
 
 loadShipBtn.addEventListener("click", async () => {
@@ -1282,6 +1324,7 @@ function renderShipDetail(data) {
   }
 
   updateSelectedAmmoCapacity();
+  renderAmmoInfoBox();
   renderAmmunitionSection();
   renderDroneSection();
   renderDeployableSection();
@@ -1417,6 +1460,31 @@ function buildAmmoRow(missile) {
   row.appendChild(qtyWrap);
 
   return row;
+}
+
+// Shown above the Ammunition section whenever a ship is loaded, regardless
+// of whether that ship actually has any ammunition to show (the counter
+// shortcuts apply to every qty counter in the ship builder, not just
+// ammunition rows) -- kept in its own container, separate from
+// ammunitionContainer, so renderAmmunitionSection()'s early-return for
+// "no compatible missiles" can't make it disappear along with the section
+// it happens to sit above. Populated once per ship load from
+// renderShipDetail(); cleared alongside everything else in
+// resetShipPicker().
+function renderAmmoInfoBox() {
+  ammoInfoBoxContainer.innerHTML = "";
+
+  const box = document.createElement("div");
+  box.className = "info-box";
+  const icon = document.createElement("span");
+  icon.className = "info-box-icon";
+  icon.textContent = "i";
+  box.appendChild(icon);
+  const text = document.createElement("span");
+  text.textContent = "Ctrl-click to move counters by 10, Shift-click to move counters by max.";
+  box.appendChild(text);
+
+  ammoInfoBoxContainer.appendChild(box);
 }
 
 // Rebuilds the Ammunition section from scratch: which missiles are
@@ -2106,6 +2174,7 @@ function resetShipPicker() {
   selectChassisLoadoutBtn.disabled = true;
   shipDetail.classList.add("hidden");
   groupsContainer.innerHTML = "";
+  ammoInfoBoxContainer.innerHTML = "";
   ammunitionContainer.innerHTML = "";
   countermeasureContainer.innerHTML = "";
   droneContainer.innerHTML = "";
@@ -2598,10 +2667,14 @@ async function editCartEntry(index) {
 
   currentShip = data;
   editingIndex = index;
-  // Clear filters first -- the ship being edited may not be in the
-  // currently filtered option list, in which case setting .value below
-  // would silently fail to select it.
-  resetFilters();
+  // Filters are deliberately left as-is (not reset) -- the ship being
+  // edited may not be in the currently filtered picker list, but
+  // applyShipSelection() below only touches selectedShipWareId/
+  // loadShipBtn.disabled (plain state, not DOM-row-dependent) plus
+  // highlighting a matching .ship-option-row *if* one happens to exist;
+  // skipping the highlight when the row's filtered out is a harmless
+  // cosmetic no-op, not a functional break -- the ship builder itself
+  // (renderShipDetail() below) loads correctly regardless.
   renderShipOptions();
   applyShipSelection(entry.shipWareId);
   editingIndex = index; // renderShipOptions() resets this; restore it
@@ -2934,7 +3007,8 @@ async function loadImportedGameLoadout(entry) {
 
   currentShip = data;
   editingIndex = null;
-  resetFilters();
+  // Filters deliberately left as-is -- see editCartEntry()'s own comment
+  // on the identical choice.
   renderShipOptions();
   applyShipSelection(entry.shipWareId);
   renderShipDetail(data);
