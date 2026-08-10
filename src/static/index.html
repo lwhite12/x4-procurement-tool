@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>X4 Procurement Planner</title>
+  <link rel="icon" type="image/png" href="/images/favicon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -187,12 +188,15 @@
         app's own data. Station-module loadouts (turret/shield/storage modules, not ships) are skipped
         automatically. This never modifies the file itself.
       </p>
+      <div id="import-loadouts-path-section">
+        <label>
+          Path to loadouts.xml (read directly by this app's own server -- only works when running locally)
+          <input id="import-loadouts-path-input" type="text" placeholder="C:\Users\...\Documents\Egosoft\X4\...\loadouts.xml" />
+        </label>
+        <p class="modal-hint">...or upload the file instead:</p>
+      </div>
       <label>
-        Path to loadouts.xml (read directly by this app's own server)
-        <input id="import-loadouts-path-input" type="text" placeholder="C:\Users\...\Documents\Egosoft\X4\...\loadouts.xml" />
-      </label>
-      <p class="modal-hint">...or upload the file instead:</p>
-      <label>
+        Upload loadouts.xml
         <input id="import-loadouts-file-input" type="file" accept=".xml" />
       </label>
       <div id="import-loadouts-status" class="import-loadouts-status hidden"></div>

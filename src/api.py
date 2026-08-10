@@ -139,6 +139,19 @@ Endpoints:
                                              dynamic "level 1 wares"
                                              columns (see app.js's
                                              openEquipmentPickerModal()).
+  GET  /api/config                         -- {"remote_mode": bool}, true
+                                             when this process is running as
+                                             a deployed Fly.io app (detected
+                                             via the FLY_APP_NAME env var
+                                             Fly sets automatically) rather
+                                             than a plain local
+                                             `python src/api.py`. Lets the
+                                             frontend hide UI that only
+                                             makes sense locally -- see
+                                             IS_REMOTE below, and
+                                             POST /api/import_loadouts'
+                                             own use of the same flag for
+                                             the actual enforcement.
   POST /api/import_loadouts               -- parses a player's saved
                                              loadouts.xml (either a
                                              server-side `path` or
@@ -150,6 +163,17 @@ Endpoints:
                                              wraps and how each field maps
                                              across. Read-only: never
                                              writes to the input file.
+                                             `path` is rejected outright
+                                             when IS_REMOTE (it would
+                                             otherwise let any visitor read
+                                             an arbitrary file off the
+                                             server's own filesystem, not
+                                             just whichever machine is
+                                             running this app locally) --
+                                             `xml_text` (the file-upload
+                                             path, read client-side via the
+                                             browser's File API) is
+                                             unaffected either way.
                                              Station-module loadouts
                                              (macro not a real ship) are
                                              silently skipped; every real
@@ -175,12 +199,16 @@ Endpoints:
                                              working set exactly like an
                                              imported one.
 
-Intentionally local-only for now (no auth, permissive by default since
-everything is served from the same origin) -- see the module docstring in
-summarize_production.py/query_ship_components.py for the actual production
-logic this wraps.
+Originally local-only; now also deployed publicly (Fly.io) -- see
+IS_REMOTE and its one actual enforcement point (POST /api/import_loadouts'
+`path` rejection) below for the one endpoint that needed to change
+behavior for that. Otherwise still permissive by default (no auth) since
+this remains a small, no-login, no-personal-data tool -- see the module
+docstring in summarize_production.py/query_ship_components.py for the
+actual production logic this wraps.
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -207,6 +235,20 @@ from summarize_production import (
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "x4.db"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# FLY_APP_NAME is set automatically by Fly.io on every deployed machine
+# (never set for a plain local `python src/api.py`) -- used as the signal
+# for "this server is reachable by the public internet, not just its own
+# operator." /api/import_loadouts's `path` field lets the caller name any
+# file for this server to read off its own filesystem -- fine when the
+# server only ever runs on the same machine as whoever's using it (the
+# original design), but an arbitrary-file-read hole once deployed
+# publicly, since nothing stops any visitor from POSTing an arbitrary path
+# directly to the endpoint regardless of what the frontend's UI shows.
+# GET /api/config surfaces this to the frontend too, so it can hide the
+# path-input field entirely in that mode -- a UX nicety, not the actual
+# enforcement (that's the check inside import_loadouts_endpoint() below).
+IS_REMOTE = bool(os.environ.get("FLY_APP_NAME"))
 
 
 def get_connection() -> sqlite3.Connection:
@@ -575,8 +617,15 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
     return {"parts": parts_by_ware, "part_names": part_names}
 
 
+@app.get("/api/config")
+def config_endpoint() -> dict:
+    return {"remote_mode": IS_REMOTE}
+
+
 @app.post("/api/import_loadouts")
 def import_loadouts_endpoint(request: ImportLoadoutsRequest) -> dict:
+    if request.path and IS_REMOTE:
+        return {"error": "Path-based import only works when this app is running locally -- use the file upload option instead."}
     if request.path:
         try:
             xml_text = Path(request.path).read_text(encoding="utf-8-sig")
@@ -627,6 +676,13 @@ app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # 0.0.0.0 so a container (Fly.io etc.) can actually route traffic in --
+    # harmless locally too, still reachable at 127.0.0.1. PORT follows
+    # Fly's own convention for "what port should this app listen on",
+    # falling back to this app's original default (plain local
+    # `python src/api.py`) when unset.
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

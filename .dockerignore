@@ -1,0 +1,13 @@
+# Separate from .gitignore -- Docker doesn't read that file. Deliberately
+# does NOT exclude data/: that's the one gitignored directory this image
+# actually needs baked in (see the Dockerfile's own comment).
+
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+XTools_1.11/
+tests/
+.claude/
+TODO.md

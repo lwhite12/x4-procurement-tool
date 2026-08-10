@@ -326,6 +326,7 @@ const equipmentPickerTbody = document.getElementById("equipment-picker-tbody");
 const equipmentPickerClearBtn = document.getElementById("equipment-picker-clear-btn");
 const equipmentPickerCancelBtn = document.getElementById("equipment-picker-cancel-btn");
 const importLoadoutsModalOverlay = document.getElementById("import-loadouts-modal-overlay");
+const importLoadoutsPathSection = document.getElementById("import-loadouts-path-section");
 const importLoadoutsPathInput = document.getElementById("import-loadouts-path-input");
 const importLoadoutsFileInput = document.getElementById("import-loadouts-file-input");
 const importLoadoutsStatus = document.getElementById("import-loadouts-status");
@@ -409,20 +410,88 @@ function buildIconImg(icon, className) {
 // icons are actually keyed by (size, purpose) rather than by ship_type
 // alone (see generate_ships_table.py's ships_base.icon docstring), so a
 // single type can have ships using more than one icon (e.g. "destroyer" at
-// L vs XL). This just takes whichever icon the first ship of that type
-// (in allShips' name-sorted order) happens to have -- good enough for a
-// filter checkbox's purely illustrative symbol, not meant to be exact.
+// L vs XL). Picks whichever icon the most ships of that type actually use
+// (a majority vote), not just whichever happens to sort first -- e.g.
+// "carrier" is 11 XL ships sharing one icon plus a single lone L-size
+// outlier (Guppy) with its own; picking "first in array order" is fragile
+// (it depends on allShips' current sort, e.g. size-first would put that
+// one L-size outlier ahead of every XL carrier) where picking "most common"
+// gives a stable, actually-representative symbol regardless of sort order.
 function typeIconMap() {
-  const map = {};
+  const iconCounts = {}; // ship_type -> {icon -> count}
   for (const ship of allShips) {
-    if (!(ship.ship_type in map)) map[ship.ship_type] = ship.icon;
+    iconCounts[ship.ship_type] ??= {};
+    iconCounts[ship.ship_type][ship.icon] = (iconCounts[ship.ship_type][ship.icon] ?? 0) + 1;
+  }
+  const map = {};
+  for (const [type, counts] of Object.entries(iconCounts)) {
+    map[type] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
   }
   return map;
 }
 
+// Real size progression (ships_base.size), not alphabetical order (which
+// would read "l, m, s, xl") -- used for the Size filter's own checkbox
+// order.
+const SIZE_ORDER = ["s", "m", "l", "xl"];
+
+// ships_base.ship_type values grouped into the three broad roles X4's own
+// ship-class menus conventionally use -- Combat (small to large), Civilian
+// (small to large), then a small Other/Utility bucket for the ones that
+// don't fit either (tug, scavenger, envoy, expeditionary, compactor). Any
+// ship_type not listed here (shouldn't happen -- every value currently in
+// ships_base is accounted for) falls back to sorting after all three
+// groups rather than being silently dropped from the filter.
+const SHIP_TYPE_CATEGORY_ORDER = ["combat", "civilian", "other"];
+const SHIP_TYPE_CATEGORY = {
+  scout: "combat",
+  fighter: "combat",
+  heavyfighter: "combat",
+  gunboat: "combat",
+  corvette: "combat",
+  frigate: "combat",
+  destroyer: "combat",
+  battleship: "combat",
+  carrier: "combat",
+  courier: "civilian",
+  transporter: "civilian",
+  freighter: "civilian",
+  miner: "civilian",
+  largeminer: "civilian",
+  builder: "civilian",
+  resupplier: "civilian",
+  tug: "other",
+  scavenger: "other",
+  envoy: "other",
+  expeditionary: "other",
+  compactor: "other",
+};
+
+// Primary: broad role category (SHIP_TYPE_CATEGORY_ORDER). Secondary:
+// alphabetical by the ship_type string itself -- shared by the Type
+// filter's own checkbox order and, via compareShips() below, the ship
+// picker list.
+function compareShipTypes(a, b) {
+  const categoryDelta =
+    SHIP_TYPE_CATEGORY_ORDER.indexOf(SHIP_TYPE_CATEGORY[a] ?? "") - SHIP_TYPE_CATEGORY_ORDER.indexOf(SHIP_TYPE_CATEGORY[b] ?? "");
+  return categoryDelta !== 0 ? categoryDelta : a.localeCompare(b);
+}
+
+// Ship picker list order: 1) size (SIZE_ORDER), 2) role category
+// (SHIP_TYPE_CATEGORY_ORDER) and 3) specific ship_type alphabetically
+// (both via compareShipTypes -- the same grouping the Type filter's own
+// checkboxes use), then 4) ship name as the final tiebreaker once type
+// itself can't distinguish two ships further.
+function compareShips(a, b) {
+  const sizeDelta = SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size);
+  if (sizeDelta !== 0) return sizeDelta;
+  const typeDelta = compareShipTypes(a.ship_type, b.ship_type);
+  return typeDelta !== 0 ? typeDelta : a.name.localeCompare(b.name);
+}
+
 async function loadShips() {
   const response = await fetch("/api/ships");
-  allShips = await response.json();
+  allShips = (await response.json()).sort(compareShips);
   populateFilterOptions();
   renderShipOptions();
 }
@@ -464,8 +533,8 @@ async function loadBuildMethods() {
 // with zero matches. Multiple checkboxes in the same group can be checked
 // at once; none checked means "don't filter on that dimension".
 function populateFilterOptions() {
-  const sizes = [...new Set(allShips.map((ship) => ship.size))].sort();
-  const types = [...new Set(allShips.map((ship) => ship.ship_type))].sort();
+  const sizes = [...new Set(allShips.map((ship) => ship.size))].sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b));
+  const types = [...new Set(allShips.map((ship) => ship.ship_type))].sort(compareShipTypes);
 
   // Sizes are stored/filtered on as their raw lowercase abbreviation
   // (ship.size, e.g. "s"/"m"/"l"/"xl" -- same value renderShipSummary()
@@ -4273,6 +4342,23 @@ loadCartInput.addEventListener("change", async (event) => {
   event.target.value = ""; // allow re-selecting the same file later
 });
 
+// Hides the "Path to loadouts.xml" input (only meaningful when this
+// server and the browser are the same machine) once this app is running
+// as a public Fly.io deployment -- see api.py's IS_REMOTE/GET /api/config
+// for the actual source of truth this mirrors; the backend independently
+// rejects a path-based import in that mode regardless of what this UI
+// shows, so a fetch failure here just leaves the (harmless, since the
+// backend still blocks it) local-dev default visible rather than erroring.
+async function applyRemoteModeUI() {
+  try {
+    const response = await fetch("/api/config");
+    const config = await response.json();
+    if (config.remote_mode) importLoadoutsPathSection.classList.add("hidden");
+  } catch {
+    // leave the path section visible -- see comment above
+  }
+}
+
 loadShips();
 loadMissiles();
 loadDrones();
@@ -4280,3 +4366,4 @@ loadDeployables();
 loadCountermeasures();
 loadCrew();
 loadBuildMethods();
+applyRemoteModeUI();

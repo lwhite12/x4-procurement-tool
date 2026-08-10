@@ -293,6 +293,30 @@ def ship_icon_jobs() -> list[ExtractionJob]:
     ]
 
 
+def favicon_icon_jobs() -> list[ExtractionJob]:
+    """The shipyard station-type icon (si_shipyard.gz), from the game's own
+    per-station-type icon set under assets/textures/ui/stationicon/ --
+    parallel to shipicon/'s per-ship-class icons (see ship_icon_jobs()),
+    just for station types instead of ship classes. Used as this
+    website's own favicon -- a shipyard is where ships get built, a
+    fitting symbol for a ship-building/procurement planner.
+
+    Only this one file, not the whole stationicon/ folder -- unlike
+    ship_icon_jobs() (which needs every ship-class icon, since this app
+    displays all of them somewhere), nothing else in this app has any use
+    for station-type icons; si_wharf/si_equipmentdock/si_factory/etc. are
+    all left alone.
+    """
+    return [
+        ExtractionJob(
+            name="favicon_icon",
+            group="favicon",
+            include_pattern=r"assets/textures/ui/stationicon/si_shipyard\.gz$",
+            out_dir=DATA_DIR / "images" / "favicon_raw",
+        )
+    ]
+
+
 def extension_suffix(ext_dir: Path) -> str:
     return EXTENSION_SUFFIXES.get(ext_dir.name, ext_dir.name.removeprefix("ego_dlc_"))
 
@@ -338,6 +362,7 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *deployable_jobs(),
     *wares_xml_jobs(),
     *ship_icon_jobs(),
+    *favicon_icon_jobs(),
 ]
 
 
