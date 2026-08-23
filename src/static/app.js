@@ -3253,6 +3253,14 @@ function clearImportedLoadouts() {
 // importedLoadoutsResult from whichever import produced it.
 function exportLoadouts() {
   if (!importedLoadoutsResult || importedLoadoutsResult.ships.length === 0) return;
+
+  const confirmed = confirm(
+    "WARNING: Be careful when overwriting your loadouts file with the downloaded one here. I can not guarantee it " +
+      "won't break the game loadouts. Make sure to back up your loadouts file somewhere before you try it, and/or " +
+      "copy-paste in any new XML loadouts you want to import in to your game.",
+  );
+  if (!confirmed) return;
+
   const body = importedLoadoutsResult.ships.map((s) => s.rawXml).join("\n  ");
   const xml = `<?xml version="1.0" encoding="utf-8"?>\n<loadouts>\n  ${body}\n</loadouts>\n`;
 
