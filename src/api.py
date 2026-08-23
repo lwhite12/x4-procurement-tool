@@ -225,6 +225,7 @@ from summarize_production import (
     aggregate_target_wares,
     categorize_target_wares,
     fetch_all_production_rows,
+    fetch_all_wares,
     fetch_ware_categories,
     fetch_ware_prices,
     summarize,
@@ -361,7 +362,7 @@ def list_ships() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT name, ware_id, size, ship_type, owners, icon FROM ships_base ORDER BY name"
+            "SELECT name, ware_id, size, ship_type, purpose, owners, icon FROM ships_base ORDER BY name"
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -373,6 +374,18 @@ def ship_groups(identifier: str) -> dict:
     conn = get_connection()
     try:
         return query_ship_groups(conn, identifier)
+    finally:
+        conn.close()
+
+
+# Powers the price-override picker -- every ware in the database, not just
+# ones appearing in the current procurement list, so the popup can offer
+# an override for anything regardless of whether it's in use yet.
+@app.get("/api/wares")
+def list_wares() -> list[dict]:
+    conn = get_connection()
+    try:
+        return fetch_all_wares(conn)
     finally:
         conn.close()
 

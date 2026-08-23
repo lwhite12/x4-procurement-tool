@@ -28,6 +28,7 @@ CREATE TABLE ships_base (
     production_method TEXT,
     macro TEXT,
     ship_type TEXT,
+    purpose TEXT,
     icon TEXT,
     hull INTEGER,
     crew INTEGER,

@@ -423,6 +423,30 @@ def fetch_ware_prices(conn: sqlite3.Connection) -> dict[str, dict[str, float]]:
     return prices
 
 
+def fetch_all_wares(conn: sqlite3.Connection) -> list[dict]:
+    """Every ware across PRICE_WARE_TABLES with its own name/price_min/
+    price_avg/price_max, as a flat list -- the "browse everything" view
+    used by api.py's GET /api/wares (the price-override picker), as
+    opposed to fetch_ware_prices()'s ware_id-keyed lookup shape. A ware_id
+    appearing in more than one table (shouldn't normally happen) yields
+    one row per table rather than being deduplicated, since each table's
+    row is independently that table's own idea of this ware's price.
+    """
+    wares: list[dict] = []
+    for table in PRICE_WARE_TABLES:
+        for row in conn.execute(f"SELECT ware_id, name, price_min, price_avg, price_max FROM {table}"):
+            wares.append(
+                {
+                    "ware_id": row["ware_id"],
+                    "name": row["name"],
+                    "price_min": row["price_min"],
+                    "price_avg": row["price_avg"],
+                    "price_max": row["price_max"],
+                }
+            )
+    return wares
+
+
 def summarize_prices(
     parts: dict[str, float],
     ware_prices: dict[str, dict[str, float]],

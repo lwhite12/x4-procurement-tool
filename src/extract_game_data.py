@@ -293,6 +293,40 @@ def ship_icon_jobs() -> list[ExtractionJob]:
     ]
 
 
+def nav_icon_jobs() -> list[ExtractionJob]:
+    """Three station-type icons *as they actually appear on the map*
+    (assets/textures/ui/map_objects/mapob_<type>.gz), not the plain glyph
+    set under stationicon/ favicon_icon_jobs() uses -- each mapob_ texture
+    already has the hexagon badge baked in (black hex fill, white glyph +
+    border), unlike si_shipyard.gz which is just the bare glyph. Used for
+    this website's own top-nav page icons (Fleet Planner/Cost Analysis/
+    About -- see generate_nav_icons.py, which recolors the black fill to
+    the game's own "faction_player" green from libraries/colors.xml
+    instead of shipping it black).
+
+    Also pulls widget/bordersquare.gz, the game's own generic "this map
+    item is selected" white square-bracket frame (see libraries/colors.xml's
+    holomap_selection_bracket/holomap_selected mappings, both plain white)
+    -- reused by generate_nav_icons.py for the Fleet Lists tab bar's
+    selected-fleet indicator, the same role it plays around a selected
+    object on the in-game map.
+    """
+    return [
+        ExtractionJob(
+            name="nav_icons",
+            group="nav_icons",
+            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock)\.gz$",
+            out_dir=DATA_DIR / "images" / "nav_icons_raw",
+        ),
+        ExtractionJob(
+            name="selection_box_icon",
+            group="nav_icons",
+            include_pattern=r"assets/textures/ui/widget/bordersquare\.gz$",
+            out_dir=DATA_DIR / "images" / "nav_icons_raw",
+        ),
+    ]
+
+
 def favicon_icon_jobs() -> list[ExtractionJob]:
     """The shipyard station-type icon (si_shipyard.gz), from the game's own
     per-station-type icon set under assets/textures/ui/stationicon/ --
@@ -363,6 +397,7 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *wares_xml_jobs(),
     *ship_icon_jobs(),
     *favicon_icon_jobs(),
+    *nav_icon_jobs(),
 ]
 
 

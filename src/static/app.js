@@ -10,17 +10,41 @@ let currentShip = null;
 // needs for its ship-class symbol.
 let selectedShipWareId = "";
 
-// Index into `cart` currently being edited, or null when "Add to procurement
-// list" will append a new entry instead of replacing an existing one.
+// Index into `activeFleet().cart` currently being edited, or null when "Add
+// to fleet list" will append a new entry instead of replacing an existing
+// one. Always reset (via resetShipPicker()) whenever the active fleet
+// changes, since it's only meaningful relative to whichever fleet's cart was
+// open when editCartEntry() was called -- see setActiveFleet()/deleteFleet().
 let editingIndex = null;
 
-// Cart entries: {shipWareId, shipName, shipIcon, missingRequiredComponents, note,
+// One fleet list: {name, cart, buildFocus, fallbackMethods, wareCostList, dirty}.
+// cart entries: {shipWareId, shipName, shipIcon, missingRequiredComponents, note,
 // loadoutMinimized, count, selections: {group_name: ware_id},
 // missileAmounts, droneAmounts, deployableAmounts, countermeasureAmounts: {ware_id: amount},
 // crewAmounts: {role: amount} (role: "marine"/"service", see CREW_ROLES --
 // not a real ware_id, both roles share one),
-// wares_list: [{ware_id, amount}], displayItems: [{label, amount}]}
-let cart = [];
+// wares_list: [{ware_id, amount}], displayItems: [{label, amount}]}.
+// dirty starts true (nothing computed yet) and is cleared by
+// recomputeDirtyFleets() -- see that function for the lazy-recompute design.
+function makeFleet(name = "") {
+  return { name, cart: [], buildFocus: null, fallbackMethods: null, wareCostList: null, dirty: true };
+}
+
+// Never empty -- always at least one fleet exists, mirroring the old
+// `cart = []` initial state. Replaces the old cart/savedComparisonColumns/
+// lastWareCostList/activeBuildFocus/activeFallbackMethods split (see
+// UNNAMED_FLEET_LIST_LABEL's old comment block, now removed, for the prior
+// "active + saved snapshots" design this superseded).
+let fleets = [makeFleet()];
+
+// Which entry in `fleets` is currently being viewed/edited in the Fleet
+// Planner and shown as the highlighted tab. Switching this (setActiveFleet())
+// is a cheap pointer change, not a copy -- every fleet is always live.
+let activeFleetIndex = 0;
+
+function activeFleet() {
+  return fleets[activeFleetIndex];
+}
 
 // Full, unfiltered ship list fetched once from GET /api/ships.
 let allShips = [];
@@ -257,7 +281,7 @@ function raceColorForName(name) {
 // Splits `name`'s leading race token (if any) into its own colored
 // <span>, appended directly to `parent` along with the rest of the name
 // as a plain text node -- for names rendered as real DOM text (e.g. the
-// procurement list's Loadout display, see renderLoadoutCell()). A
+// fleet list's Loadout display, see renderLoadoutCell()). A
 // <select><option> can't render partial-colored text (no nested markup
 // support) -- equipment pickers instead tint the *entire* option in its
 // race's color via raceColorForName() directly (see buildGroupRow()).
@@ -277,6 +301,7 @@ function appendNameWithFactionColor(parent, name) {
 }
 
 const sizeFilterOptions = document.getElementById("size-filter-options");
+const purposeFilterOptions = document.getElementById("purpose-filter-options");
 const typeFilterOptions = document.getElementById("type-filter-options");
 const shipOptionsList = document.getElementById("ship-options-list");
 const loadShipBtn = document.getElementById("load-ship-btn");
@@ -284,6 +309,8 @@ const clearShipBtnTop = document.getElementById("clear-ship-btn-top");
 const importLoadoutsBtn = document.getElementById("import-loadouts-btn");
 const selectGameLoadoutBtn = document.getElementById("select-game-loadout-btn");
 const selectChassisLoadoutBtn = document.getElementById("select-chassis-loadout-btn");
+const shipHighPresetBtn = document.getElementById("ship-high-preset-btn");
+const shipMinimumPresetBtn = document.getElementById("ship-minimum-preset-btn");
 const shipDetail = document.getElementById("ship-detail");
 const shipNameEl = document.getElementById("ship-name");
 const importedLoadoutWarningsEl = document.getElementById("imported-loadout-warnings");
@@ -297,7 +324,26 @@ const deployableContainer = document.getElementById("deployable-container");
 const crewContainer = document.getElementById("crew-container");
 const shipNoteInput = document.getElementById("ship-note-input");
 const addToCartBtn = document.getElementById("add-to-cart-btn");
+// Same action as addToCartBtn, next to Select Loadout at the top of the
+// builder -- see setAddToCartBtnLabel()/addSelectedShipToCart() below,
+// same top/bottom-copy pattern as clearShipBtnTop/clearShipBtnBottom.
+const addToCartBtnTop = document.getElementById("add-to-cart-btn-top");
+
+// Keeps both Add To Fleet List buttons (top and bottom copies) in sync --
+// every other call site sets the label through this instead of touching
+// addToCartBtn/addToCartBtnTop directly, so neither copy can drift out of
+// sync with the other (e.g. one still reading "Add To Fleet List" while
+// editCartEntry() has switched the other to "Update Fleet List").
+function setAddToCartBtnLabel(text) {
+  addToCartBtn.textContent = text;
+  addToCartBtnTop.textContent = text;
+}
+
 const addToSavedLoadoutsBtn = document.getElementById("add-to-saved-loadouts-btn");
+// Same action as addToSavedLoadoutsBtn, next to Select Filter Loadout at
+// the top of the picker -- see setAddToSavedLoadoutsBtnsDisabled() below,
+// same top/bottom-copy pattern as addToCartBtn/addToCartBtnTop.
+const addToSavedLoadoutsBtnTop = document.getElementById("add-to-saved-loadouts-btn-top");
 const addToSavedLoadoutsStatus = document.getElementById("add-to-saved-loadouts-status");
 const clearShipBtnBottom = document.getElementById("clear-ship-btn-bottom");
 const cartBody = document.getElementById("cart-body");
@@ -311,8 +357,7 @@ const wareCostListBody = document.getElementById("ware-cost-list-body");
 const saveCartBtn = document.getElementById("save-cart-btn");
 const loadCartInput = document.getElementById("load-cart-input");
 const cartNameInput = document.getElementById("cart-name-input");
-const saveForComparisonBtn = document.getElementById("save-for-comparison-btn");
-const saveForComparisonWarning = document.getElementById("save-for-comparison-warning");
+const fleetListTabsEl = document.getElementById("fleet-list-tabs");
 const buildMethodModalOverlay = document.getElementById("build-method-modal-overlay");
 const buildMethodModalFocusSelect = document.getElementById("build-method-modal-focus-select");
 const buildMethodModalFallbackList = document.getElementById("build-method-modal-fallback-list");
@@ -326,6 +371,16 @@ const equipmentPickerThead = document.getElementById("equipment-picker-thead");
 const equipmentPickerTbody = document.getElementById("equipment-picker-tbody");
 const equipmentPickerClearBtn = document.getElementById("equipment-picker-clear-btn");
 const equipmentPickerCancelBtn = document.getElementById("equipment-picker-cancel-btn");
+const priceOverrideBtn = document.getElementById("price-override-btn");
+const priceOverrideModalOverlay = document.getElementById("price-override-modal-overlay");
+const priceOverrideModalStatus = document.getElementById("price-override-modal-status");
+const priceOverrideTbody = document.getElementById("price-override-tbody");
+const priceOverrideCloseBtn = document.getElementById("price-override-close-btn");
+const priceOverrideSearchInput = document.getElementById("price-override-search-input");
+const priceOverrideSummaryList = document.getElementById("price-override-summary-list");
+const priceOverrideFilterProductionCheckbox = document.getElementById("price-override-filter-production");
+const priceOverrideFilterRawCheckbox = document.getElementById("price-override-filter-raw");
+const priceOverrideFilterProcurementCheckbox = document.getElementById("price-override-filter-procurement");
 const importLoadoutsModalOverlay = document.getElementById("import-loadouts-modal-overlay");
 const importLoadoutsPathSection = document.getElementById("import-loadouts-path-section");
 const importLoadoutsPathInput = document.getElementById("import-loadouts-path-input");
@@ -346,30 +401,11 @@ const selectGameLoadoutModalTitle = document.getElementById("select-game-loadout
 const selectGameLoadoutList = document.getElementById("select-game-loadout-list");
 const selectGameLoadoutCancelBtn = document.getElementById("select-game-loadout-cancel-btn");
 
-// The most recently calculated (or loaded) /api/summarize response, exactly
-// as rendered by renderWareCostList() -- kept around purely so "Save ware
-// cost list…" has something to serialize without needing to re-run the
-// calculation.
-let lastWareCostList = null;
-
-// The Active column's own build focus -- replaces what used to be a single
-// shared "Build focus" text input. Each saved comparison column now has its
-// own independent build focus too (savedComparisonColumns[i].buildFocus),
-// set via the same small button/modal (see openBuildMethodModal()) shown
-// under that column's own name in the Ware Cost List header -- see
-// renderWareCostListHead(). null means "no build focus set", same meaning
-// the old text box's empty string had.
-let activeBuildFocus = null;
-
-// The Active column's own fallback-method order + inclusion list -- same
-// per-column shape as activeBuildFocus above (savedComparisonColumns[i]
-// .fallbackMethods is the saved-column equivalent). null means "use
-// whatever /api/build_methods currently returns" (api.py's own
-// DEFAULT_FALLBACK_METHODS) -- sent through to /api/summarize and
-// /api/price_summary as-is (both already treat a null fallback_methods as
-// "use the server default"), only becoming a concrete array once a column's
-// build method modal has actually been saved at least once.
-let activeFallbackMethods = null;
+// lastWareCostList/activeBuildFocus/activeFallbackMethods used to live here
+// as module-level globals for "the Active column" specifically -- now every
+// fleet (not just one "active" one) carries its own .wareCostList/
+// .buildFocus/.fallbackMethods directly (see makeFleet()), read via
+// activeFleet().___ wherever the active fleet's own values are needed.
 
 // Every real build method, fetched once from GET /api/build_methods (see
 // BUILD_METHODS in generate_ships_table.py for how it's curated/ordered) --
@@ -378,10 +414,10 @@ let activeFallbackMethods = null;
 let allBuildMethods = [];
 
 // Which column the Build Method modal is currently open for -- one of the
-// objects wareCostListColumns() builds ({removable, index, ...}), read by
-// the modal's own Save handler to know whether to update activeBuildFocus/
-// activeFallbackMethods (removable: false) or a specific saved snapshot
-// (removable: true, via index). null while the modal is closed.
+// objects wareCostListColumns() builds ({fleetIndex, buildFocus,
+// fallbackMethods, ...}), read by the modal's own Save handler to call
+// recomputeFleetBuildConfig(column.fleetIndex, ...) on Save. null while the
+// modal is closed.
 let buildMethodModalTarget = null;
 
 // The modal's own working copy of the fallback-method list while open --
@@ -592,7 +628,16 @@ function populateFilterOptions() {
     .sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b))
     .map((size) => ({ value: size, label: size.toUpperCase() }));
 
+  // ship.purpose is a flat, single-valued AI role classification (e.g.
+  // "fight"/"trade"/"mine") -- unlike Type, no ship has more than one, so
+  // this needs none of buildTypeFilterEntries()'s multi-size splitting.
+  const purposeEntries = [...new Set(allShips.map((ship) => ship.purpose))]
+    .filter((purpose) => purpose != null)
+    .sort((a, b) => a.localeCompare(b))
+    .map((purpose) => ({ value: purpose, label: purpose.charAt(0).toUpperCase() + purpose.slice(1) }));
+
   buildCheckboxGroup(sizeFilterOptions, "size-filter", sizeEntries);
+  buildCheckboxGroup(purposeFilterOptions, "purpose-filter", purposeEntries);
   buildCheckboxGroup(typeFilterOptions, "type-filter", buildTypeFilterEntries());
 }
 
@@ -645,17 +690,27 @@ for (const btn of document.querySelectorAll(".filter-none-btn")) {
 // size/type checkbox selections (no checkboxes checked in a group means
 // "don't filter on that dimension"). Resets the current selection since it
 // may no longer be in the filtered set.
-function renderShipOptions() {
+//
+// Shared with openSelectGameLoadoutModal(), which applies this same
+// predicate (plus compareShips' own ordering) to the saved-loadout list
+// when opened generically, so "what ships are currently visible in the
+// picker" and "what ships' loadouts show up in Select Filter Loadout"
+// never drift apart.
+function shipPassesCurrentFilters(ship) {
   const sizeValues = checkedValues("size-filter");
+  const purposeValues = checkedValues("purpose-filter");
   const typeValues = checkedValues("type-filter");
+  return (
+    (sizeValues.length === 0 || sizeValues.includes(ship.size)) &&
+    (purposeValues.length === 0 || purposeValues.includes(ship.purpose)) &&
+    (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value)))
+  );
+}
 
+function renderShipOptions() {
   shipOptionsList.innerHTML = "";
 
-  const filtered = allShips.filter(
-    (ship) =>
-      (sizeValues.length === 0 || sizeValues.includes(ship.size)) &&
-      (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value))),
-  );
+  const filtered = allShips.filter(shipPassesCurrentFilters);
 
   if (filtered.length === 0) {
     const empty = document.createElement("div");
@@ -671,7 +726,8 @@ function renderShipOptions() {
   selectedShipWareId = "";
   loadShipBtn.disabled = true;
   editingIndex = null;
-  addToCartBtn.textContent = "Add to procurement list";
+  setAddToCartBtnLabel("Add To Fleet List");
+  saveState();
 }
 
 // One clickable row in the ship picker listbox: its class symbol (see
@@ -723,7 +779,7 @@ function buildShipOptionRow(ship) {
   row.addEventListener("click", () => {
     applyShipSelection(ship.ware_id);
     editingIndex = null;
-    addToCartBtn.textContent = "Add to procurement list";
+    setAddToCartBtnLabel("Add To Fleet List");
   });
 
   return row;
@@ -786,7 +842,7 @@ const COMPONENT_TYPE_SINGULAR_LABELS = {
   software: "Software",
 };
 
-// Grouping for the Procurement List's own "Loadout" display (see
+// Grouping for the Fleet List's own "Loadout" display (see
 // renderCart()) -- a superset of COMPONENT_TYPE_LABELS/_ORDER above (which
 // only covers ship_component_groups' component_type values) plus "chassis"
 // (the ship hull itself) and the three shared-pool categories that never
@@ -870,7 +926,7 @@ function groupKey(group) {
 }
 
 // UI-only requirement: these groups must have a selection before a ship
-// can be added to the procurement list. Not enforced anywhere server-side
+// can be added to the fleet list. Not enforced anywhere server-side
 // (the API will happily calculate a cart missing them) -- purely a picker
 // safeguard against forgetting an engine/thruster/core-software choice
 // before committing a ship. Engine/thruster are matched by component_type
@@ -912,19 +968,26 @@ function missingRequiredLabels(groups, selections) {
 // attributes, same .group-select class, so all the existing cart-building/
 // edit-repopulating code (which just queries every ".group-row" under
 // #groups-container) picks them up automatically with no special-casing.
-function buildGroupRow(group, { isLinkedShield = false } = {}) {
+function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
   const row = document.createElement("div");
   row.className = "group-row";
   row.dataset.groupKey = groupKey(group);
   row.dataset.groupName = group.group_name;
   row.dataset.slotCount = group.slot_count;
-  // Read back in addToCartBtn's handler to group the procurement list's
+  // Read back in addToCartBtn's handler to group the fleet list's
   // own display by component type (see CART_DISPLAY_GROUP_LABELS/
   // renderCart()) -- bonus-M-shield rows are still plain "shield" here
   // (isLinkedShield only changes the *label* above), so they group
   // together with ordinary main shields, same as this app's own picker
   // sections already treat them as one "Shields" category.
   row.dataset.componentType = group.component_type;
+  // Which *rendered section* (COMPONENT_TYPE_ORDER entry) this row's card
+  // lives under -- not always the same as component_type above, since a
+  // linked bonus shield's own component_type is "shield" but it's
+  // rendered nested inside its parent's section (e.g. "engine"). Used by
+  // applyHighPreset()/applyMinimumPreset() to scope a section's preset
+  // buttons to exactly the rows visually inside that section.
+  if (sectionType) row.dataset.sectionType = sectionType;
 
   const label = document.createElement("label");
   label.textContent = isLinkedShield
@@ -937,7 +1000,7 @@ function buildGroupRow(group, { isLinkedShield = false } = {}) {
     const marker = document.createElement("span");
     marker.className = "required-marker";
     marker.textContent = " *";
-    marker.title = "Recommended -- leaving this unselected will show a warning in the procurement list";
+    marker.title = "Recommended -- leaving this unselected will show a warning in the fleet list";
     label.appendChild(marker);
   }
   row.appendChild(label);
@@ -1219,6 +1282,277 @@ function closeEquipmentPickerModal() {
 equipmentPickerClearBtn.addEventListener("click", () => selectEquipmentPickerOption(""));
 equipmentPickerCancelBtn.addEventListener("click", closeEquipmentPickerModal);
 
+// GET /api/wares result, cached after the first successful fetch -- every
+// ware in the database is a fixed, session-static list (nothing here
+// changes while the app is running), so there's no reason to re-fetch it
+// on every "Set Ware Price Overrides" click.
+let allWaresCache = null;
+
+// ware_id -> override price (a plain number). In-memory only (page refresh
+// loses it), but real: sent as computeWareCostList()'s price_overrides on
+// every calculation, where api.py substitutes it for that ware's price_min/
+// price_avg/price_max alike, across all three Ware Cost List tiers. Still
+// missing a compact always-visible list of active overrides once the modal
+// is closed -- see TODO.md's "Ware price override tool" entry.
+const priceOverrides = {};
+
+async function openPriceOverrideModal() {
+  priceOverrideModalOverlay.classList.remove("hidden");
+  priceOverrideTbody.innerHTML = "";
+  priceOverrideSearchInput.value = "";
+  priceOverrideHighlightedRow = null;
+
+  if (allWaresCache) {
+    renderPriceOverrideTable(allWaresCache);
+    return;
+  }
+
+  priceOverrideModalStatus.textContent = "Loading wares…";
+  priceOverrideModalStatus.classList.remove("hidden");
+  try {
+    const response = await fetch("/api/wares");
+    allWaresCache = await response.json();
+  } catch {
+    priceOverrideModalStatus.textContent = "Failed to load wares -- try again.";
+    return;
+  }
+  priceOverrideModalStatus.classList.add("hidden");
+  renderPriceOverrideTable(allWaresCache);
+}
+
+// Every ware_id appearing anywhere in a fleet list itself (not the
+// computed cost breakdown) -- across every fleet in `fleets`, not just the
+// active one. Each entry contributes its own ship plus everything in its
+// wares_list (equipment, ammo, drones, ...). Backs the "Fleet list wares"
+// filter checkbox.
+function cartWareIds() {
+  const ids = new Set();
+  for (const fleet of fleets) {
+    for (const entry of fleet.cart) {
+      ids.add(entry.shipWareId);
+      for (const item of entry.wares_list) ids.add(item.ware_id);
+    }
+  }
+  return ids;
+}
+
+// ware_ids from every method bucket's "parts" within one summarize()-
+// shaped result ({"methods": {method: {"parts": {ware_id: amount}}}}),
+// unioned together -- a null result (e.g. a saved column that predates
+// price_summary or an empty cart) just contributes nothing.
+function wareIdsFromSummarizeResult(result) {
+  const ids = new Set();
+  if (!result) return ids;
+  for (const method of Object.values(result.methods ?? {})) {
+    for (const wareId of Object.keys(method.parts ?? {})) ids.add(wareId);
+  }
+  return ids;
+}
+
+// Every ware_id currently shown in the Ware Cost List's Production Wares
+// (tierKey "production_wares") or Raw Materials (tierKey "raw_materials")
+// tier -- across every fleet's own column in the table, not just the active
+// one. Reads .total (the flat, ungrouped tier) rather than .component_type,
+// since which wares appear is identical either way -- component_type only
+// changes how they're bucketed for display, not the underlying set.
+function wareIdsInWareCostListTier(tierKey) {
+  const ids = new Set();
+  for (const fleet of fleets) {
+    if (!fleet.wareCostList) continue;
+    for (const id of wareIdsFromSummarizeResult(fleet.wareCostList.total[tierKey])) ids.add(id);
+  }
+  return ids;
+}
+
+// Unchecked is no filter at all (show everything). Any combination of
+// checked boxes is a union, not an intersection -- a ware shows up if it
+// matches *any* checked filter. "Production wares"/"Raw resources" match
+// the actual per-ware breakdown currently rendered in those Ware Cost
+// List tiers (not a static database property); "Fleet list wares"
+// matches cart membership instead, an entirely different axis (the
+// fleet lists themselves, not their computed cost breakdown) that
+// can freely combine with either of the other two.
+function filterPriceOverrideWares(wares) {
+  const productionChecked = priceOverrideFilterProductionCheckbox.checked;
+  const rawChecked = priceOverrideFilterRawCheckbox.checked;
+  const procurementChecked = priceOverrideFilterProcurementCheckbox.checked;
+  if (!productionChecked && !rawChecked && !procurementChecked) return [...wares];
+
+  const productionIds = productionChecked ? wareIdsInWareCostListTier("production_wares") : null;
+  const rawIds = rawChecked ? wareIdsInWareCostListTier("raw_materials") : null;
+  const cartIds = procurementChecked ? cartWareIds() : null;
+
+  return wares.filter((ware) => {
+    if (productionChecked && productionIds.has(ware.ware_id)) return true;
+    if (rawChecked && rawIds.has(ware.ware_id)) return true;
+    if (procurementChecked && cartIds.has(ware.ware_id)) return true;
+    return false;
+  });
+}
+
+function renderPriceOverrideTable(wares) {
+  priceOverrideTbody.innerHTML = "";
+  priceOverrideHighlightedRow = null;
+  const sorted = filterPriceOverrideWares(wares).sort((a, b) => (a.name ?? a.ware_id).localeCompare(b.name ?? b.ware_id));
+
+  for (const ware of sorted) {
+    const tr = document.createElement("tr");
+
+    // Lowercased once at render time -- handlePriceOverrideSearch() runs
+    // on every keystroke, so it just reads this back rather than
+    // re-deriving/re-lowercasing the display name on every search.
+    tr.dataset.searchName = (ware.name ?? ware.ware_id).toLowerCase();
+
+    const nameTd = document.createElement("td");
+    nameTd.textContent = ware.name ?? ware.ware_id;
+    tr.appendChild(nameTd);
+
+    for (const priceField of ["price_min", "price_avg", "price_max"]) {
+      const td = document.createElement("td");
+      td.textContent = ware[priceField] == null ? "—" : formatPriceValue(ware[priceField]);
+      tr.appendChild(td);
+    }
+
+    const overrideTd = document.createElement("td");
+    const overrideInput = document.createElement("input");
+    overrideInput.type = "number";
+    overrideInput.min = "0";
+    overrideInput.step = "any";
+    overrideInput.placeholder = "no override";
+    overrideInput.className = "price-override-input";
+    if (priceOverrides[ware.ware_id] !== undefined) overrideInput.value = priceOverrides[ware.ware_id];
+    overrideInput.addEventListener("input", () => {
+      if (overrideInput.value === "") {
+        delete priceOverrides[ware.ware_id];
+      } else {
+        priceOverrides[ware.ware_id] = Number(overrideInput.value);
+      }
+      renderPriceOverrideSummary();
+    });
+    overrideTd.appendChild(overrideInput);
+    tr.appendChild(overrideTd);
+
+    priceOverrideTbody.appendChild(tr);
+  }
+}
+
+// Ware name for display, falling back to the raw ware_id when
+// allWaresCache hasn't been loaded yet (e.g. the summary box renders once
+// on page load, before "Set Ware Price Overrides" has ever been opened --
+// moot in practice since there can't be any overrides set yet either, but
+// keeps this function total rather than assuming the cache exists).
+function wareDisplayName(wareId) {
+  return allWaresCache?.find((ware) => ware.ware_id === wareId)?.name ?? wareId;
+}
+
+// Keeps the "Configured Ware Price Overrides" box (next to the Ware Cost
+// List title) in sync with the priceOverrides map -- called on every
+// override edit (see the input listener above) and whenever the picker
+// modal closes, so it's accurate whether or not that modal has ever been
+// opened this session.
+function renderPriceOverrideSummary() {
+  priceOverrideSummaryList.innerHTML = "";
+  const entries = Object.entries(priceOverrides);
+
+  if (entries.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "price-override-summary-empty";
+    empty.textContent = "None configured.";
+    priceOverrideSummaryList.appendChild(empty);
+    return;
+  }
+
+  entries.sort((a, b) => wareDisplayName(a[0]).localeCompare(wareDisplayName(b[0])));
+  for (const [wareId, price] of entries) {
+    const row = document.createElement("div");
+    row.className = "price-override-summary-entry";
+
+    const name = document.createElement("span");
+    name.className = "price-override-summary-name";
+    name.textContent = wareDisplayName(wareId);
+    row.appendChild(name);
+
+    const value = document.createElement("span");
+    value.className = "price-override-summary-value";
+    value.textContent = formatPriceValue(price);
+    row.appendChild(value);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "price-override-summary-remove-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = `Remove override for ${wareDisplayName(wareId)}`;
+    // Deletes straight from priceOverrides -- doesn't need to touch the
+    // modal's own table (it re-derives each input's value fresh from
+    // priceOverrides every time it's opened, see renderPriceOverrideTable()),
+    // so this works whether or not that modal has ever been opened.
+    removeBtn.addEventListener("click", () => {
+      delete priceOverrides[wareId];
+      renderPriceOverrideSummary();
+      markAllFleetsDirtyAndRecompute();
+    });
+    row.appendChild(removeBtn);
+
+    priceOverrideSummaryList.appendChild(row);
+  }
+}
+
+// Overrides only take effect on the next computeWareCostList() call, and
+// affect every fleet's cost (price_overrides is sent with every
+// /api/price_summary request regardless of which fleet's wares are being
+// priced) -- so a changed override makes every fleet's cached wareCostList
+// stale at once, not just the active one. Recomputed immediately here
+// (rather than deferred to the next Cost Analysis visit) since this can
+// only be reached from *within* the Cost Analysis page in the first place --
+// "navigate in" will never fire again while already there.
+function markAllFleetsDirtyAndRecompute() {
+  for (const fleet of fleets) fleet.dirty = true;
+  recomputeDirtyFleets();
+}
+
+function closePriceOverrideModal() {
+  priceOverrideModalOverlay.classList.add("hidden");
+  renderPriceOverrideSummary();
+  markAllFleetsDirtyAndRecompute();
+}
+
+// The row scrolled to/highlighted by the last search, if any -- cleared
+// (and its highlight removed) at the start of every new search so at most
+// one row is ever marked, and reset whenever the modal reopens/re-renders
+// since a fresh render's rows are entirely new elements.
+let priceOverrideHighlightedRow = null;
+
+// Live "jump to" search, run on every keystroke: highlights and scrolls to
+// the first row (in the table's current, name-sorted order) whose name
+// contains the typed text so far, case-insensitively. Substring match
+// rather than prefix-only, so e.g. typing "shield" still finds "M Shield
+// Generator" partway through a name. An empty search box just clears any
+// existing highlight without picking a new match.
+function handlePriceOverrideSearch() {
+  if (priceOverrideHighlightedRow) {
+    priceOverrideHighlightedRow.classList.remove("price-override-row-highlight");
+    priceOverrideHighlightedRow = null;
+  }
+
+  const query = priceOverrideSearchInput.value.trim().toLowerCase();
+  if (!query) return;
+
+  const match = [...priceOverrideTbody.querySelectorAll("tr")].find((row) => row.dataset.searchName.includes(query));
+  if (!match) return;
+
+  match.classList.add("price-override-row-highlight");
+  priceOverrideHighlightedRow = match;
+  match.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+priceOverrideSearchInput.addEventListener("input", handlePriceOverrideSearch);
+
+for (const checkbox of [priceOverrideFilterProductionCheckbox, priceOverrideFilterRawCheckbox, priceOverrideFilterProcurementCheckbox]) {
+  checkbox.addEventListener("change", () => renderPriceOverrideTable(allWaresCache ?? []));
+}
+
+priceOverrideBtn.addEventListener("click", openPriceOverrideModal);
+priceOverrideCloseBtn.addEventListener("click", closePriceOverrideModal);
+
 // Which labeled section a group_name's bundle belongs to: the non-shield
 // component_type when there is one (so an engine's dedicated bonus shield
 // still lands in "Engines", not a separate "Shields" section -- matching
@@ -1234,7 +1568,8 @@ function renderShipDetail(data) {
   shipNameEl.innerHTML = "";
   if (data.icon) shipNameEl.appendChild(buildIconImg(data.icon, "ship-icon ship-name-icon"));
   shipNameEl.appendChild(document.createTextNode(data.name));
-  selectChassisLoadoutBtn.textContent = `Select ${data.name} loadout`;
+  updatePlayerLocationMarker(data.icon);
+  selectChassisLoadoutBtn.textContent = `Select ${data.name} Loadout`;
   updateSelectChassisLoadoutBtnState();
   addToSavedLoadoutsStatus.classList.add("hidden");
   renderShipSummary(data);
@@ -1280,23 +1615,21 @@ function renderShipDetail(data) {
     heading.textContent = COMPONENT_TYPE_LABELS[sectionType];
     headingRow.appendChild(heading);
 
-    if (sectionType === "software") {
-      const highBtn = document.createElement("button");
-      highBtn.type = "button";
-      highBtn.className = "software-preset-btn";
-      highBtn.textContent = "High Preset";
-      highBtn.title = "Select the highest-tier software available in every slot";
-      highBtn.addEventListener("click", applyHighSoftwarePreset);
-      headingRow.appendChild(highBtn);
+    const highBtn = document.createElement("button");
+    highBtn.type = "button";
+    highBtn.className = "section-preset-btn";
+    highBtn.textContent = "High Preset";
+    highBtn.title = "Select the highest average-price item available in every slot in this section";
+    highBtn.addEventListener("click", () => applyHighPreset(sectionType));
+    headingRow.appendChild(highBtn);
 
-      const minBtn = document.createElement("button");
-      minBtn.type = "button";
-      minBtn.className = "software-preset-btn";
-      minBtn.textContent = "Minimum Preset";
-      minBtn.title = "Select the lowest-tier software in only the required slots (Flight Assist, Object Scanner, Long Range Scanner)";
-      minBtn.addEventListener("click", applyMinimumSoftwarePreset);
-      headingRow.appendChild(minBtn);
-    }
+    const minBtn = document.createElement("button");
+    minBtn.type = "button";
+    minBtn.className = "section-preset-btn";
+    minBtn.textContent = "Minimum Preset";
+    minBtn.title = "Select the lowest average-price item in this section's required slots (marked *), and clear everything else";
+    minBtn.addEventListener("click", () => applyMinimumPreset(sectionType));
+    headingRow.appendChild(minBtn);
 
     section.appendChild(headingRow);
 
@@ -1309,10 +1642,10 @@ function renderShipDetail(data) {
       const isLinked = nonShield.length > 0; // else: a standalone shield-only group_name
 
       for (const group of nonShield) {
-        card.appendChild(buildGroupRow(group));
+        card.appendChild(buildGroupRow(group, { sectionType }));
       }
       for (const group of shields) {
-        const row = buildGroupRow(group, { isLinkedShield: isLinked });
+        const row = buildGroupRow(group, { isLinkedShield: isLinked, sectionType });
         if (isLinked) row.classList.add("bonus-shield-row");
         card.appendChild(row);
       }
@@ -2093,51 +2426,65 @@ function renderShipSummary(data) {
   shipSummaryEl.appendChild(slotsList);
 }
 
-// Every currently-rendered software .group-row, in DOM order.
-function softwareGroupRows() {
-  return [...groupsContainer.querySelectorAll(".group-row")].filter((row) => row.dataset.componentType === "software");
+// Every currently-rendered .group-row belonging to one rendered section
+// (row.dataset.sectionType, set by buildGroupRow() -- not the same as
+// row.dataset.componentType, since a section's cards can include a
+// different component_type, e.g. an engine's own linked bonus shield),
+// in DOM order.
+function groupRowsForSection(sectionType) {
+  return [...groupsContainer.querySelectorAll(".group-row")].filter((row) => row.dataset.sectionType === sectionType);
 }
 
-// The raw group data (with its own .options, each carrying "mk") behind a
-// .group-row -- the row itself only stores groupKey as a dataset string,
-// so this looks it back up in currentShip.groups (the same array
+// The raw group data (with its own .options, each carrying "price_avg")
+// behind a .group-row -- the row itself only stores groupKey as a dataset
+// string, so this looks it back up in currentShip.groups (the same array
 // buildGroupRow() built every row from in the first place).
 function groupForRow(row) {
   return currentShip ? (currentShip.groups.find((g) => groupKey(g) === row.dataset.groupKey) ?? null) : null;
 }
 
-// "High Preset" button (next to the Software section title): selects the
-// highest-mk option in *every* software slot, required or not. mk, not
-// name or array order, is the only reliable tier indicator for software
-// -- see matching_items()'s software branch in query_ship_components.py
-// for why (some categories' names don't follow a "... Mk1"/"Mk2"
-// convention at all, e.g. "Basic Scanner" vs "Police Scanner").
-function applyHighSoftwarePreset() {
-  for (const row of softwareGroupRows()) {
+// "High Preset" button (next to each section's title): selects the
+// highest average-price option in *every* slot of that section, required
+// or not.
+function applyHighPreset(sectionType) {
+  for (const row of groupRowsForSection(sectionType)) {
     const group = groupForRow(row);
     if (!group || group.options.length === 0) continue;
-    const best = group.options.reduce((a, b) => (b.mk > a.mk ? b : a));
+    const best = group.options.reduce((a, b) => ((b.price_avg ?? 0) > (a.price_avg ?? 0) ? b : a));
     applySelectionToRow(row, best.ware_id);
   }
 }
 
-// "Minimum Preset" button: selects the lowest-mk option in the software
-// slots actually marked required (row.dataset.requiredLabel -- Flight
-// Assist/Object Scanner/Long Range Scanner, see REQUIRED_SOFTWARE_LABELS),
-// and clears every other software slot back to "-- none --" -- a true
-// minimum-viable loadout, not just "leave whatever else was picked".
-function applyMinimumSoftwarePreset() {
-  for (const row of softwareGroupRows()) {
+// "Minimum Preset" button: selects the lowest average-price option in
+// that section's slots actually marked required (row.dataset.requiredLabel
+// -- see requiredGroupLabel()), and clears every other slot in the section
+// back to "-- none --" -- a true minimum-viable loadout for that section,
+// not just "leave whatever else was picked". A section with no required
+// slots at all (e.g. Weapons, Turrets) simply clears everything.
+function applyMinimumPreset(sectionType) {
+  for (const row of groupRowsForSection(sectionType)) {
     if (!row.dataset.requiredLabel) {
       applySelectionToRow(row, "");
       continue;
     }
     const group = groupForRow(row);
     if (!group || group.options.length === 0) continue;
-    const worst = group.options.reduce((a, b) => (b.mk < a.mk ? b : a));
+    const worst = group.options.reduce((a, b) => ((b.price_avg ?? 0) < (a.price_avg ?? 0) ? b : a));
     applySelectionToRow(row, worst.ware_id);
   }
 }
+
+// Ship-wide High/Minimum Preset buttons, next to "Select loadout" -- just
+// runs every section's own applyHighPreset()/applyMinimumPreset() in turn.
+// Calling it for a component_type this ship doesn't have (e.g. no
+// missile_launcher) is harmless: groupRowsForSection() returns an empty
+// list, so that iteration is simply a no-op.
+shipHighPresetBtn.addEventListener("click", () => {
+  for (const sectionType of COMPONENT_TYPE_ORDER) applyHighPreset(sectionType);
+});
+shipMinimumPresetBtn.addEventListener("click", () => {
+  for (const sectionType of COMPONENT_TYPE_ORDER) applyMinimumPreset(sectionType);
+});
 
 function applyGroupSelections(selections) {
   for (const row of groupsContainer.querySelectorAll(".group-row")) {
@@ -2170,6 +2517,7 @@ function resetShipPicker() {
   deployableAmounts = {};
   crewAmounts = {};
   applyShipSelection("");
+  updatePlayerLocationMarker(null);
   loadShipBtn.disabled = true;
   selectChassisLoadoutBtn.disabled = true;
   shipDetail.classList.add("hidden");
@@ -2181,18 +2529,20 @@ function resetShipPicker() {
   deployableContainer.innerHTML = "";
   crewContainer.innerHTML = "";
   shipNoteInput.value = "";
-  addToCartBtn.textContent = "Add to procurement list";
+  setAddToCartBtnLabel("Add To Fleet List");
   importedLoadoutWarningsEl.classList.add("hidden");
   addToSavedLoadoutsStatus.classList.add("hidden");
 }
 
 // Two copies of the same action (top, next to Load; bottom, next to Add
-// to procurement list) so it's reachable without scrolling regardless of
+// to fleet list) so it's reachable without scrolling regardless of
 // where the user currently is on a long ship-detail page.
 clearShipBtnTop.addEventListener("click", resetShipPicker);
 clearShipBtnBottom.addEventListener("click", resetShipPicker);
 
-addToCartBtn.addEventListener("click", () => {
+// Shared by both Add To Fleet List buttons (top, next to Select Loadout;
+// bottom, next to Add To Saved Loadouts/Clear -- see addToCartBtnTop).
+function addSelectedShipToCart() {
   if (!currentShip) return;
 
   // No longer a hard block -- collected here and carried onto the cart
@@ -2332,8 +2682,8 @@ addToCartBtn.addEventListener("click", () => {
   const note = shipNoteInput.value.trim();
 
   if (editingIndex !== null) {
-    cart[editingIndex] = {
-      ...cart[editingIndex],
+    activeFleet().cart[editingIndex] = {
+      ...activeFleet().cart[editingIndex],
       shipWareId: currentShip.ware_id,
       shipName: currentShip.name,
       shipIcon: currentShip.icon,
@@ -2349,7 +2699,7 @@ addToCartBtn.addEventListener("click", () => {
       displayItems,
     };
   } else {
-    cart.push({
+    activeFleet().cart.push({
       shipWareId: currentShip.ware_id,
       shipName: currentShip.name,
       shipIcon: currentShip.icon,
@@ -2375,8 +2725,12 @@ addToCartBtn.addEventListener("click", () => {
   // re-picking everything from scratch; one of the Clear buttons (top/
   // bottom, see clearShipBtnTop/Bottom) starts over explicitly.
   if (editingIndex !== null) resetShipPicker();
+  activeFleet().dirty = true;
   renderCart();
-});
+}
+
+addToCartBtn.addEventListener("click", addSelectedShipToCart);
+addToCartBtnTop.addEventListener("click", addSelectedShipToCart);
 
 // Order-independent deep-equal for the plain flat {string: primitive}
 // maps this app builds (selections, missileAmounts, droneAmounts, etc.) --
@@ -2389,7 +2743,7 @@ function stableStringify(value) {
 }
 
 // Same group-row gathering addToCartBtn's handler does above, factored out
-// so "Add to Saved Loadouts" can build a comparable selections map without
+// so "Add To Saved Loadouts" can build a comparable selections map without
 // duplicating that DOM walk.
 function gatherCurrentSelections() {
   const selections = {};
@@ -2400,11 +2754,11 @@ function gatherCurrentSelections() {
   return selections;
 }
 
-// "Add to Saved Loadouts": snapshots the current ship-builder state into
-// the same importedLoadoutsResult working set "Import game loadouts"/
-// "Import raw XML loadout" feed (see mergeImportedLoadoutsResult()), so it
-// immediately shows up in "Select saved loadout"/"Select <ship> loadout"
-// and gets picked up by "Export loadouts" too (server-side synthesized
+// "Add To Saved Loadouts": snapshots the current ship-builder state into
+// the same importedLoadoutsResult working set "Import Game Loadouts"/
+// "Import Raw XML Loadout" feed (see mergeImportedLoadoutsResult()), so it
+// immediately shows up in "Select Filter Loadout"/"Select <ship> Loadout"
+// and gets picked up by "Export Loadouts" too (server-side synthesized
 // rawXml -- see import_loadouts.py's build_loadout_xml()).
 async function addToSavedLoadouts() {
   if (!currentShip) return;
@@ -2439,7 +2793,7 @@ async function addToSavedLoadouts() {
     return;
   }
 
-  addToSavedLoadoutsBtn.disabled = true;
+  setAddToSavedLoadoutsBtnsDisabled(true);
   try {
     const response = await fetch("/api/build_saved_loadout", {
       method: "POST",
@@ -2457,8 +2811,17 @@ async function addToSavedLoadouts() {
   } catch (err) {
     showAddToSavedLoadoutsStatus([`Could not save this loadout: ${err.message}`], true);
   } finally {
-    addToSavedLoadoutsBtn.disabled = false;
+    setAddToSavedLoadoutsBtnsDisabled(false);
   }
+}
+
+// Keeps both Add To Saved Loadouts buttons (top and bottom copies) in
+// sync while a save request is in flight -- see setAddToCartBtnLabel()'s
+// own comment for why this is worth a shared helper rather than touching
+// addToSavedLoadoutsBtn/addToSavedLoadoutsBtnTop directly at each call site.
+function setAddToSavedLoadoutsBtnsDisabled(disabled) {
+  addToSavedLoadoutsBtn.disabled = disabled;
+  addToSavedLoadoutsBtnTop.disabled = disabled;
 }
 
 function showAddToSavedLoadoutsStatus(lines, isError) {
@@ -2473,6 +2836,7 @@ function showAddToSavedLoadoutsStatus(lines, isError) {
 }
 
 addToSavedLoadoutsBtn.addEventListener("click", addToSavedLoadouts);
+addToSavedLoadoutsBtnTop.addEventListener("click", addToSavedLoadouts);
 
 // Renders one cart entry's displayItems into `loadoutTd`, grouped by
 // component type (CART_DISPLAY_ORDER/_LABELS) -- one bold, unindented
@@ -2543,18 +2907,28 @@ function renderLoadoutCell(loadoutTd, entry) {
   }
 }
 
-// Called after every procurement-list mutation (add/edit, remove, load)
-// to keep the cart table in sync -- also triggers runCalculation() at the
-// end, so the Ware Cost List/Monetary Cost Analysis stay live without a
-// manual Calculate click. The qty +/- and direct-input controls built
-// below deliberately skip a full renderCart() (they only need to update
-// their own displayed value), so they call runCalculation() themselves
-// instead of relying on this.
+// Called after every fleet-list mutation (add/edit, remove, load) to keep
+// the cart table and the fleet-list tab bar in sync. Does NOT trigger any
+// recalculation -- cart edits just mark the active fleet dirty (see the qty
+// handlers/removeBtn below) and wait for recomputeDirtyFleets(), which only
+// actually runs on navigating into Cost Analysis (or immediately, for the
+// couple of triggers -- price overrides, build focus -- only reachable from
+// within that page already). See PERSISTED_STATE plan notes / showPage().
 function renderCart() {
-  cartBody.innerHTML = "";
-  cartEmptyMsg.classList.toggle("hidden", cart.length > 0);
+  // Saved synchronously here so a refresh in the brief gap before the next
+  // mutation/render doesn't lose it.
+  saveState();
+  // Keeps the rename input in sync whenever the active fleet changes out
+  // from under it (switch/add/delete) -- setting .value here, not just on
+  // its own "input" handler, is what lets a single renderCart() call cover
+  // every call site that changes activeFleetIndex.
+  cartNameInput.value = activeFleet().name;
+  renderFleetListTabs();
 
-  cart.forEach((entry, index) => {
+  cartBody.innerHTML = "";
+  cartEmptyMsg.classList.toggle("hidden", activeFleet().cart.length > 0);
+
+  activeFleet().cart.forEach((entry, index) => {
     const tr = document.createElement("tr");
 
     const shipTd = document.createElement("td");
@@ -2578,14 +2952,12 @@ function renderCart() {
       warningDiv.textContent = `⚠ Missing: ${entry.missingRequiredComponents.join(", ")}`;
       shipTd.appendChild(warningDiv);
     }
-    tr.appendChild(shipTd);
 
-    const loadoutTd = document.createElement("td");
-    loadoutTd.className = "cart-loadout";
-    renderLoadoutCell(loadoutTd, entry);
-    tr.appendChild(loadoutTd);
-
-    const qtyTd = document.createElement("td");
+    // Qty control and Edit/Remove actions live in this same cell, each on
+    // their own line below the ship name -- there's no separate Qty/
+    // actions column any more.
+    const qtyRow = document.createElement("div");
+    qtyRow.className = "cart-qty-row";
     const qtyWrap = document.createElement("span");
     qtyWrap.className = "qty-control";
 
@@ -2597,7 +2969,8 @@ function renderCart() {
     qtyInput.addEventListener("change", () => {
       entry.count = Math.max(0, Number(qtyInput.value) || 0);
       qtyInput.value = entry.count;
-      runCalculation();
+      activeFleet().dirty = true;
+      saveState();
     });
 
     const minusBtn = document.createElement("button");
@@ -2606,12 +2979,13 @@ function renderCart() {
     minusBtn.className = "qty-btn";
     // Shift+click zeroes this row out in one step; ctrl+click steps by 10
     // instead of 1. No "fill max" on plus here -- unlike the
-    // capacity-pooled pickers above, a procurement list entry's own
+    // capacity-pooled pickers above, a fleet list entry's own
     // quantity has no ceiling, so ctrl+click on plus just steps by 10 too.
     minusBtn.addEventListener("click", (event) => {
       entry.count = event.shiftKey ? 0 : Math.max(0, entry.count - (event.ctrlKey ? 10 : 1));
       qtyInput.value = entry.count;
-      runCalculation();
+      activeFleet().dirty = true;
+      saveState();
     });
 
     const plusBtn = document.createElement("button");
@@ -2621,43 +2995,49 @@ function renderCart() {
     plusBtn.addEventListener("click", (event) => {
       entry.count += event.ctrlKey ? 10 : 1;
       qtyInput.value = entry.count;
-      runCalculation();
+      activeFleet().dirty = true;
+      saveState();
     });
 
     qtyWrap.appendChild(minusBtn);
     qtyWrap.appendChild(qtyInput);
     qtyWrap.appendChild(plusBtn);
-    qtyTd.appendChild(qtyWrap);
-    tr.appendChild(qtyTd);
+    qtyRow.appendChild(qtyWrap);
 
-    const actionsTd = document.createElement("td");
-
+    // Edit/Remove share this same line as the qty control -- see
+    // .cart-qty-row's own CSS for the flex layout that puts them there.
     const editBtn = document.createElement("button");
-    editBtn.textContent = "Edit";
+    editBtn.textContent = "edit";
     editBtn.className = "edit-btn";
     editBtn.addEventListener("click", () => editCartEntry(index));
-    actionsTd.appendChild(editBtn);
+    qtyRow.appendChild(editBtn);
 
     const removeBtn = document.createElement("button");
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = "x";
+    removeBtn.title = "Remove";
     removeBtn.className = "remove-btn";
     removeBtn.addEventListener("click", () => {
-      cart.splice(index, 1);
+      activeFleet().cart.splice(index, 1);
+      activeFleet().dirty = true;
       if (editingIndex === index) resetShipPicker();
       renderCart();
     });
-    actionsTd.appendChild(removeBtn);
+    qtyRow.appendChild(removeBtn);
 
-    tr.appendChild(actionsTd);
+    shipTd.appendChild(qtyRow);
+    tr.appendChild(shipTd);
+
+    const loadoutTd = document.createElement("td");
+    loadoutTd.className = "cart-loadout";
+    renderLoadoutCell(loadoutTd, entry);
+    tr.appendChild(loadoutTd);
 
     cartBody.appendChild(tr);
   });
-
-  runCalculation();
 }
 
 async function editCartEntry(index) {
-  const entry = cart[index];
+  const entry = activeFleet().cart[index];
   const response = await fetch(`/api/ships/${encodeURIComponent(entry.shipWareId)}/groups`);
   const data = await response.json();
   if (data.error) {
@@ -2699,15 +3079,15 @@ async function editCartEntry(index) {
   crewAmounts = { ...(entry.crewAmounts ?? {}) };
   renderCrewSection();
   shipNoteInput.value = entry.note ?? "";
-  addToCartBtn.textContent = "Update procurement list";
+  setAddToCartBtnLabel("Update Fleet List");
   importedLoadoutWarningsEl.classList.add("hidden");
   shipDetail.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ---- Import Game Loadouts ----
-// Two modals: "Import game loadouts" (reads a player-saved loadouts.xml,
+// Two modals: "Import Game Loadouts" (reads a player-saved loadouts.xml,
 // either by server-side path or an uploaded file, via POST
-// /api/import_loadouts) and "Select game loadout" (picks one of the
+// /api/import_loadouts) and "Select Filter Loadout" (picks one of the
 // successfully-parsed ship loadouts from that import to load into the
 // builder, the same way editCartEntry() loads a saved cart entry). See
 // import_loadouts.py's own module docstring for the schema being parsed
@@ -2715,7 +3095,7 @@ async function editCartEntry(index) {
 
 // The most recent POST /api/import_loadouts response
 // ({ships, failed, total_loadouts, skipped_station_loadouts}), or null
-// before any import has run -- populates the "Select game loadout" modal,
+// before any import has run -- populates the "Select Filter Loadout" modal,
 // see openSelectGameLoadoutModal().
 let importedLoadoutsResult = null;
 
@@ -2790,7 +3170,7 @@ async function runImportLoadouts() {
       `${result.skipped_station_loadouts} station module loadout(s) skipped.`,
     ];
     if (result.failed.length > 0) lines.push(`${result.failed.length} loadout(s) failed to parse.`);
-    if (warningCount > 0) lines.push(`${warningCount} warning(s) across imported ships -- see "Select game loadout".`);
+    if (warningCount > 0) lines.push(`${warningCount} warning(s) across imported ships -- see "Select Filter Loadout".`);
     showImportLoadoutsStatus(lines, false);
   } catch (err) {
     showImportLoadoutsStatus([`Import failed: ${err.message}`], true);
@@ -2852,10 +3232,11 @@ function updateLoadoutManagerBtnStates() {
   exportLoadoutsBtn.disabled = !hasLoadouts;
   clearLoadoutsBtn.disabled = !hasLoadouts;
   updateSelectChassisLoadoutBtnState();
+  saveState();
 }
 
-// Discards the entire imported-loadouts working set (both "Import game
-// loadouts" and "Import raw XML loadout" feed into the same
+// Discards the entire imported-loadouts working set (both "Import Game
+// Loadouts" and "Import Raw XML Loadout" feed into the same
 // importedLoadoutsResult -- there's no way to clear just one source).
 // Confirmed first since this can't be undone short of re-importing.
 function clearImportedLoadouts() {
@@ -2914,7 +3295,7 @@ async function runImportRawXmlLoadout() {
     const lines = [`Added ${result.ships.length} ship loadout(s).`];
     if (result.skipped_station_loadouts > 0) lines.push(`${result.skipped_station_loadouts} station module loadout(s) skipped.`);
     if (result.failed.length > 0) lines.push(`${result.failed.length} loadout(s) failed to parse.`);
-    if (warningCount > 0) lines.push(`${warningCount} warning(s) -- see "Select game loadout".`);
+    if (warningCount > 0) lines.push(`${warningCount} warning(s) -- see "Select Filter Loadout".`);
     showImportRawXmlLoadoutStatus(lines, false);
   } catch (err) {
     showImportRawXmlLoadoutStatus([`Import failed: ${err.message}`], true);
@@ -2927,22 +3308,52 @@ importRawXmlLoadoutBtn.addEventListener("click", openImportRawXmlLoadoutModal);
 importRawXmlLoadoutCancelBtn.addEventListener("click", closeImportRawXmlLoadoutModal);
 importRawXmlLoadoutConfirmBtn.addEventListener("click", runImportRawXmlLoadout);
 
-// Shared by both the "Select game loadout" button (every imported ship)
+// Shared by both the "Select Filter Loadout" button (every imported ship)
 // and the "Select chassis loadout" button next to the loaded ship's name
 // (only loadouts whose shipWareId matches the currently loaded ship) --
 // chassisWareId is omitted for the former, passed for the latter.
 function openSelectGameLoadoutModal(chassisWareId) {
   if (!importedLoadoutsResult) return;
-  const entries = chassisWareId
+  let entries = chassisWareId
     ? importedLoadoutsResult.ships.filter((s) => s.shipWareId === chassisWareId)
     : importedLoadoutsResult.ships;
 
-  selectGameLoadoutModalTitle.textContent = chassisWareId ? `Select ${currentShip.name} Loadout` : "Select Saved Loadout";
+  // Looked up for every entry regardless of chassisWareId -- used below
+  // both for the generic view's filter/sort and (in both views) for each
+  // row's own chassis icon, since an imported-loadout entry only carries
+  // its shipName as plain text, not the icon symbol allShips already has.
+  const shipByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
+
+  // The generic "Select Filter Loadout" button (chassisWareId omitted)
+  // applies the exact same Size/Purpose/Type filters and ship-list
+  // ordering as the picker above it -- a ship-specific "Select <Ship>
+  // Loadout" button (chassisWareId given) is already narrowed to one
+  // ship, so filtering/sorting by ship would be a no-op there anyway,
+  // and skipping it means an out-of-filter ship's own loadouts still stay
+  // reachable from its own button.
+  if (!chassisWareId) {
+    entries = entries
+      .filter((entry) => {
+        const ship = shipByWareId.get(entry.shipWareId);
+        return ship ? shipPassesCurrentFilters(ship) : true;
+      })
+      .slice()
+      .sort((a, b) => {
+        const shipA = shipByWareId.get(a.shipWareId);
+        const shipB = shipByWareId.get(b.shipWareId);
+        const shipCompare = shipA && shipB ? compareShips(shipA, shipB) : 0;
+        return shipCompare !== 0 ? shipCompare : (a.name || "").localeCompare(b.name || "");
+      });
+  }
+
+  selectGameLoadoutModalTitle.textContent = chassisWareId ? `Select ${currentShip.name} Loadout` : "Select Filter Loadout";
   selectGameLoadoutList.innerHTML = "";
 
   if (entries.length === 0) {
     const empty = document.createElement("p");
-    empty.textContent = "No imported loadouts for this ship.";
+    empty.textContent = chassisWareId
+      ? "No imported loadouts for this ship."
+      : "No imported loadouts match the current filters.";
     selectGameLoadoutList.appendChild(empty);
   }
 
@@ -2961,6 +3372,9 @@ function openSelectGameLoadoutModal(chassisWareId) {
     shipSpan.className = "select-game-loadout-row-ship";
     shipSpan.textContent = entry.shipName;
     row.appendChild(shipSpan);
+
+    const ship = shipByWareId.get(entry.shipWareId);
+    if (ship?.icon) row.appendChild(buildIconImg(ship.icon, "ship-icon"));
 
     if (entry.warnings.length > 0) {
       const warnSpan = document.createElement("span");
@@ -2994,7 +3408,7 @@ selectGameLoadoutCancelBtn.addEventListener("click", closeSelectGameLoadoutModal
 // Loads one parsed loadout (see import_loadouts.py's parse_ship_loadout())
 // into the ship builder as a fresh, unsaved configuration -- same restore
 // sequence as editCartEntry(), except editingIndex stays null (this isn't
-// editing an existing cart entry -- "Add to procurement list" will append
+// editing an existing cart entry -- "Add To Fleet List" will append
 // a new one) and the loadout's own name seeds the note field instead of a
 // saved entry's note.
 async function loadImportedGameLoadout(entry) {
@@ -3024,7 +3438,7 @@ async function loadImportedGameLoadout(entry) {
   crewAmounts = { ...entry.crewAmounts };
   renderCrewSection();
   shipNoteInput.value = entry.name ?? "";
-  addToCartBtn.textContent = "Add to procurement list";
+  setAddToCartBtnLabel("Add To Fleet List");
 
   importedLoadoutWarningsEl.innerHTML = "";
   if (entry.warnings.length > 0) {
@@ -3047,11 +3461,12 @@ async function loadImportedGameLoadout(entry) {
   shipDetail.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// Bumped on every runCalculation() call and captured as `token` at the
-// start of each -- a response is only applied if it's still the latest
-// call by the time it arrives, so rapidly changing the procurement list
-// (e.g. mashing a qty +/- button) can't let an older, slower response
-// clobber a newer one on screen.
+// Bumped on every recomputeDirtyFleets() call and captured as `token` at
+// the start of each -- a response is only applied if it's still the latest
+// call by the time it arrives, so rapid back-to-back triggers (e.g.
+// switching straight back into Cost Analysis, or two price-override edits
+// in quick succession) can't let an older, slower response clobber a newer
+// one on screen.
 let calculationToken = 0;
 
 // The Ware Cost List always fetches both grouping modes at once -- "total"
@@ -3062,19 +3477,18 @@ let calculationToken = 0;
 // renderWareCostList()), never a new request.
 let activeWareCostListTab = "total";
 
-// Whether the current render has an "Active List" column to compare saved
-// columns against -- set once per renderWareCostList() call (it's always
-// column 0 when present, since wareCostListColumns() puts it first) and
-// read by appendComparisonCell() below, rather than threading a parameter
-// through every rendering function in the tier -> method -> [category] ->
-// row chain. False whenever the active procurement list is empty (see
-// wareCostListColumns()), in which case saved columns render as plain
-// values with no diff annotation at all -- there's nothing to be a
-// baseline.
-let wareCostListHasBaseline = false;
+// Whether the current render has a baseline column to compare every other
+// fleet against -- set once per renderWareCostList() call and read by
+// appendComparisonCell() below, rather than threading a parameter through
+// every rendering function in the tier -> method -> [category] -> row
+// chain. wareCostListColumns() always sorts the active fleet into column 0,
+// and `fleets` is never empty, so this is unconditionally true today -- kept
+// as its own flag (rather than inlined) since the diff-rendering functions
+// already read it by name.
+let wareCostListHasBaseline = true;
 
 // Resolves to the parsed JSON body, or throws (with the response's own
-// error text) on a non-ok response -- lets runCalculation() below fire
+// error text) on a non-ok response -- lets recomputeDirtyFleets() below fire
 // every summarize()/price_summary combination via Promise.all and handle
 // any one of them failing with a single try/catch, instead of checking
 // .ok on each individually.
@@ -3105,21 +3519,18 @@ function fetchPriceSummaryResult(groupByComponentType, baseBody) {
 // Fetches all four summarize() depth x grouping-mode combinations plus both
 // price_summary grouping modes for one cart + build focus + fallback-method
 // list, returning the exact {total: {...}, component_type: {...}} shape
-// lastWareCostList/savedComparisonColumns[i].wareCostList both use.
-// fallbackMethods null is passed straight through to the API as-is --
-// both /api/summarize and /api/price_summary already treat a null
-// fallback_methods as "use the server's own default" (DEFAULT_FALLBACK_
-// METHODS), same meaning activeFallbackMethods/snapshot.fallbackMethods
-// give it client-side. Shared by runCalculation() (the live Active column,
-// re-run automatically on every cart mutation) and
-// recomputeSavedColumnBuildConfig() (a saved column, re-run only when that
-// column's own build method is explicitly edited) -- the two differ only in
-// which cart/build focus/fallback methods they call this with and where
-// they store the result.
+// every fleet.wareCostList holds. fallbackMethods null is passed straight
+// through to the API as-is -- both /api/summarize and /api/price_summary
+// already treat a null fallback_methods as "use the server's own default"
+// (DEFAULT_FALLBACK_METHODS), same meaning fleet.fallbackMethods gives it
+// client-side. Shared by recomputeDirtyFleets() (called once per dirty
+// fleet) and recomputeFleetBuildConfig() (a single fleet, re-run only when
+// that fleet's own build method is explicitly edited) -- pure function of
+// its three arguments, doesn't know or care which fleet it's for.
 async function computeWareCostList(cartEntries, buildFocus, fallbackMethods) {
   const wares = cartEntries.map((entry) => ({ count: entry.count, wares_list: entry.wares_list }));
   const summarizeBaseBody = { build_focus: buildFocus, fallback_methods: fallbackMethods, verbose: false, wares };
-  const priceBaseBody = { build_focus: buildFocus, fallback_methods: fallbackMethods, wares };
+  const priceBaseBody = { build_focus: buildFocus, fallback_methods: fallbackMethods, wares, price_overrides: priceOverrides };
 
   const [
     totalRawMaterials,
@@ -3155,76 +3566,60 @@ async function computeWareCostList(cartEntries, buildFocus, fallbackMethods) {
   };
 }
 
-// Re-runs the Ware Cost List (see computeWareCostList()) and the Monetary
-// Cost Analysis panel for the Active column, from the current procurement
-// list and its own activeBuildFocus. Called automatically by every
-// procurement-list mutation (see renderCart() and the qty controls within
-// it) and by editing the Active column's build focus (see
-// renderWareCostListHead()), so everything always reflects the cart's
-// current contents without a manual click. Silently hides both panels
-// (rather than alerting) when the cart is empty, since this runs
-// unattended -- an empty cart is a normal, reachable state (e.g. after
-// removing the last entry), not a user error.
-async function runCalculation() {
+// The lazy-recompute core: recomputes computeWareCostList() for every fleet
+// whose .dirty is true (cart edits/removals just set that flag -- see
+// renderCart() -- rather than calling this directly), clears the flag on
+// success, then re-renders the Ware Cost List once. Called from showPage()
+// on navigating into Cost Analysis, from bootstrap() when the page loads
+// directly into Cost Analysis (e.g. a bookmarked #cost-analysis link), and
+// eagerly from the two triggers only reachable from *within* that page
+// already -- price overrides (markAllFleetsDirtyAndRecompute()) and a
+// fleet's own build focus (recomputeFleetBuildConfig() below) -- since
+// "navigate in" will never fire again while already there.
+//
+// Promise.allSettled (not Promise.all) closing over fleet objects (not
+// indices): one fleet's API failure can't blank out another fleet's fresh
+// numbers, and a fleet deleted while its own request is still in flight just
+// silently no-ops when that response lands (writing onto a detached object),
+// rather than corrupting anything by index.
+async function recomputeDirtyFleets() {
   const token = ++calculationToken;
+  const dirtyFleets = fleets.filter((fleet) => fleet.dirty);
 
-  if (cart.length === 0) {
-    lastWareCostList = null;
-    // Still re-rendered (not just hidden outright): any saved comparison
-    // columns are unaffected by the active cart being empty and should
-    // stay visible -- renderWareCostList() itself decides whether the
-    // whole section has anything left to show at all.
-    renderWareCostList();
-    return;
-  }
+  await Promise.allSettled(
+    dirtyFleets.map(async (fleet) => {
+      if (fleet.cart.length === 0) {
+        fleet.wareCostList = null;
+        fleet.dirty = false;
+        return;
+      }
+      try {
+        fleet.wareCostList = await computeWareCostList(fleet.cart, fleet.buildFocus, fleet.fallbackMethods);
+        fleet.dirty = false;
+      } catch (err) {
+        // Left dirty -- retried on the next trigger. fleet.wareCostList
+        // keeps whatever it last successfully held (possibly null).
+        console.error(`Calculation failed for fleet "${fleet.name}": ${err.message}`);
+      }
+    }),
+  );
 
-  let result;
-  try {
-    result = await computeWareCostList(cart, activeBuildFocus, activeFallbackMethods);
-  } catch (err) {
-    if (token !== calculationToken) return; // superseded by a newer call
-    alert(`Calculation failed: ${err.message}`);
-    return;
-  }
   if (token !== calculationToken) return; // superseded by a newer call
-
-  lastWareCostList = result;
-  renderWareCostList();
+  renderWareCostList(); // always -- e.g. a fleet switch with nothing dirty still needs the baseline reorder
 }
 
-// Re-runs the Active column's own calculation with a newly edited build
-// method (see the Build Method modal's Save handler below). Just a thin
-// wrapper around setting the two module-level variables + runCalculation()
-// -- factored out mainly so the modal's Save handler doesn't need to know
-// which column type it's touching beyond a single if/else.
-function recomputeActiveBuildConfig(buildFocus, fallbackMethods) {
-  activeBuildFocus = buildFocus;
-  activeFallbackMethods = fallbackMethods;
-  runCalculation();
-}
-
-// Re-runs one saved comparison column's own calculation with a newly edited
-// build method, updating its stored buildFocus/fallbackMethods/wareCostList
-// in place. Unlike runCalculation() (re-run automatically on every cart
-// mutation, guarded by calculationToken against overlapping calls), this
-// only ever fires from one deliberate action -- editing that column's own
-// build method -- so no race-guarding is needed.
-async function recomputeSavedColumnBuildConfig(index, buildFocus, fallbackMethods) {
-  const snapshot = savedComparisonColumns[index];
-  if (!snapshot) return;
-
-  let result;
-  try {
-    result = await computeWareCostList(snapshot.cart, buildFocus, fallbackMethods);
-  } catch (err) {
-    alert(`Calculation failed: ${err.message}`);
-    return;
-  }
-
-  snapshot.buildFocus = buildFocus;
-  snapshot.fallbackMethods = fallbackMethods;
-  snapshot.wareCostList = result;
-  renderWareCostList();
+// Re-runs one fleet's own calculation with a newly edited build method (see
+// the Build Method modal's Save handler below), then recomputes it
+// immediately -- this only ever fires from one deliberate action (editing
+// that fleet's own build method, from within the Cost Analysis page, where
+// "navigate in" won't happen again), so there's nothing to defer.
+function recomputeFleetBuildConfig(fleetIndex, buildFocus, fallbackMethods) {
+  const fleet = fleets[fleetIndex];
+  if (!fleet) return;
+  fleet.buildFocus = buildFocus;
+  fleet.fallbackMethods = fallbackMethods;
+  fleet.dirty = true;
+  recomputeDirtyFleets();
 }
 
 // Opens the Build Method modal for `column` (one of wareCostListColumns()'s
@@ -3342,12 +3737,7 @@ buildMethodModalSaveBtn.addEventListener("click", () => {
 
   const column = buildMethodModalTarget;
   closeBuildMethodModal();
-
-  if (column.removable) {
-    recomputeSavedColumnBuildConfig(column.index, buildFocus, fallbackMethods);
-  } else {
-    recomputeActiveBuildConfig(buildFocus, fallbackMethods);
-  }
+  recomputeFleetBuildConfig(column.fleetIndex, buildFocus, fallbackMethods);
 });
 
 // Tab buttons are static markup (not rebuilt per render), so wiring them
@@ -3505,7 +3895,7 @@ function appendWarePartRows(partsByColumn) {
 // "|"-joined and increasingly specific -- a category's key embeds its tier
 // ("raw_materials|engine") -- so collapsing one section never needs to
 // know or care about any other. Shared across both tabs *and* every column
-// (neither the "total"/"component_type" split nor which procurement list a
+// (neither the "total"/"component_type" split nor which fleet list a
 // column represents appears in the key), since a tier/category means the
 // same thing regardless of which column happens to have data for it.
 const collapsedWareCostListSections = new Set();
@@ -3604,9 +3994,9 @@ function appendWareCostListTier(tierKey, heading, columns) {
   }
 
   // Every column computes group_by_component_type the same way for a
-  // given tab (see runCalculation()/saveForComparisonBtn), so whichever
-  // column actually has data decides whether it's grouped -- they never
-  // legitimately disagree.
+  // given tab (see recomputeDirtyFleets()), so whichever column actually
+  // has data decides whether it's grouped -- they never legitimately
+  // disagree.
   const grouped = isGroupedParts(sampleData.parts);
 
   if (grouped) {
@@ -3631,51 +4021,24 @@ function appendWareCostListTier(tierKey, heading, columns) {
   }
 }
 
-// One column per procurement list currently shown in the Ware Cost List --
-// the live "Active List" first (tracks the current cart and its most
-// recent calculation; omitted entirely while the cart is empty), then one
-// per snapshot saved via "Save for comparison", in the order they were
-// saved. `removable` is false only for the active column, which can't be
-// removed this way (clear the procurement list instead).
+// One column per fleet in `fleets`, active fleet always sorted first (see
+// module comment on wareCostListHasBaseline for why: the diff/highlight
+// machinery elsewhere hardcodes "column 0 is the baseline", so sorting here
+// is simpler than teaching that machinery about activeFleetIndex directly).
 function wareCostListColumns() {
-  const columns = [];
-  if (lastWareCostList) {
-    columns.push({
-      label: "Active List",
-      data: lastWareCostList,
-      removable: false,
-      buildFocus: activeBuildFocus,
-      fallbackMethods: activeFallbackMethods,
-    });
-  }
-  savedComparisonColumns.forEach((snapshot, index) => {
-    columns.push({
-      label: snapshot.name,
-      data: snapshot.wareCostList,
-      removable: true,
-      index,
-      buildFocus: snapshot.buildFocus,
-      fallbackMethods: snapshot.fallbackMethods,
-    });
-  });
-  return columns;
+  const order = [activeFleetIndex, ...fleets.map((_, i) => i).filter((i) => i !== activeFleetIndex)];
+  return order.map((fleetIndex) => ({ data: fleets[fleetIndex].wareCostList, fleetIndex }));
 }
 
-function removeComparisonColumn(index) {
-  savedComparisonColumns.splice(index, 1);
-  renderWareCostList();
-  updateSaveForComparisonWarning(); // the removed column may have been the one causing it
-}
-
-// The two-row <thead>: a "List Name" row naming each column (each with its
-// own "Build Focus: ..." button underneath -- see openBuildMethodModal() --
-// plus a remove button on every saved one, none on "Active List"), then a
-// "Ware"/"Amount" x N column-header row underneath -- except a saved
-// column's own "Amount" cell is instead a "Set Active" button (see
-// setActiveFromComparisonColumn() above), since that's the more useful
-// thing to put there than a repeated, static label. Rebuilt on every
-// render since the column count itself can change (adding/removing a
-// saved comparison snapshot).
+// The two-row <thead>: a "List Name" row with one column per fleet, each
+// rendered via the exact same buildFleetTabButton() the Fleet Planner's
+// own tab bar uses (same ship icon/color/box, same click-to-switch --
+// setActiveFleet()), plus its Build Focus line (see openBuildMethodModal())
+// since that's otherwise only ever reachable from here; then a plain
+// "Ware"/"Amount" x N column-header row underneath -- switching which
+// fleet is active is entirely the name row's job now, so this row no
+// longer needs its own "Set Active" button. Rebuilt on every render since
+// the column count/order can change.
 function renderWareCostListHead(columns) {
   wareCostListThead.innerHTML = "";
 
@@ -3686,37 +4049,7 @@ function renderWareCostListHead(columns) {
   nameRow.appendChild(nameLabelTh);
   for (const column of columns) {
     const th = document.createElement("th");
-
-    const nameDiv = document.createElement("div");
-    nameDiv.append(column.label);
-    th.appendChild(nameDiv);
-
-    // Opens the Build Method modal (see openBuildMethodModal()) to edit
-    // this column's own build focus + fallback-methods list. The modal's
-    // own Save handler decides whether to recalculate the Active column
-    // right away (recomputeActiveBuildConfig()) or just this saved
-    // snapshot (recomputeSavedColumnBuildConfig()), based on column.removable.
-    const buildFocusBtn = document.createElement("button");
-    buildFocusBtn.type = "button";
-    buildFocusBtn.className = "ware-cost-list-build-focus-btn";
-    buildFocusBtn.appendChild(document.createTextNode("Build Focus: "));
-    const buildFocusNameSpan = document.createElement("span");
-    applyFactionTextColor(buildFocusNameSpan, BUILD_METHOD_TO_FACTION[column.buildFocus]);
-    buildFocusNameSpan.textContent = column.buildFocus ?? "none";
-    buildFocusBtn.appendChild(buildFocusNameSpan);
-    buildFocusBtn.title = "Set this list's build method";
-    buildFocusBtn.addEventListener("click", () => openBuildMethodModal(column));
-    th.appendChild(buildFocusBtn);
-
-    if (column.removable) {
-      const removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = "ware-cost-list-remove-column-btn";
-      removeBtn.textContent = "×";
-      removeBtn.title = "Remove this saved comparison column";
-      removeBtn.addEventListener("click", () => removeComparisonColumn(column.index));
-      th.appendChild(removeBtn);
-    }
+    th.appendChild(buildFleetTabButton(fleets[column.fleetIndex], column.fleetIndex, { showBuildFocus: true }));
     nameRow.appendChild(th);
   }
   wareCostListThead.appendChild(nameRow);
@@ -3727,16 +4060,7 @@ function renderWareCostListHead(columns) {
   columnHeaderRow.appendChild(wareTh);
   for (const column of columns) {
     const th = document.createElement("th");
-    if (column.removable) {
-      const setActiveBtn = document.createElement("button");
-      setActiveBtn.type = "button";
-      setActiveBtn.className = "ware-cost-list-set-active-btn";
-      setActiveBtn.textContent = "Set Active";
-      setActiveBtn.addEventListener("click", () => setActiveFromComparisonColumn(column.index));
-      th.appendChild(setActiveBtn);
-    } else {
-      th.textContent = "Amount";
-    }
+    th.textContent = "Amount";
     columnHeaderRow.appendChild(th);
   }
   wareCostListThead.appendChild(columnHeaderRow);
@@ -3947,21 +4271,17 @@ function appendMoneyTier(columns) {
 // RAW_MATERIALS_SEARCH_DEPTH/PRODUCTION_WARES_SEARCH_DEPTH) -- production
 // wares (the shallow, "what the shipyard directly consumes" view) first,
 // then raw materials (the deepest, "build everything from scratch" view)
-// -- across every column currently shown (the active procurement list plus
-// any saved comparison snapshots). Reads lastWareCostList/
-// savedComparisonColumns/activeWareCostListTab directly rather than taking
-// parameters, since it's invoked from several unrelated places (a fresh
-// calculation, a tab switch, a collapse toggle, adding or removing a
-// comparison column) that all just want "redraw with whatever the current
-// state is".
+// -- one column per fleet in `fleets`. Reads wareCostListColumns()/
+// activeWareCostListTab directly rather than taking parameters, since it's
+// invoked from several unrelated places (a fresh calculation, a tab switch,
+// a collapse toggle, switching/deleting a fleet) that all just want
+// "redraw with whatever the current state is".
 function renderWareCostList() {
-  const columns = wareCostListColumns();
-  if (columns.length === 0) {
-    wareCostListSection.classList.add("hidden");
-    return;
-  }
+  // renderFleetListTabs() is not called here -- renderCart() already keeps
+  // the tab bar in sync on every fleet mutation/switch; calling it again
+  // here would just be redundant work on every recompute.
+  const columns = wareCostListColumns(); // always >= 1 -- `fleets` is never empty
   wareCostListSection.classList.remove("hidden");
-  wareCostListHasBaseline = !columns[0].removable;
 
   renderWareCostListHead(columns);
   wareCostListBody.innerHTML = "";
@@ -3973,132 +4293,222 @@ function renderWareCostList() {
     columns,
   );
   appendWareCostListTier("raw_materials", "Raw Materials (build everything from scratch)", columns);
+  saveState();
 }
 
-// --- Ware cost list comparison --------------------------------------------
-// Snapshots taken via "Save for comparison" -- each is a fully independent,
-// frozen copy of the procurement list (cart) and its computed results
-// (lastWareCostList) at the moment it was saved, so that column never
-// changes when the active procurement list is edited afterward. Deep-
-// copied via a JSON round-trip since both cart and lastWareCostList are
-// plain data (no functions/DOM references) -- simpler than a hand-written
-// structural clone. Only lives in memory for now (no file save/load, per
-// the "Save for comparison" button replacing the old ware-cost-list
-// save/load buttons entirely).
-let savedComparisonColumns = [];
+// --- Fleet lists / tab bar --------------------------------------------
+// Display-only fallback for a fleet's tab/column label when its name is
+// blank -- never persisted as a real name, just labels the UI.
+const DEFAULT_NEW_FLEET_LABEL = "New Fleet";
 
-// Stand-in for a snapshot taken with no procurement list name set --
-// stored literally in snapshot.name (rather than leaving it "") so the
-// List Name row always has something to display; setActiveFromComparisonColumn()
-// below checks for this exact value to know when to restore an *empty*
-// cartNameInput instead of this placeholder text.
-const UNNAMED_PROCUREMENT_LIST_LABEL = "(unnamed procurement list)";
-
-// Live warning next to "Save for comparison" -- shown whenever the current
-// procurement list's name (resolved the same way saveForComparisonBtn's
-// handler resolves it) matches an *existing* saved comparison column's
-// name, since clicking Save in that state overwrites that column instead
-// of adding a new one. Re-checked on every rename (cartNameInput's "input"
-// event below) and wherever else the set of saved columns or the active
-// name can change: after saving, removing a column, or "Set Active".
-function updateSaveForComparisonWarning() {
-  const name = cartNameInput.value.trim() || UNNAMED_PROCUREMENT_LIST_LABEL;
-  const willOverwrite = savedComparisonColumns.some((snapshot) => snapshot.name === name);
-  saveForComparisonWarning.textContent = willOverwrite ? "warning, this will overwrite a saved list." : "";
+// Picks "New Fleet", "New Fleet 2", "New Fleet 3", ... -- the first label
+// not already used by an existing fleet, so two fleets created back-to-back
+// via "+" are always visually distinguishable in the tab bar.
+function nextNewFleetName() {
+  const existingNames = new Set(fleets.map((fleet) => fleet.name.trim()));
+  if (!existingNames.has(DEFAULT_NEW_FLEET_LABEL)) return DEFAULT_NEW_FLEET_LABEL;
+  let n = 2;
+  while (existingNames.has(`${DEFAULT_NEW_FLEET_LABEL} ${n}`)) n += 1;
+  return `${DEFAULT_NEW_FLEET_LABEL} ${n}`;
 }
-cartNameInput.addEventListener("input", updateSaveForComparisonWarning);
 
-saveForComparisonBtn.addEventListener("click", () => {
-  if (!lastWareCostList) {
-    alert("No ware cost list to save yet -- add something to the procurement list first.");
-    return;
-  }
-
-  const name = cartNameInput.value.trim() || UNNAMED_PROCUREMENT_LIST_LABEL;
-  const snapshot = {
-    name,
-    cart: JSON.parse(JSON.stringify(cart)),
-    wareCostList: JSON.parse(JSON.stringify(lastWareCostList)),
-    buildFocus: activeBuildFocus,
-    fallbackMethods: activeFallbackMethods,
-  };
-
-  // Same name as an existing saved column -> update it in place (keeping
-  // its column position) rather than appending a duplicate -- this is the
-  // "list updating" behavior updateSaveForComparisonWarning() above warns
-  // about before it happens.
-  const existingIndex = savedComparisonColumns.findIndex((existing) => existing.name === name);
-  if (existingIndex === -1) {
-    savedComparisonColumns.push(snapshot);
-  } else {
-    savedComparisonColumns[existingIndex] = snapshot;
-  }
-
-  renderWareCostList();
-  updateSaveForComparisonWarning();
-});
-
-// "Set Active" (see renderWareCostListHead()) -- loads a saved comparison
-// snapshot's own procurement list back into the active cart, overwriting
-// whatever's currently there. Same confirmation and restore behavior as
-// Upload procurement list (loadCartInput's handler below): confirms only
-// when there's something to actually lose, restores the list name and
-// build focus, then lets renderCart() trigger a fresh runCalculation() for
-// the newly active list. The snapshot itself is left untouched in
-// savedComparisonColumns -- this doesn't consume or remove it, so the
-// column it came from is still there to compare against afterward.
-function setActiveFromComparisonColumn(index) {
-  const snapshot = savedComparisonColumns[index];
-  if (!snapshot) return;
-
-  if (cart.length > 0 && !confirm("Loading will replace your current procurement list. Continue?")) {
-    return;
-  }
-
-  cart = JSON.parse(JSON.stringify(snapshot.cart));
-  cartNameInput.value = snapshot.name === UNNAMED_PROCUREMENT_LIST_LABEL ? "" : snapshot.name;
-  // Setting .value programmatically doesn't fire an "input" event, so the
-  // listener that normally keeps the overwrite warning in sync never runs
-  // for this -- update it explicitly (the restored name is now, by
-  // definition, this same snapshot's own name, so the warning is expected
-  // to come on: saving again would overwrite the column just loaded from).
-  updateSaveForComparisonWarning();
-  activeBuildFocus = snapshot.buildFocus ?? null;
-  activeFallbackMethods = snapshot.fallbackMethods ?? null;
-
+// Switches which fleet is active -- no confirmation, no copying, since
+// every fleet is always live and directly editable. resetShipPicker() is
+// required here (not optional): editingIndex numerically indexes the
+// previously active fleet's cart, and would otherwise silently corrupt an
+// unrelated entry in the newly active fleet at the same index.
+function setActiveFleet(fleetIndex) {
+  if (fleetIndex === activeFleetIndex) return;
+  activeFleetIndex = fleetIndex;
   resetShipPicker();
   renderCart();
+  renderWareCostList();
+}
+
+// Deletes a fleet outright -- real data loss, unlike switching, so this
+// keeps a confirm() (same category as clearImportedLoadouts()'s). Reachable
+// both from the tab bar and the Ware Cost List's own column header.
+function deleteFleet(fleetIndex) {
+  if (fleets.length <= 1) return;
+  const fleet = fleets[fleetIndex];
+  if (!confirm(`Delete fleet list "${fleet.name.trim() || DEFAULT_NEW_FLEET_LABEL}"? This cannot be undone.`)) return;
+
+  fleets.splice(fleetIndex, 1);
+  if (fleetIndex === activeFleetIndex) {
+    activeFleetIndex = Math.min(fleetIndex, fleets.length - 1);
+    resetShipPicker();
+  } else if (fleetIndex < activeFleetIndex) {
+    activeFleetIndex -= 1;
+  }
+  renderCart();
+  renderWareCostList();
+}
+
+cartNameInput.addEventListener("input", () => {
+  activeFleet().name = cartNameInput.value;
+  renderFleetListTabs();
+  saveState();
+});
+
+// One bracket per corner around the active tab's ship icon -- see
+// buildFleetTabShipIcon(). All 4 corners share one source image
+// (selection_box_corner.png, generate_nav_icons.py's crop of just one
+// corner of the game's own selection frame) since that source is
+// perfectly symmetric under rotation; each corner just rotates it into
+// place via its own CSS class.
+const SELECTION_BOX_CORNER_CLASSES = [
+  "fleet-list-tab-selection-corner top-left",
+  "fleet-list-tab-selection-corner top-right",
+  "fleet-list-tab-selection-corner bottom-right",
+  "fleet-list-tab-selection-corner bottom-left",
+];
+
+// A tab's own leading ship icon -- the fleet's first cart entry's ship
+// class, tinted the game's own "faction_player" green (see
+// generate_nav_icons.py's PLAYER_GREEN/PLAYER_GREEN_HIGHLIGHT), matching
+// how the map colors a player-owned icon. The active fleet's tab gets the
+// brighter "currently here" tint plus 4 corner brackets (the game's own
+// "selected map item" indicator, from widget/bordersquare.gz -- rendered
+// in-game as 4 floating corner brackets, not a solid connected outline, so
+// that's what's reproduced here too) -- every other tab just gets the
+// plain tint, no brackets.
+function buildFleetTabShipIcon(icon, isActive) {
+  const wrap = document.createElement("span");
+  wrap.className = "fleet-list-tab-ship-icon-wrap";
+
+  if (isActive) {
+    for (const cornerClass of SELECTION_BOX_CORNER_CLASSES) {
+      const corner = document.createElement("img");
+      corner.src = "/images/nav_icons/selection_box_corner.png";
+      corner.alt = "";
+      corner.className = cornerClass;
+      wrap.appendChild(corner);
+    }
+  }
+
+  const img = document.createElement("img");
+  img.src = `/images/nav_icons/${isActive ? "player_location" : "fleet_tab"}/${icon}.png`;
+  img.alt = "";
+  img.className = "fleet-list-tab-ship-icon";
+  wrap.appendChild(img);
+
+  return wrap;
+}
+
+// One fleet's own tab button -- ship icon (see buildFleetTabShipIcon()),
+// name, an optional Build Focus line underneath the name (see
+// showBuildFocus below), and a delete "×" (unless only one fleet remains).
+// Clicking anywhere on the button switches to that fleet via
+// setActiveFleet(); the two sub-controls (Build Focus, "×") each stop that
+// click from bubbling so they act independently of the tab-switch. Shared
+// by both renderFleetListTabs() (the Fleet Planner's own tab bar) and
+// renderWareCostListHead() (the Ware Cost List's column headers) so a
+// fleet looks and behaves identically -- same icon/color/box/click-to-
+// switch -- in both places; the Ware Cost List is the only one of the two
+// that needs the Build Focus line, since that's the only place it's
+// otherwise ever set (see openBuildMethodModal()).
+function buildFleetTabButton(fleet, fleetIndex, { showBuildFocus = false } = {}) {
+  const isActive = fleetIndex === activeFleetIndex;
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.className = isActive ? "fleet-list-tab-btn active" : "fleet-list-tab-btn";
+  tab.addEventListener("click", () => setActiveFleet(fleetIndex));
+
+  const firstShipIcon = fleet.cart[0]?.shipIcon;
+  if (firstShipIcon) tab.appendChild(buildFleetTabShipIcon(firstShipIcon, isActive));
+
+  const nameStack = document.createElement("span");
+  nameStack.className = "fleet-list-tab-name-stack";
+  nameStack.appendChild(document.createTextNode(fleet.name.trim() || DEFAULT_NEW_FLEET_LABEL));
+
+  if (showBuildFocus) {
+    const buildFocusBtn = document.createElement("button");
+    buildFocusBtn.type = "button";
+    buildFocusBtn.className = "ware-cost-list-build-focus-btn";
+    buildFocusBtn.appendChild(document.createTextNode("Build Focus: "));
+    const buildFocusNameSpan = document.createElement("span");
+    applyFactionTextColor(buildFocusNameSpan, BUILD_METHOD_TO_FACTION[fleet.buildFocus]);
+    buildFocusNameSpan.textContent = fleet.buildFocus ?? "none";
+    buildFocusBtn.appendChild(buildFocusNameSpan);
+    buildFocusBtn.title = "Set this list's build method";
+    buildFocusBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openBuildMethodModal({ fleetIndex, buildFocus: fleet.buildFocus, fallbackMethods: fleet.fallbackMethods });
+    });
+    nameStack.appendChild(buildFocusBtn);
+  }
+  tab.appendChild(nameStack);
+
+  if (fleets.length > 1) {
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "fleet-list-tab-remove-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Delete this fleet list";
+    removeBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteFleet(fleetIndex);
+    });
+    tab.appendChild(removeBtn);
+  }
+
+  return tab;
+}
+
+// The Fleet Lists section's own tab bar (styled like the top page nav --
+// see .fleet-list-tabs/.fleet-list-tab-btn) -- one tab per fleet in
+// `fleets`, in order (see buildFleetTabButton()), plus a trailing "+" to
+// create a new one.
+function renderFleetListTabs() {
+  fleetListTabsEl.innerHTML = "";
+
+  fleets.forEach((fleet, index) => {
+    fleetListTabsEl.appendChild(buildFleetTabButton(fleet, index));
+  });
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "fleet-list-tab-add-btn";
+  addBtn.textContent = "+";
+  addBtn.title = "New fleet list";
+  addBtn.addEventListener("click", () => {
+    fleets.push(makeFleet(nextNewFleetName()));
+    activeFleetIndex = fleets.length - 1;
+    resetShipPicker();
+    renderCart();
+  });
+  fleetListTabsEl.appendChild(addBtn);
 }
 
 // --- Analysis download / upload -------------------------------------------
-// Unlike "Download procurement list…" (summarize_production.py's CLI input
-// shape, for portability outside this app) and "Save for comparison" (an
-// in-memory-only snapshot), this captures the *entire* comparison table's
-// state -- the active procurement list and every saved comparison column
-// -- as one file, so it can be closed and reopened later with nothing lost.
-// It intentionally serializes this app's own internal `cart` array shape
-// directly (the same {shipWareId, wares_list, selections, ...} entries
-// savedComparisonColumns already stores), not the CLI-compatible
-// {count, wares_list} shape -- there's no need for CLI portability here,
-// and doing so avoids reconstructCartEntry()'s lossy re-derivation
-// (ambiguous group matching, etc.) entirely: restoring the active cart is
-// just as direct a deep copy as restoring a saved column already is.
+// Unlike "Download Fleet List…" below (summarize_production.py's CLI input
+// shape, for portability outside this app, one fleet at a time), this
+// captures every fleet in `fleets` as one file, so the whole comparison
+// table can be closed and reopened later with nothing lost. It
+// intentionally serializes this app's own internal `cart` array shape
+// directly (the same {shipWareId, wares_list, selections, ...} entries),
+// not the CLI-compatible {count, wares_list} shape -- there's no need for
+// CLI portability here, and doing so avoids reconstructCartEntry()'s lossy
+// re-derivation (ambiguous group matching, etc.) entirely.
+//
+// Deliberately excludes each fleet's cached wareCostList/dirty -- those are
+// a cache, not source of truth -- so every restored fleet comes back
+// dirty: true and recomputes fresh the next time Cost Analysis is visited.
 
 downloadAnalysisBtn.addEventListener("click", () => {
-  if (cart.length === 0 && savedComparisonColumns.length === 0) {
-    alert("Nothing to download -- the procurement list is empty and there are no saved comparison lists.");
+  if (fleets.every((fleet) => fleet.cart.length === 0)) {
+    alert("Nothing to download -- every fleet list is empty.");
     return;
   }
 
-  const cartName = cartNameInput.value.trim();
   const analysis = {
-    active: {
-      cart_name: cartName || null,
-      build_focus: activeBuildFocus,
-      fallback_methods: activeFallbackMethods,
-      cart: JSON.parse(JSON.stringify(cart)),
-    },
-    saved_columns: JSON.parse(JSON.stringify(savedComparisonColumns)),
+    fleets: fleets.map((fleet) => ({
+      name: fleet.name,
+      cart: JSON.parse(JSON.stringify(fleet.cart)),
+      build_focus: fleet.buildFocus,
+      fallback_methods: fleet.fallbackMethods,
+    })),
+    active_fleet_index: activeFleetIndex,
   };
 
   const blob = new Blob([JSON.stringify(analysis, null, 2)], { type: "application/json" });
@@ -4106,11 +4516,10 @@ downloadAnalysisBtn.addEventListener("click", () => {
   const link = document.createElement("a");
   link.href = url;
   // The dedicated analysis-file-name-input, when set, always wins over the
-  // procurement list's own name -- it exists specifically so this
-  // download's filename can differ from (and outlive renames of) the
-  // active procurement list.
+  // active fleet's own name -- it exists specifically so this
+  // download's filename can differ from (and outlive renames of) that fleet.
   const fileNameOverride = analysisFileNameInput.value.trim();
-  const baseFileName = fileNameOverride || cartName || "x4_analysis";
+  const baseFileName = fileNameOverride || activeFleet().name.trim() || "x4_analysis";
   link.download = `${baseFileName.replace(/[^a-z0-9_-]+/gi, "_")}.json`;
   document.body.appendChild(link);
   link.click();
@@ -4131,35 +4540,33 @@ uploadAnalysisInput.addEventListener("change", async (event) => {
     return;
   }
 
-  if (!data.active || !Array.isArray(data.active.cart) || !Array.isArray(data.saved_columns)) {
-    alert(
-      'This doesn\'t look like a valid analysis file (missing "active.cart"/"saved_columns" arrays).',
-    );
+  if (!Array.isArray(data.fleets) || data.fleets.some((fleet) => !Array.isArray(fleet.cart))) {
+    alert('This doesn\'t look like a valid analysis file (missing a "fleets" array of {cart, ...} entries).');
     event.target.value = "";
     return;
   }
 
   if (
-    (cart.length > 0 || savedComparisonColumns.length > 0) &&
-    !confirm("Loading will replace your current procurement list and all saved comparison lists. Continue?")
+    fleets.some((fleet) => fleet.cart.length > 0) &&
+    !confirm("Loading will replace all of your current fleet lists. Continue?")
   ) {
     event.target.value = "";
     return;
   }
 
-  cart = JSON.parse(JSON.stringify(data.active.cart));
-  cartNameInput.value = data.active.cart_name || "";
-  activeBuildFocus = data.active.build_focus ?? null;
-  activeFallbackMethods = data.active.fallback_methods ?? null;
-  savedComparisonColumns = JSON.parse(JSON.stringify(data.saved_columns));
-
-  // Setting .value programmatically doesn't fire an "input" event, so the
-  // listener that normally keeps the overwrite warning in sync never runs
-  // for this -- update it explicitly.
-  updateSaveForComparisonWarning();
+  fleets = data.fleets.map((fleet) => ({
+    name: fleet.name || "",
+    cart: JSON.parse(JSON.stringify(fleet.cart)),
+    buildFocus: fleet.build_focus ?? null,
+    fallbackMethods: fleet.fallback_methods ?? null,
+    wareCostList: null,
+    dirty: true,
+  }));
+  if (fleets.length === 0) fleets = [makeFleet()];
+  activeFleetIndex = Math.min(Math.max(data.active_fleet_index ?? 0, 0), fleets.length - 1);
 
   resetShipPicker();
-  renderCart(); // triggers a fresh runCalculation() for the restored active list
+  renderCart();
   event.target.value = ""; // allow re-selecting the same file later
 });
 
@@ -4175,8 +4582,8 @@ uploadAnalysisInput.addEventListener("change", async (event) => {
 // saved value is just that same fixed depth, purely for CLI compatibility.
 
 saveCartBtn.addEventListener("click", () => {
-  if (cart.length === 0) {
-    alert("Procurement list is empty -- nothing to download.");
+  if (activeFleet().cart.length === 0) {
+    alert("Fleet list is empty -- nothing to download.");
     return;
   }
 
@@ -4184,11 +4591,11 @@ saveCartBtn.addEventListener("click", () => {
 
   const body = {
     cart_name: cartName || null,
-    build_focus: activeBuildFocus,
+    build_focus: activeFleet().buildFocus,
     // Unlike cart_name/note, fallback_methods is a field
     // summarize_production.py's CLI genuinely already reads (see this
     // module's own docstring) -- not an extra/ignored key.
-    fallback_methods: activeFallbackMethods,
+    fallback_methods: activeFleet().fallbackMethods,
     search_depth: RAW_MATERIALS_SEARCH_DEPTH,
     verbose: true,
     // note is extra (summarize_production.py's CLI ignores unknown keys,
@@ -4196,7 +4603,7 @@ saveCartBtn.addEventListener("click", () => {
     // same file (loadCartInput's handler, via reconstructCartEntry())
     // restores it too. Omitted entirely rather than sent as "" when unset,
     // for a cleaner file.
-    wares: cart.map((entry) => ({ count: entry.count, wares_list: entry.wares_list, note: entry.note || undefined })),
+    wares: activeFleet().cart.map((entry) => ({ count: entry.count, wares_list: entry.wares_list, note: entry.note || undefined })),
   };
 
   const blob = new Blob([JSON.stringify(body, null, 2)], { type: "application/json" });
@@ -4246,7 +4653,7 @@ async function reconstructCartEntry(config) {
   if (!shipData) {
     return {
       shipWareId: null,
-      shipName: "(unrecognized procurement list entry)",
+      shipName: "(unrecognized fleet list entry)",
       shipIcon: null,
       missingRequiredComponents: [],
       note: config.note || "",
@@ -4383,23 +4790,24 @@ loadCartInput.addEventListener("change", async (event) => {
   }
 
   if (!Array.isArray(data.wares)) {
-    alert("This doesn't look like a valid procurement list file (missing a \"wares\" array).");
+    alert("This doesn't look like a valid fleet list file (missing a \"wares\" array).");
     event.target.value = "";
     return;
   }
 
-  if (cart.length > 0 && !confirm("Loading will replace your current procurement list. Continue?")) {
+  const activeName = activeFleet().name.trim() || DEFAULT_NEW_FLEET_LABEL;
+  if (
+    activeFleet().cart.length > 0 &&
+    !confirm(`Loading will replace the active fleet's list ("${activeName}"). Continue?`)
+  ) {
     event.target.value = "";
     return;
   }
 
-  cartNameInput.value = data.cart_name || "";
-  // Setting .value programmatically doesn't fire an "input" event, so the
-  // listener that normally keeps the overwrite warning in sync never runs
-  // for this -- update it explicitly.
-  updateSaveForComparisonWarning();
-  activeBuildFocus = data.build_focus ?? null;
-  activeFallbackMethods = data.fallback_methods ?? null;
+  activeFleet().name = data.cart_name || "";
+  cartNameInput.value = activeFleet().name;
+  activeFleet().buildFocus = data.build_focus ?? null;
+  activeFleet().fallbackMethods = data.fallback_methods ?? null;
   // A loaded file's own "search_depth"/"group_by_component_type" (if any --
   // old saves, or a CLI input file) are intentionally ignored: there's no
   // UI control for either any more, the Ware Cost List always shows both
@@ -4409,7 +4817,8 @@ loadCartInput.addEventListener("change", async (event) => {
   for (const config of data.wares) {
     newCart.push(await reconstructCartEntry(config));
   }
-  cart = newCart;
+  activeFleet().cart = newCart;
+  activeFleet().dirty = true;
 
   resetShipPicker();
   renderCart();
@@ -4433,11 +4842,194 @@ async function applyRemoteModeUI() {
   }
 }
 
-loadShips();
-loadMissiles();
-loadDrones();
-loadDeployables();
-loadCountermeasures();
-loadCrew();
-loadBuildMethods();
+// The nav bar's small "you are here" marker (see generate_nav_icons.py) --
+// ship_s_fighter_01 (a small fighter) when no ship is loaded, matching the
+// map's own default. Updates to the currently loaded ship's own icon in
+// renderShipDetail() (every ship-load path funnels through there --
+// Load button, Select Filter/<Ship> Loadout, editing a cart entry -- see
+// that function's own callers), and reverts here in resetShipPicker()
+// (both Clear buttons, plus every other place that resets the builder).
+const DEFAULT_PLAYER_LOCATION_ICON = "ship_s_fighter_01";
+
+function updatePlayerLocationMarker(iconName) {
+  const src = `/images/nav_icons/player_location/${iconName || DEFAULT_PLAYER_LOCATION_ICON}.png`;
+  for (const img of document.querySelectorAll(".main-nav-player-marker")) {
+    img.src = src;
+  }
+}
+
+// ---- Page navigation (Fleet Planner / Cost Analysis / About) ----
+// Client-side only -- switching pages just toggles which #page-<id> div is
+// visible, no navigation/reload involved, so fleets/currentShip/
+// priceOverrides etc. all stay exactly as they were.
+// location.hash still updates so a page is linkable/bookmarkable and the
+// browser's own back/forward buttons work.
+const PAGE_IDS = ["fleet-planner", "cost-analysis", "about"];
+
+function showPage(pageId) {
+  if (!PAGE_IDS.includes(pageId)) pageId = PAGE_IDS[0];
+  for (const id of PAGE_IDS) {
+    document.getElementById(`page-${id}`).classList.toggle("hidden", id !== pageId);
+  }
+  for (const btn of document.querySelectorAll(".main-nav-btn")) {
+    btn.classList.toggle("active", btn.dataset.page === pageId);
+  }
+  if (location.hash !== `#${pageId}`) location.hash = pageId;
+  // Navigating into Cost Analysis is the main lazy-recompute trigger (see
+  // recomputeDirtyFleets()) -- edits made from *within* that page (price
+  // overrides, per-fleet build focus) recompute eagerly instead, since
+  // "navigate in" never fires again while already there. Does NOT cover the
+  // very first page shown at load -- see bootstrap()'s own trailing check,
+  // since this runs before fleets are ever restored from localStorage.
+  if (pageId === "cost-analysis") recomputeDirtyFleets();
+}
+
+for (const btn of document.querySelectorAll(".main-nav-btn")) {
+  btn.addEventListener("click", () => showPage(btn.dataset.page));
+}
+
+// Covers both the browser's back/forward buttons and a direct/bookmarked
+// link straight to e.g. #cost-analysis.
+window.addEventListener("hashchange", () => showPage(location.hash.slice(1)));
+
+showPage(location.hash.slice(1));
+
+// ---- Persisted state (localStorage) ----
+// Survives a page reload/browser restart -- everything a user would
+// reasonably consider "their data": every fleet in `fleets` (including each
+// one's own cached wareCostList/dirty flag -- deliberately NOT stripped, so
+// a reload doesn't force every fleet to recompute again the next time Cost
+// Analysis is opened, which would defeat the point of the dirty-flag
+// design), which one is active, configured price overrides, and the
+// imported-loadouts working set (see
+// mergeImportedLoadoutsResult()/clearImportedLoadouts()), plus the current
+// Size/Purpose/Type filter selections. Deliberately does NOT include the
+// ship currently being configured in the builder (currentShip/
+// missileAmounts/etc. and friends) -- that's treated as an unsaved draft,
+// exactly like it already is if you clear the picker or load a different
+// ship without adding the current one to the list.
+const PERSISTED_STATE_KEY = "x4-fleet-planner-state";
+const PERSISTED_STATE_VERSION = 2;
+
+// loadShips() (see bootstrap() below) calls renderShipOptions() once on
+// its own, before there's been any chance to restore a previous session --
+// without this guard that call's own saveState() hook would immediately
+// overwrite a real saved session with empty defaults, before
+// restorePersistedState() ever got to read it. Flipped true right before
+// restorePersistedState() runs; every save from then on is real.
+let stateReady = false;
+
+// Called from a handful of existing render/state-mutation choke points
+// (renderCart() via renderWareCostList(), renderShipOptions(),
+// updateLoadoutManagerBtnStates()) rather than threaded through every
+// individual mutation -- see each call site's own comment.
+function saveState() {
+  if (!stateReady) return;
+
+  const state = {
+    version: PERSISTED_STATE_VERSION,
+    fleets,
+    activeFleetIndex,
+    priceOverrides,
+    importedLoadoutsResult,
+    filters: {
+      size: checkedValues("size-filter"),
+      purpose: checkedValues("purpose-filter"),
+      type: checkedValues("type-filter"),
+    },
+  };
+  try {
+    localStorage.setItem(PERSISTED_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Storage full/disabled (private browsing, quota exceeded) -- state
+    // just doesn't persist this time; nothing else in the app depends on
+    // the write actually succeeding.
+  }
+}
+
+// Returns null on anything unusable (nothing saved yet, corrupt JSON, or
+// a version from a future/incompatible build of this app) rather than
+// guessing at a partial shape -- restorePersistedState() then just leaves
+// every already-initialized default in place.
+function loadPersistedState() {
+  let raw;
+  try {
+    raw = localStorage.getItem(PERSISTED_STATE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const state = JSON.parse(raw);
+    return state && state.version === PERSISTED_STATE_VERSION ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+// Called once at startup, after the ship list (and with it the filter
+// checkboxes -- see loadShips()) exists to restore filter selections
+// into. Re-renders through the same functions saveState() is hooked into,
+// so restoring doesn't need its own separate render logic.
+function restorePersistedState(state) {
+  if (!state) return;
+
+  if (Array.isArray(state.fleets) && state.fleets.length > 0) {
+    fleets = state.fleets;
+    // Defensive clamp -- guards against a corrupted/hand-edited index
+    // rather than trusting it blindly.
+    activeFleetIndex = Math.min(Math.max(state.activeFleetIndex ?? 0, 0), fleets.length - 1);
+  }
+  // priceOverrides is const (mutated in place elsewhere too, e.g. the
+  // Configured Ware Price Overrides list's own "x" remove button) --
+  // assign onto it rather than rebinding the name.
+  if (state.priceOverrides && typeof state.priceOverrides === "object") {
+    Object.assign(priceOverrides, state.priceOverrides);
+  }
+  if (state.importedLoadoutsResult) importedLoadoutsResult = state.importedLoadoutsResult;
+
+  if (state.filters) {
+    const filterGroups = {
+      "size-filter": state.filters.size,
+      "purpose-filter": state.filters.purpose,
+      "type-filter": state.filters.type,
+    };
+    for (const [name, values] of Object.entries(filterGroups)) {
+      if (!Array.isArray(values)) continue;
+      for (const input of document.querySelectorAll(`input[name="${name}"]`)) {
+        input.checked = values.includes(input.value);
+      }
+    }
+  }
+
+  updateLoadoutManagerBtnStates();
+  renderShipOptions();
+  renderCart();
+}
+
+async function bootstrap() {
+  await loadShips(); // filter checkboxes (restorePersistedState needs them) live here
+  await Promise.all([
+    loadMissiles(),
+    loadDrones(),
+    loadDeployables(),
+    loadCountermeasures(),
+    loadCrew(),
+    loadBuildMethods(),
+  ]);
+  stateReady = true;
+  restorePersistedState(loadPersistedState());
+
+  // showPage(location.hash.slice(1)) below already ran once, synchronously,
+  // before any of the above -- so its own recomputeDirtyFleets() hook (see
+  // showPage()) fired, if at all, against the seeded placeholder fleet, not
+  // real/restored data. Check the actually-visible page here, after restore
+  // completes, and trigger the real recompute directly for a direct/
+  // bookmarked load straight into #cost-analysis.
+  if (!document.getElementById("page-cost-analysis").classList.contains("hidden")) {
+    recomputeDirtyFleets();
+  }
+}
+
+bootstrap();
 applyRemoteModeUI();

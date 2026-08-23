@@ -186,6 +186,13 @@ macro's <ship type="..."/>, <hull max="..."/>, <people capacity="..."/>, and
 some ships (S-class ships in particular); unlike hull/crew/ship_type it
 defaults to 0 rather than being left null when missing.
 
+ships_base.purpose is the macro's <purpose primary="..."/> -- an AI role
+classification (e.g. "fight"/"trade"/"mine"/"build"/"auxiliary"/"racing"/
+"salvage"/"dismantling"), the same element analyze_drone_macro() already
+reads into drones_base.purpose for drones. Independent of ship_type: a
+ship_type like "scout" or "heavyfighter" is a hull *class*, purpose is
+what it's *for* -- e.g. multiple ship_types can share purpose "fight".
+
 ships_base.icon is the macro's <identification icon="..."/> -- a small
 ship-class symbol name (e.g. "ship_s_fighter_01"), one per size+purpose
 combo rather than unique per ship (many different ships of the same
@@ -1814,6 +1821,13 @@ def load_macro_data(macro_path: Path) -> dict:
     ship_el = properties.find("ship")
     result["ship_type"] = ship_el.get("type") if ship_el is not None else None
 
+    # AI role classification, e.g. "fight"/"trade"/"mine"/"build"/
+    # "auxiliary"/"racing"/"salvage"/"dismantling" -- same element
+    # analyze_drone_macro() already reads for drones (see that function's
+    # docstring); just never read for real ships until now.
+    purpose_el = properties.find("purpose")
+    result["purpose"] = purpose_el.get("primary") if purpose_el is not None else None
+
     # e.g. "ship_s_fighter_01" -- the small ship-class symbol shown in the
     # game's own UI, one per size+purpose combo (not unique per ship: many
     # different fighter-type ships of the same size all share one icon).
@@ -2021,6 +2035,7 @@ def analyze_ship_components(ship: dict, size: str | None) -> dict:
         "missile_capacity": 0,
         "drone_capacity": 0,
         "ship_type": None,
+        "purpose": None,
         "icon": None,
         "hull": None,
         "crew": None,
@@ -2064,6 +2079,7 @@ def analyze_ship_components(ship: dict, size: str | None) -> dict:
     result["missile_capacity"] = macro_data.get("missile_capacity", 0)
     result["drone_capacity"] = macro_data.get("drone_capacity", 0)
     result["ship_type"] = macro_data.get("ship_type")
+    result["purpose"] = macro_data.get("purpose")
     result["icon"] = macro_data.get("icon")
     result["hull"] = macro_data.get("hull")
     result["crew"] = macro_data.get("crew")
@@ -2197,6 +2213,7 @@ CREATE TABLE ships_base (
     production_method TEXT,
     macro TEXT,
     ship_type TEXT,
+    purpose TEXT,
     icon TEXT,
     hull INTEGER,
     crew INTEGER,
@@ -2556,6 +2573,7 @@ def write_ships_csv(
             "production_method",
             "macro",
             "ship_type",
+            "purpose",
             "icon",
             "hull",
             "crew",
@@ -2589,6 +2607,7 @@ def write_ships_csv(
                 "production_method": primary_prod["method_name"] if primary_prod else "",
                 "macro": s["macro"] or "",
                 "ship_type": s["ship_type"] or "",
+                "purpose": s["purpose"] or "",
                 "icon": s["icon"] or "",
                 "hull": s["hull"] if s["hull"] is not None else "",
                 "crew": s["crew"] if s["crew"] is not None else "",
@@ -3126,6 +3145,7 @@ def main() -> None:
         s["missile_capacity"] = analysis["missile_capacity"]
         s["drone_capacity"] = analysis["drone_capacity"]
         s["ship_type"] = analysis["ship_type"]
+        s["purpose"] = analysis["purpose"]
         s["icon"] = analysis["icon"]
         s["hull"] = analysis["hull"]
         s["crew"] = analysis["crew"]

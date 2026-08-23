@@ -7,10 +7,39 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>X4 Procurement Planner</h1>
+  <header id="main-header">
+    <h1>X4 Procurement Planner</h1>
+    <nav id="main-nav">
+      <button type="button" class="main-nav-btn active" data-page="fleet-planner">
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/fleet_planner.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/fleet_planner_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        Fleet Planner
+      </button>
+      <button type="button" class="main-nav-btn" data-page="cost-analysis">
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/cost_analysis.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/cost_analysis_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        Cost Analysis
+      </button>
+      <button type="button" class="main-nav-btn" data-page="about">
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/about.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/about_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        About
+      </button>
+    </nav>
+  </header>
 
-  <section id="picker-section">
-    <h2>1. Pick a ship</h2>
+  <div id="page-fleet-planner" class="page">
+  <fieldset id="picker-section" class="section-box">
+    <legend class="section-box-legend">Ship Builder</legend>
     <div id="ship-filters">
       <fieldset class="filter-group">
         <legend>Size</legend>
@@ -19,6 +48,14 @@
           <button type="button" class="filter-none-btn" data-filter="size-filter">None</button>
         </div>
         <div id="size-filter-options" class="filter-options"></div>
+      </fieldset>
+      <fieldset class="filter-group">
+        <legend>Purpose</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="purpose-filter">All</button>
+          <button type="button" class="filter-none-btn" data-filter="purpose-filter">None</button>
+        </div>
+        <div id="purpose-filter-options" class="filter-options"></div>
       </fieldset>
       <fieldset class="filter-group">
         <legend>Type</legend>
@@ -31,23 +68,27 @@
       <fieldset class="filter-group loadout-manager-group">
         <legend>Loadout Manager</legend>
         <div class="loadout-manager-actions">
-          <button id="import-loadouts-btn" type="button">Import game loadouts</button>
-          <button id="import-raw-xml-loadout-btn" type="button">Import raw XML loadout</button>
-          <button id="export-loadouts-btn" type="button" disabled>Export loadouts</button>
-          <button id="clear-loadouts-btn" type="button" disabled>Clear loadouts</button>
+          <button id="import-loadouts-btn" type="button">Import Game Loadouts</button>
+          <button id="import-raw-xml-loadout-btn" type="button">Import Raw XML Loadout</button>
+          <button id="export-loadouts-btn" type="button" disabled>Export Loadouts</button>
+          <button id="clear-loadouts-btn" type="button" disabled>Clear Loadouts</button>
         </div>
       </fieldset>
-      <p class="filter-hint">Check none in a group to include every value for it.</p>
+      <p class="filter-hint">Check none in a group to remove the filter.</p>
     </div>
     <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship"></div>
     <button id="load-ship-btn" disabled>Load</button>
     <button id="clear-ship-btn-top" type="button" class="clear-ship-btn">Clear</button>
-    <button id="select-game-loadout-btn" type="button" disabled>Select saved loadout</button>
+    <button id="select-game-loadout-btn" type="button" disabled>Select Filter Loadout</button>
+    <button id="add-to-saved-loadouts-btn-top" type="button">Add To Saved Loadouts</button>
 
     <div id="ship-detail" class="hidden">
       <div class="ship-name-row">
         <h3 id="ship-name"></h3>
-        <button id="select-chassis-loadout-btn" type="button" disabled>Select loadout</button>
+        <button id="select-chassis-loadout-btn" type="button" disabled>Select Loadout</button>
+        <button id="ship-high-preset-btn" type="button" class="section-preset-btn">High Preset</button>
+        <button id="ship-minimum-preset-btn" type="button" class="section-preset-btn">Minimum Preset</button>
+        <button id="add-to-cart-btn-top" type="button">Add To Fleet List</button>
       </div>
       <div id="imported-loadout-warnings" class="imported-loadout-warnings hidden"></div>
 
@@ -72,23 +113,26 @@
         <input id="ship-note-input" type="text" placeholder="e.g. Boron Border Patrol" />
       </label>
 
-      <button id="add-to-cart-btn">Add to procurement list</button>
-      <button id="add-to-saved-loadouts-btn" type="button">Add to Saved Loadouts</button>
-      <button id="clear-ship-btn-bottom" type="button" class="clear-ship-btn">Clear</button>
+      <div class="ship-detail-actions-row">
+        <button id="add-to-saved-loadouts-btn" type="button">Add To Saved Loadouts</button>
+        <button id="clear-ship-btn-bottom" type="button" class="clear-ship-btn">Clear</button>
+        <button id="add-to-cart-btn">Add To Fleet List</button>
+      </div>
       <div id="add-to-saved-loadouts-status" class="import-loadouts-status hidden"></div>
     </div>
-  </section>
+  </fieldset>
 
-  <section id="cart-section">
-    <h2>2. Procurement List</h2>
+  <fieldset id="cart-section" class="section-box">
+    <legend class="section-box-legend">Fleet Lists</legend>
+    <nav id="fleet-list-tabs" class="fleet-list-tabs"></nav>
     <label>
-      Procurement list name
+      Fleet list name
       <input id="cart-name-input" type="text" placeholder="e.g. Sector Defense Fleet" />
     </label>
     <div id="cart-toolbar">
-      <button id="save-cart-btn">Download procurement list…</button>
+      <button id="save-cart-btn">Download Fleet List…</button>
       <label class="file-input-label">
-        Upload procurement list…
+        Upload Fleet List…
         <input id="load-cart-input" type="file" accept="application/json,.json" class="hidden" />
       </label>
     </div>
@@ -97,17 +141,17 @@
         <tr>
           <th>Ship</th>
           <th>Loadout</th>
-          <th>Qty</th>
-          <th></th>
         </tr>
       </thead>
       <tbody id="cart-body"></tbody>
     </table>
-    <p id="cart-empty-msg">Procurement list is empty.</p>
-  </section>
+    <p id="cart-empty-msg">Fleet list is empty.</p>
+  </fieldset>
+  </div>
 
-  <section id="calculate-section">
-    <h2>3. Calculate production</h2>
+  <div id="page-cost-analysis" class="page hidden">
+  <fieldset id="calculate-section" class="section-box">
+    <legend class="section-box-legend">Calculate Production</legend>
     <label>
       Analysis file name
       <input id="analysis-file-name-input" type="text" placeholder="e.g. fleet_comparison" />
@@ -121,10 +165,17 @@
     </div>
 
     <div id="ware-cost-list" class="hidden">
-      <h3>Ware Cost List</h3>
-      <div id="ware-cost-list-toolbar">
-        <button id="save-for-comparison-btn">Save for comparison</button>
-        <span id="save-for-comparison-warning" class="save-for-comparison-warning"></span>
+      <div class="ware-cost-list-header-row">
+        <div class="ware-cost-list-header-left">
+          <h3>Ware Cost List</h3>
+          <button id="price-override-btn" type="button">Set Ware Price Overrides</button>
+        </div>
+        <fieldset class="filter-group price-override-summary-box">
+          <legend>Configured Ware Price Overrides</legend>
+          <div id="price-override-summary-list" class="price-override-summary-list">
+            <span class="price-override-summary-empty">None configured.</span>
+          </div>
+        </fieldset>
       </div>
       <div id="ware-cost-list-tabs" class="tab-bar">
         <button type="button" class="tab-btn active" data-ware-cost-list-tab="total">Total Cost Breakdown</button>
@@ -137,7 +188,55 @@
         </table>
       </div>
     </div>
-  </section>
+  </fieldset>
+  </div>
+
+  <div id="page-about" class="page hidden">
+    <fieldset id="about-section" class="section-box">
+      <legend class="section-box-legend">About</legend>
+      <div class="about-disclaimer">
+        <p>
+          This is an unofficial fan project. It is not affiliated with, endorsed, or supported by Egosoft. Egosoft
+          assumes no technical support or liability (e.g., for corrupted save games). Use at your own risk. All
+          names, trademarks, and content related to X4: Foundations are the property of Egosoft or their respective
+          owners.
+        </p>
+        <p>
+          <a href="https://store.steampowered.com/app/392160/X4_Foundations/" target="_blank" rel="noopener"
+            >X4: Foundations on Steam</a
+          >
+        </p>
+        <p>
+          View this project on GitHub:
+          <a href="https://github.com/lwhite12/x4-procurement-tool" target="_blank" rel="noopener"
+            >https://github.com/lwhite12/x4-procurement-tool</a
+          >
+        </p>
+      </div>
+
+      <h3>Running this locally against your own game install</h3>
+      <p class="modal-hint">
+        The hosted website covers the base game and all DLCs. The eventual goal of this is to run against a local install with any
+        combination of DLCs/mods you want to use. However, this is untested so who knows if it works. If you want to try it, here's how:
+      </p>
+      <ol>
+        <li>Clone the repository (see the GitHub link above) and install Python dependencies: <code>pip install -r requirements.txt</code>.</li>
+        <li>
+          Obtain <strong>XRCatTool</strong> (an egosoft first-party X4 catalog-extraction tool -- not included in this
+          repository) and place it at <code>XTools_1.11/XRCatTool.exe</code> under the repo root, or modify the repo code to point to your cli path. 
+          <span class="modal-hint">[link to the current XRCatTool download to be added here]</span>
+        </li>
+        <li>
+          Run <code>python src/extract_game_data.py</code> to pull ship/equipment/ware data out of your local X4
+          installation's <code>.cat</code>/<code>.dat</code> catalogs. By default this expects the game installed at
+          <code>C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations</code> -- edit <code>GAME_ROOT</code> at
+          the top of that script if yours lives somewhere else.
+        </li>
+        <li>Run <code>python src/generate_ships_table.py</code> to build <code>data/x4.db</code> from the extracted files.</li>
+        <li>Run <code>python src/api.py</code> and open <code>http://127.0.0.1:8000/</code>.</li>
+      </ol>
+    </fieldset>
+  </div>
 
   <div id="build-method-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
@@ -175,8 +274,54 @@
         </table>
       </div>
       <div class="modal-actions">
-        <button type="button" id="equipment-picker-clear-btn">Clear selection</button>
+        <button type="button" id="equipment-picker-clear-btn">Clear Selection</button>
         <button type="button" id="equipment-picker-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="price-override-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <div class="price-override-modal-heading-row">
+        <h3>Set Ware Price Overrides</h3>
+        <div class="price-override-filter-checkboxes">
+          <label class="checkbox-label">
+            <input type="checkbox" id="price-override-filter-production" />
+            Production wares
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="price-override-filter-raw" />
+            Raw resources
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="price-override-filter-procurement" />
+            Fleet list wares
+          </label>
+        </div>
+        <input
+          id="price-override-search-input"
+          type="text"
+          class="price-override-search-input"
+          placeholder="Search wares…"
+        />
+      </div>
+      <div id="price-override-modal-status" class="equipment-picker-modal-status hidden"></div>
+      <div id="price-override-table-wrapper" class="equipment-picker-table-wrapper">
+        <table id="price-override-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Min Price</th>
+              <th>Avg Price</th>
+              <th>Max Price</th>
+              <th>Override</th>
+            </tr>
+          </thead>
+          <tbody id="price-override-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="price-override-close-btn">Close</button>
       </div>
     </div>
   </div>
@@ -216,7 +361,7 @@
         Paste a single <code>&lt;loadout ...&gt;...&lt;/loadout&gt;</code> element, or a full
         <code>&lt;loadouts&gt;...&lt;/loadouts&gt;</code> block containing several -- the same shape found in a saved
         <code>loadouts.xml</code>. Parsed ship loadout(s) are added to this app's own working set of imported
-        loadouts (see "Select game loadout") alongside anything already imported, rather than replacing it. This
+        loadouts (see "Select Filter Loadout") alongside anything already imported, rather than replacing it. This
         never writes to any file.
       </p>
       <textarea id="import-raw-xml-loadout-textarea" class="import-raw-xml-loadout-textarea" placeholder="<loadout id=&quot;...&quot; name=&quot;...&quot; macro=&quot;...&quot;>...</loadout>" spellcheck="false"></textarea>
@@ -230,32 +375,13 @@
 
   <div id="select-game-loadout-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3 id="select-game-loadout-modal-title">Select Saved Loadout</h3>
+      <h3 id="select-game-loadout-modal-title">Select Filter Loadout</h3>
       <div id="select-game-loadout-list" class="select-game-loadout-list"></div>
       <div class="modal-actions">
         <button type="button" id="select-game-loadout-cancel-btn">Cancel</button>
       </div>
     </div>
   </div>
-
-  <footer id="site-footer">
-    <p>
-      This is an unofficial fan project. It is not affiliated with, endorsed, or supported by Egosoft. Egosoft
-      assumes no technical support or liability (e.g., for corrupted save games). Use at your own risk. All names,
-      trademarks, and content related to X4: Foundations are the property of Egosoft or their respective owners.
-    </p>
-    <p>
-      <a href="https://store.steampowered.com/app/392160/X4_Foundations/" target="_blank" rel="noopener"
-        >X4: Foundations on Steam</a
-      >
-    </p>
-    <p>
-      View this project on GitHub:
-      <a href="https://github.com/lwhite12/x4-procurement-tool" target="_blank" rel="noopener"
-        >https://github.com/lwhite12/x4-procurement-tool</a
-      >
-    </p>
-  </footer>
 
   <script src="app.js"></script>
 </body>
