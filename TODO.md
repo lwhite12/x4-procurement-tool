@@ -91,3 +91,12 @@ Large ideas not yet scheduled. Pick one up whenever; check items off as they lan
 
 ## 12. Clean up the AI generated code
 - [ ] Have some self respect
+
+## 13. User-based state management / recall feature (brainstormed 2026-08-23)
+- [ ] Surfaced while scoping a fleet/loadout share-link feature (see the UUID-backed-server-storage
+  option under that discussion) -- if there's eventually a user login, the server could store and
+  serve saved data configurations per user rather than just anonymous one-off share links.
+- [ ] Would naturally generalize beyond just share links to other things worth persisting/recalling:
+  ship loadout sets, saved fleets for comparison, ware price override presets, etc.
+- [ ] Framed as one general "state manager" feature encompassing all these different kinds of
+  user-persisted data/configs, rather than a bespoke mechanism per data type.

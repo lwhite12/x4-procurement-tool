@@ -35,6 +35,7 @@
         About
       </button>
     </nav>
+    <button type="button" id="header-share-btn" class="header-share-btn">Share</button>
   </header>
 
   <div id="page-fleet-planner" class="page">
@@ -77,10 +78,13 @@
       <p class="filter-hint">Check none in a group to remove the filter.</p>
     </div>
     <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship"></div>
-    <button id="load-ship-btn" disabled>Load</button>
-    <button id="clear-ship-btn-top" type="button" class="clear-ship-btn">Clear</button>
-    <button id="select-game-loadout-btn" type="button" disabled>Select Filter Loadout</button>
-    <button id="add-to-saved-loadouts-btn-top" type="button">Add To Saved Loadouts</button>
+    <div class="ship-picker-actions-row">
+      <button id="load-ship-btn" disabled>Load</button>
+      <button id="clear-ship-btn-top" type="button" class="clear-ship-btn">Clear</button>
+      <button id="select-game-loadout-btn" type="button" disabled>Select Filter Loadout</button>
+      <button id="add-to-saved-loadouts-btn-top" type="button">Add To Saved Loadouts</button>
+      <button id="add-to-cart-btn-top" type="button">Add To Fleet List</button>
+    </div>
 
     <div id="ship-detail" class="hidden">
       <div class="ship-name-row">
@@ -88,7 +92,6 @@
         <button id="select-chassis-loadout-btn" type="button" disabled>Select Loadout</button>
         <button id="ship-high-preset-btn" type="button" class="section-preset-btn">High Preset</button>
         <button id="ship-minimum-preset-btn" type="button" class="section-preset-btn">Minimum Preset</button>
-        <button id="add-to-cart-btn-top" type="button">Add To Fleet List</button>
       </div>
       <div id="imported-loadout-warnings" class="imported-loadout-warnings hidden"></div>
 
@@ -213,6 +216,21 @@
           >
         </p>
       </div>
+
+      <h3>Future Plans</h3>
+      <p class="modal-hint">A few bigger features on the roadmap, not built yet:</p>
+      <h4>User Accounts &amp; Saved States</h4>
+      <p class="modal-hint">
+        Right now, sharing a fleet list, ship loadout, or price override preset means generating a one-off link
+        (see the Share button above). The plan is to eventually add real user accounts, so you can save and
+        recall your own fleet lists, ship loadouts, and price override presets directly -- without needing to
+        keep track of links.
+      </p>
+      <h4>Language Support</h4>
+      <p class="modal-hint">
+        Ship and ware names/descriptions are currently only pulled from the game's English-language files.
+        Support for reading other languages X4 itself supports is planned.
+      </p>
 
       <h3>Running this locally against your own game install</h3>
       <p class="modal-hint">
@@ -379,6 +397,44 @@
       <div id="select-game-loadout-list" class="select-game-loadout-list"></div>
       <div class="modal-actions">
         <button type="button" id="select-game-loadout-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="share-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Share</h3>
+      <p class="modal-hint">
+        Create a link others can open to load a copy of your data. Only the checked sections below are
+        included -- anyone with the link can view whatever you check here.
+      </p>
+      <div id="share-modal-options" class="share-modal-options">
+        <label class="checkbox-label">
+          <input type="checkbox" id="share-option-fleets" />
+          Fleet Lists
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="share-option-price_overrides" />
+          Ware Price Overrides
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="share-option-loadouts" />
+          Ship Loadouts
+        </label>
+      </div>
+      <div id="share-modal-status" class="import-loadouts-status hidden"></div>
+      <div id="share-modal-result" class="share-modal-result hidden">
+        <label>
+          Share link
+          <div class="share-modal-result-row">
+            <input id="share-modal-result-input" type="text" readonly />
+            <button type="button" id="share-modal-copy-btn">Copy</button>
+          </div>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="share-modal-cancel-btn">Cancel</button>
+        <button type="button" id="share-modal-generate-btn">Generate Share Link</button>
       </div>
     </div>
   </div>

@@ -73,6 +73,17 @@ body {
   align-items: center;
 }
 
+/* Pushed to the far right of the header, away from the page-navigation
+   tabs, since it's a distinct action (not another page) -- reachable from
+   every page since sharing spans data that lives on more than one of them
+   (Fleet Lists/Ship Loadouts on Fleet Planner, Ware Price Overrides on
+   Cost Analysis). See #share-modal-overlay. */
+.header-share-btn {
+  margin-left: auto;
+  align-self: center;
+  margin-right: 1rem;
+}
+
 #main-nav {
   display: flex;
   align-items: stretch;
@@ -1298,12 +1309,19 @@ input[type="checkbox"] {
   margin: 0;
 }
 
-/* Add To Fleet List (last -- see index.html) is the only button pushed to
-   this row's right edge via its own margin-left: auto below; the ship
-   name/Select Loadout/High Preset/Minimum Preset stay left-packed right
-   after each other, same left/right split as .ship-detail-actions-row
-   below. */
-#add-to-cart-btn-top {
+/* Wraps Load/Clear/Select Filter Loadout/Add To Saved Loadouts/Add To
+   Fleet List above the builder. Add To Fleet List (last -- see index.html)
+   gets pushed to the row's right edge via its own margin-left: auto below,
+   same left/right split as .ship-detail-actions-row below (secondary
+   actions packed left, the primary action alone on the right). */
+.ship-picker-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.ship-picker-actions-row #add-to-cart-btn-top {
   margin-left: auto;
 }
 
@@ -1312,7 +1330,7 @@ input[type="checkbox"] {
    right edge via its own margin-left: auto below, separating it visually
    from the two secondary actions as the primary action on this row --
    mirroring #add-to-cart-btn-top's own position at the right end of the
-   ship-name-row above. */
+   ship-picker-actions-row above. */
 .ship-detail-actions-row {
   display: flex;
   align-items: center;
@@ -1407,6 +1425,27 @@ input[type="checkbox"] {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.share-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.share-modal-result {
+  margin-top: 0.75rem;
+}
+
+.share-modal-result-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.share-modal-result-row input {
+  flex: 1;
+  font-family: monospace;
 }
 
 /* Wider variant of .modal for the equipment picker, which needs room for

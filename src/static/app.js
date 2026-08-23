@@ -351,6 +351,14 @@ const cartEmptyMsg = document.getElementById("cart-empty-msg");
 const analysisFileNameInput = document.getElementById("analysis-file-name-input");
 const downloadAnalysisBtn = document.getElementById("download-analysis-btn");
 const uploadAnalysisInput = document.getElementById("upload-analysis-input");
+const headerShareBtn = document.getElementById("header-share-btn");
+const shareModalOverlay = document.getElementById("share-modal-overlay");
+const shareModalStatus = document.getElementById("share-modal-status");
+const shareModalResult = document.getElementById("share-modal-result");
+const shareModalResultInput = document.getElementById("share-modal-result-input");
+const shareModalCopyBtn = document.getElementById("share-modal-copy-btn");
+const shareModalCancelBtn = document.getElementById("share-modal-cancel-btn");
+const shareModalGenerateBtn = document.getElementById("share-modal-generate-btn");
 const wareCostListSection = document.getElementById("ware-cost-list");
 const wareCostListThead = document.getElementById("ware-cost-list-thead");
 const wareCostListBody = document.getElementById("ware-cost-list-body");
@@ -4503,13 +4511,13 @@ function renderFleetListTabs() {
 // a cache, not source of truth -- so every restored fleet comes back
 // dirty: true and recomputes fresh the next time Cost Analysis is visited.
 
-downloadAnalysisBtn.addEventListener("click", () => {
-  if (fleets.every((fleet) => fleet.cart.length === 0)) {
-    alert("Nothing to download -- every fleet list is empty.");
-    return;
-  }
-
-  const analysis = {
+// The full multi-fleet snapshot shape shared by Download Analysis, Upload
+// Analysis, and the "Fleet Lists" share section (see SHARE_SECTIONS) --
+// deliberately excludes each fleet's cached wareCostList/dirty flag (a
+// cache, not source of truth), so restoring/sharing a set of fleets always
+// recomputes fresh rather than carrying over possibly-stale numbers.
+function buildAnalysisPayload() {
+  return {
     fleets: fleets.map((fleet) => ({
       name: fleet.name,
       cart: JSON.parse(JSON.stringify(fleet.cart)),
@@ -4518,7 +4526,50 @@ downloadAnalysisBtn.addEventListener("click", () => {
     })),
     active_fleet_index: activeFleetIndex,
   };
+}
 
+// Validates and applies an analysis payload (see buildAnalysisPayload())
+// onto `fleets`/`activeFleetIndex`, replacing everything currently there --
+// confirms first if there's anything real to lose. Shared by Upload
+// Analysis and the "Fleet Lists" share section, so a shared or uploaded set
+// of fleets restores identically either way. Returns true if applied,
+// false if the payload was invalid or the user declined the confirm.
+function applyAnalysisPayload(data) {
+  if (!data || !Array.isArray(data.fleets) || data.fleets.some((fleet) => !Array.isArray(fleet.cart))) {
+    alert('This doesn\'t look like a valid analysis (missing a "fleets" array of {cart, ...} entries).');
+    return false;
+  }
+
+  if (
+    fleets.some((fleet) => fleet.cart.length > 0) &&
+    !confirm("Loading will replace all of your current fleet lists. Continue?")
+  ) {
+    return false;
+  }
+
+  fleets = data.fleets.map((fleet) => ({
+    name: fleet.name || "",
+    cart: JSON.parse(JSON.stringify(fleet.cart)),
+    buildFocus: fleet.build_focus ?? null,
+    fallbackMethods: fleet.fallback_methods ?? null,
+    wareCostList: null,
+    dirty: true,
+  }));
+  if (fleets.length === 0) fleets = [makeFleet()];
+  activeFleetIndex = Math.min(Math.max(data.active_fleet_index ?? 0, 0), fleets.length - 1);
+
+  resetShipPicker();
+  renderCart();
+  return true;
+}
+
+downloadAnalysisBtn.addEventListener("click", () => {
+  if (fleets.every((fleet) => fleet.cart.length === 0)) {
+    alert("Nothing to download -- every fleet list is empty.");
+    return;
+  }
+
+  const analysis = buildAnalysisPayload();
   const blob = new Blob([JSON.stringify(analysis, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -4548,35 +4599,197 @@ uploadAnalysisInput.addEventListener("change", async (event) => {
     return;
   }
 
-  if (!Array.isArray(data.fleets) || data.fleets.some((fleet) => !Array.isArray(fleet.cart))) {
-    alert('This doesn\'t look like a valid analysis file (missing a "fleets" array of {cart, ...} entries).');
-    event.target.value = "";
-    return;
-  }
-
-  if (
-    fleets.some((fleet) => fleet.cart.length > 0) &&
-    !confirm("Loading will replace all of your current fleet lists. Continue?")
-  ) {
-    event.target.value = "";
-    return;
-  }
-
-  fleets = data.fleets.map((fleet) => ({
-    name: fleet.name || "",
-    cart: JSON.parse(JSON.stringify(fleet.cart)),
-    buildFocus: fleet.build_focus ?? null,
-    fallbackMethods: fleet.fallback_methods ?? null,
-    wareCostList: null,
-    dirty: true,
-  }));
-  if (fleets.length === 0) fleets = [makeFleet()];
-  activeFleetIndex = Math.min(Math.max(data.active_fleet_index ?? 0, 0), fleets.length - 1);
-
-  resetShipPicker();
-  renderCart();
+  applyAnalysisPayload(data);
   event.target.value = ""; // allow re-selecting the same file later
 });
+
+// --- Share links -------------------------------------------------------------
+// Each of these 3 slices of state can be shared independently (a user might
+// share fleets but not their price overrides, say) -- see api.py's own
+// ShareSection Literal, which this list's `section` values must keep
+// matching exactly, and the URL shape (?share_<section>=<uuid>, one per
+// included section) applyShareLinksFromUrl() below reads back. `checkbox`
+// is looked up once here since every one of these already exists in the
+// DOM from page load (unlike the fleet tabs, this isn't rebuilt per render).
+const SHARE_SECTIONS = [
+  {
+    section: "fleets",
+    label: "Fleet Lists",
+    checkbox: document.getElementById("share-option-fleets"),
+    hasContent: () => fleets.some((fleet) => fleet.cart.length > 0),
+    buildPayload: buildAnalysisPayload,
+    applyPayload: applyAnalysisPayload,
+  },
+  {
+    section: "price_overrides",
+    label: "Ware Price Overrides",
+    checkbox: document.getElementById("share-option-price_overrides"),
+    hasContent: () => Object.keys(priceOverrides).length > 0,
+    buildPayload: () => ({ ...priceOverrides }),
+    applyPayload: (data) => {
+      if (!data || typeof data !== "object") return false;
+      if (
+        Object.keys(priceOverrides).length > 0 &&
+        !confirm("Loading will replace your current ware price overrides. Continue?")
+      ) {
+        return false;
+      }
+      for (const key of Object.keys(priceOverrides)) delete priceOverrides[key];
+      Object.assign(priceOverrides, data);
+      renderPriceOverrideSummary();
+      markAllFleetsDirtyAndRecompute();
+      return true;
+    },
+  },
+  {
+    section: "loadouts",
+    label: "Ship Loadouts",
+    checkbox: document.getElementById("share-option-loadouts"),
+    hasContent: () => !!importedLoadoutsResult && importedLoadoutsResult.ships.length > 0,
+    // The saved/imported-loadouts working set is already an additive,
+    // never-overwriting concept everywhere else it's touched (Import Game
+    // Loadouts, Import Raw XML Loadout, Add To Saved Loadouts all merge via
+    // this same function) -- shared loadouts merge the same way, on
+    // purpose, rather than introducing a one-off "replace" behavior just
+    // for this entry point.
+    buildPayload: () => importedLoadoutsResult,
+    applyPayload: (data) => {
+      if (!data || !Array.isArray(data.ships)) return false;
+      mergeImportedLoadoutsResult(data);
+      return true;
+    },
+  },
+];
+
+// {section: {hash, uuid}} of the most recently generated share per section
+// -- see generateShareLink() below. Persisted (see saveState()) so
+// re-sharing unchanged data, even in a later session, still reuses the
+// same link instead of writing a redundant duplicate into Tigris every
+// time. hash is stableStringify() of that section's own buildPayload()
+// result -- order-independent, so key-insertion-order differences alone
+// (e.g. price overrides added in a different order) don't count as a
+// change.
+let shareCache = {};
+
+function showShareModalStatus(lines, isError) {
+  shareModalStatus.innerHTML = "";
+  for (const line of lines) {
+    const div = document.createElement("div");
+    div.textContent = line;
+    shareModalStatus.appendChild(div);
+  }
+  shareModalStatus.classList.toggle("hidden", lines.length === 0);
+  shareModalStatus.classList.toggle("status-error", !!isError);
+}
+
+function openShareModal() {
+  for (const entry of SHARE_SECTIONS) {
+    const has = entry.hasContent();
+    entry.checkbox.checked = has;
+    entry.checkbox.disabled = !has;
+  }
+  shareModalResult.classList.add("hidden");
+  showShareModalStatus([], false);
+  shareModalOverlay.classList.remove("hidden");
+}
+
+async function generateShareLink() {
+  const checkedSections = SHARE_SECTIONS.filter((entry) => entry.checkbox.checked);
+  if (checkedSections.length === 0) {
+    showShareModalStatus(["Check at least one section to share."], true);
+    return;
+  }
+
+  shareModalGenerateBtn.disabled = true;
+  showShareModalStatus(["Generating…"], false);
+  try {
+    const params = new URLSearchParams();
+    for (const entry of checkedSections) {
+      const payload = entry.buildPayload();
+      const hash = stableStringify(payload);
+      const cached = shareCache[entry.section];
+      let uuid = cached && cached.hash === hash ? cached.uuid : null;
+
+      if (!uuid) {
+        const response = await fetch(`/api/share/${entry.section}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: payload }),
+        });
+        const result = await response.json();
+        if (result.error) {
+          showShareModalStatus([`Could not share ${entry.label}: ${result.error}`], true);
+          return;
+        }
+        uuid = result.uuid;
+        shareCache[entry.section] = { hash, uuid };
+        saveState();
+      }
+      params.set(`share_${entry.section}`, uuid);
+    }
+
+    shareModalResultInput.value = `${location.origin}${location.pathname}?${params.toString()}`;
+    shareModalResult.classList.remove("hidden");
+    showShareModalStatus([], false);
+  } catch (err) {
+    showShareModalStatus([`Could not generate share link: ${err.message}`], true);
+  } finally {
+    shareModalGenerateBtn.disabled = false;
+  }
+}
+
+headerShareBtn.addEventListener("click", openShareModal);
+shareModalCancelBtn.addEventListener("click", () => shareModalOverlay.classList.add("hidden"));
+shareModalGenerateBtn.addEventListener("click", generateShareLink);
+
+shareModalCopyBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(shareModalResultInput.value);
+    showShareModalStatus(["Copied!"], false);
+  } catch {
+    // Clipboard API unavailable or permission denied (e.g. non-HTTPS,
+    // an older browser, or a blocked permission) -- select the text so
+    // the user can still copy it manually (Ctrl/Cmd+C).
+    shareModalResultInput.select();
+    showShareModalStatus(["Couldn't copy automatically -- text is selected, copy it manually."], true);
+  }
+});
+
+// Reads ?share_<section>=<uuid> query params (see SHARE_SECTIONS/
+// generateShareLink() above) and, for each present, fetches and applies
+// that section -- called once from bootstrap(), after state has already
+// been restored from localStorage, so each section's own applyPayload()
+// (which may confirm() before overwriting) is judging against the user's
+// real current data, not empty defaults. Strips the params from the URL
+// afterward either way (applied, declined, or failed) so reloading the
+// page doesn't re-prompt every time.
+async function applyShareLinksFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const present = SHARE_SECTIONS.filter((entry) => params.has(`share_${entry.section}`));
+  if (present.length === 0) return;
+
+  let anyApplied = false;
+  for (const entry of present) {
+    const shareUuid = params.get(`share_${entry.section}`);
+    try {
+      const response = await fetch(`/api/share/${entry.section}/${shareUuid}`);
+      const result = await response.json();
+      if (result.error) {
+        alert(`Could not load shared ${entry.label}: ${result.error}`);
+        continue;
+      }
+      if (entry.applyPayload(result.data)) anyApplied = true;
+    } catch (err) {
+      alert(`Could not load shared ${entry.label}: ${err.message}`);
+    }
+  }
+
+  const url = new URL(location.href);
+  for (const entry of present) url.searchParams.delete(`share_${entry.section}`);
+  history.replaceState(null, "", url);
+
+  if (anyApplied) saveState();
+}
 
 // --- Save / load ------------------------------------------------------------
 // The saved file is shaped exactly like summarize_production.py's own input
@@ -4940,6 +5153,7 @@ function saveState() {
     activeFleetIndex,
     priceOverrides,
     importedLoadoutsResult,
+    shareCache,
     filters: {
       size: checkedValues("size-filter"),
       purpose: checkedValues("purpose-filter"),
@@ -4995,6 +5209,10 @@ function restorePersistedState(state) {
     Object.assign(priceOverrides, state.priceOverrides);
   }
   if (state.importedLoadoutsResult) importedLoadoutsResult = state.importedLoadoutsResult;
+  // Purely an optimization (skip re-uploading an unchanged share), so a
+  // missing/malformed value here just means the next share regenerates
+  // from scratch -- nothing to validate strictly.
+  if (state.shareCache && typeof state.shareCache === "object") shareCache = state.shareCache;
 
   if (state.filters) {
     const filterGroups = {
@@ -5027,6 +5245,10 @@ async function bootstrap() {
   ]);
   stateReady = true;
   restorePersistedState(loadPersistedState());
+  // Judged against the just-restored real state above, not empty defaults
+  // -- see applyShareLinksFromUrl()'s own comment for why this has to come
+  // after restorePersistedState(), not before it.
+  await applyShareLinksFromUrl();
 
   // showPage(location.hash.slice(1)) below already ran once, synchronously,
   // before any of the above -- so its own recomputeDirtyFleets() hook (see

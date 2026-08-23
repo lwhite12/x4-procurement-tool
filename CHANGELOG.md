@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
+## [0.3.0] - 2026-08-23
+
+### Added
+
+- Share links: generate a link that loads a copy of your Fleet Lists, Ware Price Overrides,
+  and/or Ship Loadouts on another browser -- pick which of the three to include, each one
+  independently, from the new "Share" button in the header.
+- A confirmation warning before downloading Export Loadouts, since overwriting your real
+  `loadouts.xml` with the downloaded one isn't guaranteed safe -- recommends backing up your
+  loadouts file first.
+- A "Future Plans" section on the About page, covering two bigger features on the roadmap:
+  user accounts with saved/recallable fleet lists, ship loadouts, and price override presets;
+  and support for non-English game language files.
+
+### Changed
+
+- "Add To Fleet List" (top copy) moved up out of the ship builder to sit next to "Add To
+  Saved Loadouts", so both are reachable together without scrolling down first.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added

@@ -208,9 +208,11 @@ docstring in summarize_production.py/query_ship_components.py for the
 actual production logic this wraps.
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -218,6 +220,7 @@ from pydantic import BaseModel
 
 from import_loadouts import build_saved_loadout_entry, parse_loadouts_xml
 from query_ship_components import query_ship_groups
+from share_storage import get_share, put_share
 from summarize_production import (
     ABSOLUTE_MAX_DEPTH,
     DEFAULT_FALLBACK_METHODS,
@@ -323,6 +326,22 @@ class ImportLoadoutsRequest(BaseModel):
     # root handling). If both are given, `path` wins.
     path: str | None = None
     xml_text: str | None = None
+
+
+# The three independently-shareable slices of frontend state (see app.js's
+# own SHARE_SECTIONS) -- a Literal (not a bare str) so FastAPI 422s on
+# anything else automatically, rather than this module needing to validate
+# it before ever reaching share_storage.py (which has no opinion on what
+# sections exist).
+ShareSection = Literal["fleets", "price_overrides", "loadouts"]
+
+
+class ShareCreateRequest(BaseModel):
+    # Deliberately untyped beyond "some JSON object" -- this endpoint has no
+    # opinion on any given section's own shape (fleets/priceOverrides/
+    # importedLoadoutsResult each look completely different), it's just a
+    # blob store. The frontend is the only place that shape is meaningful.
+    data: dict
 
 
 class BuildSavedLoadoutRequest(BaseModel):
@@ -681,6 +700,29 @@ def build_saved_loadout_endpoint(request: BuildSavedLoadoutRequest) -> dict:
         )
     finally:
         conn.close()
+
+
+# Generous but not unbounded -- this endpoint has no auth (any visitor can
+# create shares), so a size cap keeps one bad request from writing an
+# absurdly large object rather than actually limiting real usage. A share
+# with dozens of fully-loaded-out ships across several fleets is still well
+# under this.
+MAX_SHARE_BYTES = 5 * 1024 * 1024
+
+
+@app.post("/api/share/{section}")
+def create_share_endpoint(section: ShareSection, request: ShareCreateRequest) -> dict:
+    if len(json.dumps(request.data)) > MAX_SHARE_BYTES:
+        return {"error": "This is too large to share -- try sharing fewer fleets/loadouts at once."}
+    return {"uuid": put_share(section, request.data)}
+
+
+@app.get("/api/share/{section}/{share_uuid}")
+def read_share_endpoint(section: ShareSection, share_uuid: str) -> dict:
+    data = get_share(section, share_uuid)
+    if data is None:
+        return {"error": "This share link doesn't exist (it may be mistyped, or the share may have been removed)."}
+    return {"data": data}
 
 
 # Ship-class symbol PNGs (see generate_ship_icons.py) -- served under
