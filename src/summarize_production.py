@@ -1,13 +1,15 @@
 """Summarize the production requirements for a list of target wares,
-optionally focused on a single build method, to a configurable search depth.
+resolved against an ordered build method priority list, to a configurable
+search depth.
 
 Input: JSON (a file path argument, or "-" to read from stdin), shaped like:
 {
-  "build_focus": "Teladi",              # optional; case-insensitive
-  "fallback_methods": [...],   # optional, defaults to DEFAULT_FALLBACK_METHODS
-                                # (BUILD_METHODS in generate_ships_table.py --
-                                # every real build method, Universal first,
-                                # Terran second, Recycling last)
+  "build_method_priority": ["Teladi", "Universal", ...],  # optional; case-
+                                # insensitive; defaults to
+                                # DEFAULT_BUILD_METHOD_PRIORITY (BUILD_METHODS
+                                # in generate_ships_table.py -- every real
+                                # build method, Universal first, Terran
+                                # second, Recycling/Xenon last)
   "search_depth": 1,                    # optional, defaults to 1 (one layer)
   "verbose": true,                      # optional, defaults to true
   "group_by_component_type": false,     # optional, defaults to false
@@ -45,8 +47,8 @@ ware_ids (e.g. a turret type both ships happen to use) summed together
 rather than listed twice -- unless they also specify different "category"
 overrides (see below), in which case they're kept as separate target
 entries instead of merged. Everything downstream of that point
-(build_focus, search_depth, resolution_log, and so on) operates on that
-one flattened list exactly as before -- it has no notion of
+(build_method_priority, search_depth, resolution_log, and so on) operates
+on that one flattened list exactly as before -- it has no notion of
 "configurations" at all. Every ware_id prefixed "software_" is still
 priced (fetch_ware_prices()/PRICE_WARE_TABLES cover software_base, so
 api.py's POST /api/price_summary "top_level" tier counts it), but
@@ -98,22 +100,19 @@ though the sub-part ware_id itself has no equipment_type of its own.
 
 Method resolution (used at every level)
 ------------------------------------------
-For a given ware, "the same process" always means: try build_focus first
-(exact match, case-insensitive); if unavailable, try each of
-fallback_methods in order and use the first available match; if still
-nothing matches, the ware can't be expanded under this build_focus at all,
-so it's folded into the output as-is (as if it were a leaf ware) instead of
-being dropped.
+For a given ware, "the same process" always means: try each entry of
+build_method_priority in order (exact match, case-insensitive) and use the
+first available match; if none of them match, the ware can't be expanded
+under this priority list at all, so it's folded into the output as-is (as
+if it were a leaf ware) instead of being dropped.
 
-When build_focus is omitted entirely, the first entry of fallback_methods
-is promoted to build_focus for the whole call (the rest of the list stays
-available as fallback exactly as before) -- "the first viable build
-method" this app tries, not a survey of every method that could complete
-the list. summarize() resolves to at most one build method per call; a
-side-by-side comparison of several build methods means calling it once per
-method (e.g. this app's frontend: one Ware Cost List column per
-procurement list, each with its own build_focus/fallback_methods), not one
-call enumerating every viable candidate into separate buckets.
+summarize() resolves to at most one build method per call -- build_method_
+priority names the one *ranked list* to try, not several independent
+choices to compare; a side-by-side comparison of several priority
+orderings means calling it once per ordering (e.g. this app's frontend: one
+Ware Cost List column per procurement list, each with its own
+build_method_priority), not one call enumerating every viable candidate
+into separate buckets.
 
 search_depth
 ---------------
@@ -130,10 +129,9 @@ original one-layer behavior.
 
 search_depth=N (N>1) keeps going: depths 1..N-1 get resolved and expanded
 into their own sub-parts, and depth-N wares are the terminal layer (shown
-in "parts" as-is, not expanded further). The *original* build_focus (the
-one requested, or promoted from fallback_methods[0] when none was -- see
-"Method resolution" above; the same single value for the whole call) is
-retained as the preferred method at every depth, not whatever a parent had
+in "parts" as-is, not expanded further). The *original* build_method_
+priority list (the same one given for the whole call -- see "Method
+resolution" above) is retained at every depth, not whatever a parent had
 to fall back to -- e.g. if hullparts (depth 1) resolves via "Teladi" but
 one of its sub-parts, graphene (depth 2), has no Teladi recipe and falls
 back to "Universal", graphene's own sub-parts (depth 3) still try "Teladi"
@@ -157,36 +155,27 @@ unboundedly.
 
 Output
 ---------
-"build_focus" echoes back the *effective* build focus this run actually
-used -- the one requested, or (when none was given) whichever
-fallback_methods entry got promoted to take its place, per "Method
-resolution" above. Only null when fallback_methods was itself empty and no
-explicit build_focus was given either -- nothing to resolve against at
-all. "fallback_build_methods" echoes back the remaining fallback list
-actually used alongside it (with build_focus given explicitly, this is
-just the input fallback_methods verbatim; with none given, it's that same
-list *minus* whichever entry was promoted to build_focus).
+"build_method_priority" echoes back the priority list this run actually
+used -- the input verbatim, or DEFAULT_BUILD_METHOD_PRIORITY when none was
+given.
 
-"methods" has at most one entry now, keyed by the effective build_focus
-above -- this app resolves to a single build method per call, never a
-comparison across several (see "Method resolution" above for why, and how
-to compare methods instead: call summarize() once per method). It's empty
-only when build_focus ended up null (nothing to try at all -- every target
-ware becomes a leaf); otherwise the single entry always exists even if
-every target ware under it turned out unresolvable (no wares at all beyond
-folded-in leaves) -- the resolved build method should still appear in the
-output. Its value has:
+"parts"/"ware_count"/"resolution_log" (see below) are only present at all
+when build_method_priority is non-empty -- there's nothing to resolve
+against otherwise, so every target ware would trivially become a leaf with
+no real breakdown to report; an empty priority list short-circuits to just
+the echoed-back (empty) list with no further keys, rather than reporting a
+degenerate "everything is a leaf" result. Whenever they are present:
   - "parts": with group_by_component_type false (the default), required
     ware_id -> summed amount needed (across all target wares and every
     level of their expansion, including different target wares that fell
-    back to different methods but shared the same requested build_focus).
+    back to different methods but shared the same top-priority one).
     With group_by_component_type true, this is instead category ->
     (ware_id -> summed amount), one flat map per category as described
-    above -- a category with no contributions at all under this method is
-    omitted entirely rather than appearing as an empty map. Software
-    target wares (ware_id prefixed "software_") never contribute here at
-    all, regardless of search_depth -- see this function's own inline
-    comment on the target loop for why.
+    above -- a category with no contributions at all is omitted entirely
+    rather than appearing as an empty map. Software target wares (ware_id
+    prefixed "software_") never contribute here at all, regardless of
+    search_depth -- see this function's own inline comment on the target
+    loop for why.
   - "ware_count": how many distinct wares "parts" contains -- with
     group_by_component_type true, this counts each distinct ware_id once
     even if it appears under more than one category (e.g. a raw material
@@ -259,11 +248,11 @@ DB_PATH = ROOT / "data" / "x4.db"
 
 # The full, ordered list of real build methods (see BUILD_METHODS' own
 # comment in generate_ships_table.py for how it was curated/ordered) --
-# every one of them tried in order as a fallback whenever build_focus (or an
-# earlier fallback) doesn't cover a given ware. Re-exported under this name
-# since every existing caller (api.py, this module's own CLI, summarize()'s
-# default parameter) already refers to it as DEFAULT_FALLBACK_METHODS.
-DEFAULT_FALLBACK_METHODS = BUILD_METHODS
+# tried in this order for every ware, one whole call's worth of priority
+# (see resolve_method()/summarize()). Re-exported under this name since
+# every caller (api.py, this module's own CLI, summarize()'s default
+# parameter) refers to it this way.
+DEFAULT_BUILD_METHOD_PRIORITY = BUILD_METHODS
 DEFAULT_SEARCH_DEPTH = 1
 ABSOLUTE_MAX_DEPTH = 100
 # group_by_component_type's catch-all category for any target ware_id not
@@ -456,8 +445,8 @@ def summarize_prices(
     amount map, exactly as summarize() already produced it) -- multiplies
     each ware's amount by its price and sums across the whole list. Pure
     lookup and arithmetic, no recursion and no re-expansion of anything:
-    "parts" is taken completely at face value, whatever depth/build_focus
-    it was originally computed with.
+    "parts" is taken completely at face value, whatever depth/build_method_
+    priority it was originally computed with.
 
     price_overrides is an optional ware_id -> price map. When a ware_id
     has an entry here, that single price is used in place of its price_min/
@@ -559,29 +548,33 @@ def find_method(available_methods: set[str], wanted: str) -> str | None:
 def resolve_method(
     ware_id: str,
     available_methods: set[str],
-    build_focus: str,
-    fallback_methods: list[str],
+    priority_methods: list[str],
     depth: int,
 ) -> tuple[str | None, dict | None]:
-    """Try build_focus, then fallback_methods in order. Only returns a log
-    entry (a non-None `entry`) when an actual substitution happened -- a
-    fallback method stood in for build_focus. A direct hit (build_focus
-    itself was available) or a total failure (nothing matched at all,
-    including no fallback) both return `entry=None`: neither is a
+    """Try priority_methods in order, first available match wins. Only
+    returns a log entry (a non-None `entry`) when an actual substitution
+    happened -- a lower-priority method stood in because priority_methods[0]
+    itself wasn't available. A direct hit (the top-priority method itself
+    was available) or a total failure (nothing in the list matched,
+    including an empty list) both return `entry=None`: neither is a
     substitution, so there's nothing to log, even though the caller still
     needs used_method to know what happened.
     """
-    match = find_method(available_methods, build_focus)
+    if not priority_methods:
+        return None, None
+
+    top_priority = priority_methods[0]
+    match = find_method(available_methods, top_priority)
     if match is not None:
         return match, None
 
     fallback_match = next(
-        (m for fb in fallback_methods if (m := find_method(available_methods, fb)) is not None), None
+        (m for fb in priority_methods[1:] if (m := find_method(available_methods, fb)) is not None), None
     )
     if fallback_match is not None:
         return fallback_match, {
             "ware_id": ware_id,
-            "requested_method": build_focus,
+            "requested_method": top_priority,
             "used_method": fallback_match,
             "depth": depth,
         }
@@ -592,27 +585,26 @@ def resolve_method(
 def expand_ware(
     ware_id: str,
     amount: float,
-    method: str,
+    priority_methods: list[str],
     by_ware_method: dict[tuple[str, str], list[sqlite3.Row]],
     methods_by_ware: dict[str, set[str]],
-    fallback_methods: list[str],
     depth: int,
     ancestors: frozenset[str],
     depth_limit: int,
 ) -> tuple[dict[str, float], list[dict]]:
     """Recursively expand one ware into its terminal (leaf,
-    fallback-exhausted, cycle-stopped, or depth-limited) requirements,
-    using `method` -- the *original* requested focus, unchanged across the
-    whole recursion -- as this ware's build focus. `depth` is the layer
-    `ware_id` itself belongs to (1 = a direct component of the top-level
-    target, 2 = a component of one of those, etc.) -- it's what any
-    substitution log entry for *this* ware's own resolution is tagged with.
-    Returns (contributions, resolution_log_entries): only an actual
-    fallback substitution (a method other than `method` itself stood in
-    for it) adds a log entry -- a plain leaf ware, a direct hit, a
-    fallback-exhausted ware, a cycle, and hitting depth_limit are all
-    terminal outcomes that still contribute to the totals but are common/
-    uninteresting enough not to log.
+    priority-exhausted, cycle-stopped, or depth-limited) requirements,
+    using `priority_methods` -- the *original* requested priority list,
+    unchanged across the whole recursion -- to resolve this ware's own
+    build method. `depth` is the layer `ware_id` itself belongs to (1 = a
+    direct component of the top-level target, 2 = a component of one of
+    those, etc.) -- it's what any substitution log entry for *this* ware's
+    own resolution is tagged with. Returns (contributions,
+    resolution_log_entries): only an actual substitution (a method other
+    than priority_methods[0] stood in for it) adds a log entry -- a plain
+    leaf ware, a direct hit, a priority-exhausted ware, a cycle, and
+    hitting depth_limit are all terminal outcomes that still contribute to
+    the totals but are common/uninteresting enough not to log.
     """
     available_methods = methods_by_ware.get(ware_id)
 
@@ -625,7 +617,7 @@ def expand_ware(
     if depth >= depth_limit:
         return {ware_id: amount}, []
 
-    used_method, entry = resolve_method(ware_id, available_methods, method, fallback_methods, depth)
+    used_method, entry = resolve_method(ware_id, available_methods, priority_methods, depth)
     if used_method is None:
         return {ware_id: amount}, []
 
@@ -640,10 +632,9 @@ def expand_ware(
         sub_contributions, sub_log = expand_ware(
             row["ware"],
             row["amount"] * scale,
-            method,
+            priority_methods,
             by_ware_method,
             methods_by_ware,
-            fallback_methods,
             depth + 1,
             next_ancestors,
             depth_limit,
@@ -658,28 +649,24 @@ def expand_ware(
 def summarize(
     target_wares: list[dict],
     rows: list[sqlite3.Row],
-    build_focus: str | None,
-    fallback_methods: list[str] | None = None,
+    build_method_priority: list[str] | None = None,
     search_depth: int = DEFAULT_SEARCH_DEPTH,
     verbose: bool = True,
     group_by_component_type: bool = False,
     category_by_ware: dict[str, str] | None = None,
 ) -> dict:
     """Resolves to at most one build method per call, never a comparison
-    across several. An explicit build_focus is used as-is; with none given,
-    the first entry of fallback_methods becomes the effective one (the rest
-    stays available as fallback for whichever wares don't support it
-    natively) -- "the first viable build method" this app tries, not a
-    survey of every method that could complete the list. This mirrors the
-    frontend's own one-build-method-per-comparison-column model (see
-    app.js's Build Method modal) -- comparing different build methods now
-    means comparing different *columns*, each configured with its own
-    build_focus/fallback_methods, not multiple method buckets stacked
-    inside a single column/request.
+    across several -- build_method_priority names one *ranked list* to try
+    (first available match wins, per ware), not several independent choices
+    to compare. This mirrors the frontend's own one-priority-list-per-
+    comparison-column model (see app.js's Build Method modal) -- comparing
+    different priority orderings means comparing different *columns*, each
+    configured with its own build_method_priority, not multiple method
+    buckets stacked inside a single column/request.
     """
-    fallback_methods = fallback_methods if fallback_methods is not None else DEFAULT_FALLBACK_METHODS
-    if build_focus is None and fallback_methods:
-        build_focus, fallback_methods = fallback_methods[0], fallback_methods[1:]
+    build_method_priority = (
+        build_method_priority if build_method_priority is not None else DEFAULT_BUILD_METHOD_PRIORITY
+    )
 
     depth_limit = min(search_depth, ABSOLUTE_MAX_DEPTH)
     by_ware_method, methods_by_ware = build_index(rows)
@@ -692,9 +679,9 @@ def summarize(
     # a category -> (ware_id -> amount) map (true) -- the `target_bucket =
     # ...` line below is what actually picks which shape gets written to,
     # everything else treats "bucket" as an opaque accumulator. Stays empty
-    # (and so does resolution_log) only when build_focus is still None here
-    # (fallback_methods was itself empty) -- nothing to resolve against at
-    # all, every target ware becomes a leaf below.
+    # (and so does resolution_log) when build_method_priority is itself
+    # empty -- nothing to resolve against at all, every target ware becomes
+    # a leaf below.
     bucket: dict = {}
     resolution_log: list[dict] = []
     leaf_wares: list[tuple[str, float, str]] = []
@@ -735,15 +722,15 @@ def summarize(
 
         available_methods = methods_by_ware.get(ware_id)
         used_method = None
-        if available_methods and build_focus is not None:
-            used_method, entry = resolve_method(ware_id, available_methods, build_focus, fallback_methods, 0)
+        if available_methods and build_method_priority:
+            used_method, entry = resolve_method(ware_id, available_methods, build_method_priority, 0)
             if entry is not None:
                 resolution_log.append(entry)
 
         if used_method is None:
             # A plain leaf ware (no production recipe at all, under any
-            # method), or this build_focus (plus every fallback) simply
-            # doesn't cover it -- either way, required exactly as-is.
+            # method), or this priority list simply doesn't cover it --
+            # either way, required exactly as-is.
             leaf_wares.append((ware_id, amount, category))
             continue
 
@@ -762,10 +749,9 @@ def summarize(
             contributions, log = expand_ware(
                 row["ware"],
                 row["amount"] * scale,
-                build_focus,
+                build_method_priority,
                 by_ware_method,
                 methods_by_ware,
-                fallback_methods,
                 1,
                 next_ancestors,
                 depth_limit,
@@ -783,8 +769,8 @@ def summarize(
 
     # Rounded only here, once, on the fully-accumulated totals -- rounding
     # after every individual addition would compound small errors instead.
-    methods_output = {}
-    if build_focus is not None:
+    result = {"build_method_priority": build_method_priority}
+    if build_method_priority:
         if group_by_component_type:
             parts = {
                 category: {ware: round(qty, 2) for ware, qty in category_bucket.items()}
@@ -800,16 +786,11 @@ def summarize(
             parts = {ware: round(qty, 2) for ware, qty in bucket.items()}
             ware_count = len(bucket)
 
-        entry = {"parts": parts, "ware_count": ware_count}
+        result["parts"] = parts
+        result["ware_count"] = ware_count
         if verbose:
-            entry["resolution_log"] = resolution_log
-        methods_output[build_focus] = entry
+            result["resolution_log"] = resolution_log
 
-    result = {
-        "build_focus": build_focus,
-        "fallback_build_methods": fallback_methods,
-        "methods": methods_output,
-    }
     return result
 
 
@@ -819,8 +800,7 @@ def main() -> None:
     args = parser.parse_args()
 
     payload = load_input(args.input)
-    build_focus = payload.get("build_focus")
-    fallback_methods = payload.get("fallback_methods", DEFAULT_FALLBACK_METHODS)
+    build_method_priority = payload.get("build_method_priority", DEFAULT_BUILD_METHOD_PRIORITY)
     search_depth = payload.get("search_depth", DEFAULT_SEARCH_DEPTH)
     verbose = payload.get("verbose", True)
     group_by_component_type = payload.get("group_by_component_type", False)
@@ -843,7 +823,7 @@ def main() -> None:
         conn.close()
 
     result = summarize(
-        target_wares, rows, build_focus, fallback_methods, search_depth, verbose, group_by_component_type, category_by_ware
+        target_wares, rows, build_method_priority, search_depth, verbose, group_by_component_type, category_by_ware
     )
     print(json.dumps(result, indent=2))
 

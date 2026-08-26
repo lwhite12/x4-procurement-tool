@@ -64,13 +64,12 @@ Endpoints:
                                              per-ship column unlike
                                              countermeasures/deployables
   GET  /api/build_methods                 -- every real build method
-                                             (DEFAULT_FALLBACK_METHODS --
+                                             (DEFAULT_BUILD_METHOD_PRIORITY --
                                              see BUILD_METHODS in
                                              generate_ships_table.py for how
-                                             it was curated/ordered), for
-                                             the frontend's build-focus
-                                             dropdown and its per-column
-                                             editable fallback-methods list
+                                             it was curated/ordered), for the
+                                             frontend's per-column editable
+                                             build-method-priority list
                                              (defaults to this same list)
   POST /api/summarize                    -- aggregate_target_wares() +
                                              summarize(), same input shape
@@ -108,9 +107,9 @@ Endpoints:
                                                  -- "build everything from
                                                  scratch"
                                              production_wares/raw_materials
-                                             are per build method (like
-                                             /api/summarize's own
-                                             "methods"); top_level is a
+                                             each resolve to the same single
+                                             build_method_priority as
+                                             /api/summarize; top_level is a
                                              single total, since no method
                                              resolution is involved. Also
                                              takes its own
@@ -223,7 +222,7 @@ from query_ship_components import query_ship_groups
 from share_storage import get_share, put_share
 from summarize_production import (
     ABSOLUTE_MAX_DEPTH,
-    DEFAULT_FALLBACK_METHODS,
+    DEFAULT_BUILD_METHOD_PRIORITY,
     DEFAULT_SEARCH_DEPTH,
     aggregate_target_wares,
     categorize_target_wares,
@@ -279,8 +278,7 @@ class WaresConfiguration(BaseModel):
 
 
 class SummarizeRequest(BaseModel):
-    build_focus: str | None = None
-    fallback_methods: list[str] | None = None
+    build_method_priority: list[str] | None = None
     search_depth: int = DEFAULT_SEARCH_DEPTH
     verbose: bool = True
     group_by_component_type: bool = False
@@ -292,11 +290,10 @@ class PriceSummaryRequest(BaseModel):
     # response tiers are derived from this directly; unlike the old design,
     # nothing here is taken from a prior /api/summarize call.
     wares: list[WaresConfiguration]
-    # Same build_focus/fallback_methods semantics as SummarizeRequest --
-    # used for the production_wares/raw_materials tiers' own method
-    # resolution (top_level needs neither, it's a direct price lookup).
-    build_focus: str | None = None
-    fallback_methods: list[str] | None = None
+    # Same build_method_priority semantics as SummarizeRequest -- used for
+    # the production_wares/raw_materials tiers' own method resolution
+    # (top_level needs neither, it's a direct price lookup).
+    build_method_priority: list[str] | None = None
     # Same semantics as SummarizeRequest's own flag: false (the default)
     # prices each tier as one combined total; true prices each tier *by
     # component type* instead -- see summarize_prices_by_category()/
@@ -309,8 +306,7 @@ class PriceSummaryRequest(BaseModel):
 
 class Level1PartsRequest(BaseModel):
     ware_ids: list[str]
-    build_focus: str | None = None
-    fallback_methods: list[str] | None = None
+    build_method_priority: list[str] | None = None
 
 
 class ImportLoadoutsRequest(BaseModel):
@@ -471,14 +467,13 @@ def list_crew() -> list[dict]:
 
 @app.get("/api/build_methods")
 def list_build_methods() -> list[str]:
-    return DEFAULT_FALLBACK_METHODS
+    return DEFAULT_BUILD_METHOD_PRIORITY
 
 
 @app.post("/api/summarize")
 def summarize_endpoint(request: SummarizeRequest) -> dict:
     configurations = [config.model_dump() for config in request.wares]
     target_wares = aggregate_target_wares(configurations)
-    fallback_methods = request.fallback_methods if request.fallback_methods is not None else DEFAULT_FALLBACK_METHODS
 
     conn = get_connection()
     try:
@@ -490,8 +485,7 @@ def summarize_endpoint(request: SummarizeRequest) -> dict:
     return summarize(
         target_wares,
         rows,
-        request.build_focus,
-        fallback_methods,
+        request.build_method_priority,
         request.search_depth,
         request.verbose,
         request.group_by_component_type,
@@ -502,41 +496,37 @@ def summarize_endpoint(request: SummarizeRequest) -> dict:
 def _price_methods(
     target_wares,
     rows,
-    build_focus,
-    fallback_methods,
+    build_method_priority,
     search_depth,
     ware_prices,
     price_overrides,
     group_by_component_type,
     category_by_ware,
 ):
-    """summarize() at a given depth, then prices each resulting method
-    bucket's "parts" -- flat (summarize_prices()) or, when
-    group_by_component_type is set, by category (summarize_prices_by_
-    category()), mirroring "parts" itself being either a flat ware_id ->
-    amount map or a category -> ware_id -> amount map. Shared by the
-    production_wares (depth=1) and raw_materials (depth=ABSOLUTE_MAX_DEPTH)
-    tiers below, which differ only in which depth they ask summarize() for.
+    """summarize() at a given depth, then prices the resulting "parts" --
+    flat (summarize_prices()) or, when group_by_component_type is set, by
+    category (summarize_prices_by_category()), mirroring "parts" itself
+    being either a flat ware_id -> amount map or a category -> ware_id ->
+    amount map. Returns None when build_method_priority resolved to nothing
+    (summarize() has no "parts" to price at all -- see its own docstring).
+    Shared by the production_wares (depth=1) and raw_materials
+    (depth=ABSOLUTE_MAX_DEPTH) tiers below, which differ only in which
+    depth they ask summarize() for.
     """
     result = summarize(
-        target_wares, rows, build_focus, fallback_methods, search_depth, False, group_by_component_type, category_by_ware
+        target_wares, rows, build_method_priority, search_depth, False, group_by_component_type, category_by_ware
     )
+    if "parts" not in result:
+        return None
     if group_by_component_type:
-        return {
-            method: summarize_prices_by_category(data["parts"], ware_prices, price_overrides)
-            for method, data in result["methods"].items()
-        }
-    return {
-        method: summarize_prices(data["parts"], ware_prices, price_overrides)
-        for method, data in result["methods"].items()
-    }
+        return summarize_prices_by_category(result["parts"], ware_prices, price_overrides)
+    return summarize_prices(result["parts"], ware_prices, price_overrides)
 
 
 @app.post("/api/price_summary")
 def price_summary_endpoint(request: PriceSummaryRequest) -> dict:
     configurations = [config.model_dump() for config in request.wares]
     target_wares = aggregate_target_wares(configurations)
-    fallback_methods = request.fallback_methods if request.fallback_methods is not None else DEFAULT_FALLBACK_METHODS
 
     conn = get_connection()
     try:
@@ -570,8 +560,7 @@ def price_summary_endpoint(request: PriceSummaryRequest) -> dict:
     production_wares_summary = _price_methods(
         target_wares,
         rows,
-        request.build_focus,
-        fallback_methods,
+        request.build_method_priority,
         1,
         ware_prices,
         request.price_overrides,
@@ -585,8 +574,7 @@ def price_summary_endpoint(request: PriceSummaryRequest) -> dict:
     raw_materials_summary = _price_methods(
         target_wares,
         rows,
-        request.build_focus,
-        fallback_methods,
+        request.build_method_priority,
         ABSOLUTE_MAX_DEPTH,
         ware_prices,
         request.price_overrides,
@@ -616,16 +604,13 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
 
     Response: {"parts": {ware_id: {part_ware_id: amount, ...}, ...},
     "part_names": {part_ware_id: name, ...}} -- a ware_id with no
-    production recipe at all (a true leaf, or one this build_focus/
-    fallback_methods combination can't resolve) gets an empty {} rather
-    than being omitted, so the caller can still render a row for it.
-    part_names covers every part_ware_id that appears in any row, looked
-    up from whichever of economy_wares_base/equipment_wares_base actually
-    has it (a depth-1 input is normally a raw/economy ware, but doesn't
-    have to be).
+    production recipe at all (a true leaf, or one this build_method_
+    priority list can't resolve) gets an empty {} rather than being
+    omitted, so the caller can still render a row for it. part_names covers
+    every part_ware_id that appears in any row, looked up from whichever of
+    economy_wares_base/equipment_wares_base actually has it (a depth-1
+    input is normally a raw/economy ware, but doesn't have to be).
     """
-    fallback_methods = request.fallback_methods if request.fallback_methods is not None else DEFAULT_FALLBACK_METHODS
-
     conn = get_connection()
     try:
         rows = fetch_all_production_rows(conn)
@@ -633,9 +618,8 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
         parts_by_ware: dict[str, dict[str, float]] = {}
         all_part_ids: set[str] = set()
         for ware_id in request.ware_ids:
-            result = summarize([{"ware_id": ware_id, "amount": 1}], rows, request.build_focus, fallback_methods, 1, False)
-            method = result["build_focus"]
-            parts = result["methods"][method]["parts"] if method and method in result["methods"] else {}
+            result = summarize([{"ware_id": ware_id, "amount": 1}], rows, request.build_method_priority, 1, False)
+            parts = result.get("parts", {})
             parts_by_ware[ware_id] = parts
             all_part_ids.update(parts.keys())
 

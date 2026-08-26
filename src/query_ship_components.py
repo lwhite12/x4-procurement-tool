@@ -182,10 +182,14 @@ def load_input(source: str) -> dict:
 
 
 def resolve_ship(conn: sqlite3.Connection, identifier: str) -> sqlite3.Row | None:
-    row = conn.execute("SELECT name, ware_id, icon FROM ships_base WHERE ware_id = ?", (identifier,)).fetchone()
+    row = conn.execute(
+        "SELECT name, ware_id, icon, production_method FROM ships_base WHERE ware_id = ?", (identifier,)
+    ).fetchone()
     if row is not None:
         return row
-    return conn.execute("SELECT name, ware_id, icon FROM ships_base WHERE name = ?", (identifier,)).fetchone()
+    return conn.execute(
+        "SELECT name, ware_id, icon, production_method FROM ships_base WHERE name = ?", (identifier,)
+    ).fetchone()
 
 
 def fetch_groups(conn: sqlite3.Connection, ship_id: str) -> list[sqlite3.Row]:
@@ -409,6 +413,13 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str) -> dict:
         "name": ship["name"],
         "ware_id": ship["ware_id"],
         "icon": ship["icon"],
+        # This hull's own primary build method (ships_base.production_method
+        # -- generate_ships_table.py's write_ships_csv() already picks one
+        # canonical method per ship, "" when it has no production recipe at
+        # all) -- the frontend uses this to seed a fresh fleet's build
+        # method priority list when its first ship is added (see app.js's
+        # addSelectedShipToCart()), not for anything display here.
+        "production_method": ship["production_method"] or None,
         "summary": {
             "size": summary_row["size"] if summary_row is not None else None,
             "shields": summary_row["shields"] if summary_row is not None else None,

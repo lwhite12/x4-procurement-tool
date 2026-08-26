@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
+## [0.3.1] - 2026-08-26
+
+### Added
+
+- A fleet list's Build Method Priority is now auto-seeded from its first ship's own primary
+  build method (e.g. adding an Asgard first defaults the whole list to Terran) -- set once,
+  so it stays freely editable afterward and is never re-ordered automatically again.
+
+### Changed
+
+- Build Focus and Fallback Methods merged into a single, reorderable Build Method Priority
+  list, used consistently across the UI and API -- the top entry is tried first for every
+  ware, with each one below it acting as that ware's own fallback.
+
+### Fixed
+
+- The production-cost pipeline was silently dropping DLC patches to existing wares' build
+  methods (e.g. the Terran build method for XL All-Round Thrusters Mk3, needed to build a
+  pure-Terran Asgard) -- several hundred DLC recipe patches across every expansion are now
+  included.
+- Kha'ak/Xenon-only build methods are no longer hidden from price/cost comparisons, so Xenon
+  and Kha'ak ships can now be viewed and priced like any other (still not player-buildable or
+  pilotable, same as before).
+
 ## [0.3.0] - 2026-08-23
 
 ### Added

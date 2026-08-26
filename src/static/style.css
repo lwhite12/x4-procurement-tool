@@ -200,10 +200,10 @@ body {
   cursor: default;
 }
 
-/* Name (and, in the Ware Cost List's own column headers, the Build Focus
-   button underneath it -- see buildFleetTabButton()'s showBuildFocus
+/* Name (and, in the Ware Cost List's own column headers, the Priority
+   button underneath it -- see buildFleetTabButton()'s showBuildPriority
    option) stacked in a column next to the ship icon, instead of the plain
-   single-line text a tab has with no Build Focus line. */
+   single-line text a tab has with no Priority line. */
 .fleet-list-tab-name-stack {
   display: flex;
   flex-direction: column;

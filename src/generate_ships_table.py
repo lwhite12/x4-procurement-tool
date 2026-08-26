@@ -218,15 +218,19 @@ points depending on the ship), which doesn't fit fixed columns at all, so
 it's serialized into a single "position:value,position:value,..." text
 column instead of a further normalized table.
 
-Expansion ships
+Expansion wares
 ---------------
 Each expansion's wares_<suffix>.xml is a <diff> patch, not a standalone
-<wares> list: new ship (and other ware) definitions live inside an
+<wares> list: new ship/equipment/economy-ware definitions live inside an
 <add sel="/wares"> block, alongside separate <add sel="/wares/ware[@id='...']">
-blocks that patch *existing* wares (mostly adding extra owner factions to
-base-game ships for that expansion). Only the wholesale-new ware entries are
-picked up here -- the per-ware patches are not applied, so an existing ship's
-`owners` list may be incomplete with respect to what an expansion adds to it.
+blocks that patch an *existing* ware (extra owner factions, or -- just as
+common -- an entirely new <production> method the base game didn't ship,
+e.g. the Terran DLC adding a Terran recipe to a thruster that only had a
+Universal one). iter_ware_elements() applies both: every file's own
+wholesale-new ware entries are collected first, then every patch is merged
+onto its target ware's Element (owners/productions/etc. all inherited from
+whichever child elements the patch itself adds) before any of the
+type-specific parsers below ever see it.
 
 Economy wares
 -------------
@@ -692,31 +696,40 @@ FULL_REF_RE = re.compile(r"^\{(\d+),\s*(\d+)\}$")
 LEADING_PAREN_RE = re.compile(r"^\((?:\\.|[^()])*\)\s*")
 ESCAPED_PAREN_RE = re.compile(r"\\([()])")
 
-# Every real, player-selectable production method (a ware's own
-# <production method="..." name="{page,id}"/>) across the whole dataset,
-# manually curated from a direct audit of every distinct resolved method
-# name against how often each is tagged "noplayerbuild" (an NPC/enemy-only
-# recipe variant, never something a player's own factory can build to):
+# Every real production method (a ware's own <production method="..."
+# name="{page,id}"/>) across the whole dataset, manually curated from a
+# direct audit of every distinct resolved method name:
 #   Universal 1064/1064 clean, Terran 143/143, Boron 76/76, Teladi 12/12,
 #   Argon 7/7, Paranid 7/7, Closed Loop 4/4, Split 2/2 -- all fully player-
 #   buildable, kept as-is.
-#   Xenon 127/127 noplayerbuild -- the enemy faction's own recipe variant,
-#   dropped entirely (never a real choice).
-#   Recycling 5/5 noplayerbuild -- kept anyway: unlike Xenon this is a real,
-#   player-accessible activity (Scrap Processor stations are player-
-#   buildable), the tag just means this exact recipe variant isn't
-#   selectable as a factory blueprint.
+#   Xenon 127/127 tagged "noplayerbuild" (an NPC/enemy-only recipe
+#   variant) -- kept anyway, deliberately: this list isn't only used to
+#   pick a build focus for a player's *own* factories, it's also how
+#   Xenon/Kha'ak ships get priced/compared at all in the Cost Analysis
+#   tool, since those ships' own components have no other method to fall
+#   back to. "noplayerbuild" is a real in-game distinction (this recipe
+#   variant isn't selectable as a factory blueprint) but not a reason to
+#   hide the data -- confirmed the tag doesn't even mean "never player-
+#   accessible" in general: the Recycling method below carries the same
+#   tag, and is produced by a real, player-buildable Scrap Recycler module
+#   that references it directly, bypassing the normal factory-blueprint
+#   picker entirely.
+#   Recycling 5/5 also tagged "noplayerbuild", kept for that reason above.
 #   A second, garbled method (2/2 noplayerbuild, "Processing" followed by a
 #   giant leaked dev comment -- its own name="{20206,1301}" resolves via a
 #   *trailing*, not leading, "(...)" comment, which resolve_text() has no
 #   safe way to strip generically: a regex matching an unescaped trailing
 #   "(...)" also matches inside strings using ESCAPED_PAREN_RE's own escape
 #   convention (e.g. ship names like "Magnetar \(Gas\) Vanguard"), silently
-#   corrupting them. Not worth a bigger fix for one ware's cosmetic name --
-#   dropped instead, same Scrap-Processor/recycling concept as Recycling
-#   above in practice, and only 2 occurrences total.
-# Ordered Universal first, Terran second, Recycling last (all explicit
-# product requirements), everything else alphabetically between.
+#   corrupting them. Still dropped -- unlike Xenon/Recycling above this
+#   isn't a noplayerbuild judgment call, it's a cosmetic text-resolution
+#   bug (a real fix would need a way to distinguish "trailing dev comment"
+#   from "trailing escaped parenthetical in a real name," not attempted
+#   here) -- same Scrap-Processor/recycling concept as Recycling in
+#   practice, and only 2 occurrences total, so nothing is lost by dropping
+#   it specifically.
+# Ordered Universal first, Terran second, Recycling/Xenon last (all
+# explicit product requirements), everything else alphabetically between.
 BUILD_METHODS = [
     "Universal",
     "Terran",
@@ -727,6 +740,7 @@ BUILD_METHODS = [
     "Split",
     "Teladi",
     "Recycling",
+    "Xenon",
 ]
 
 COMPONENT_TYPES = ("engine", "turret", "weapon", "shield")
@@ -783,74 +797,117 @@ def wares_files() -> list[Path]:
     return sorted(WARES_DIR.glob("wares*.xml"))
 
 
-def iter_ware_elements(path: Path):
-    """Yield <ware> elements from a wares file.
+WARE_PATCH_SEL_RE = re.compile(r"^/wares/ware\[@id='([^']+)'\]$")
+
+
+def iter_ware_elements(paths: list[Path]):
+    """Yield every <ware> element across all of `paths` (base wares.xml plus
+    every expansion's wares_<suffix>.xml), patches applied -- one merged
+    pass across every file, not per-file, so patch order relative to the
+    ware it targets never matters (every file's own new-ware definitions are
+    collected first, patches are resolved against that complete set after).
 
     Base wares.xml has a plain <wares> root with <ware> children. Each
-    expansion's wares_<suffix>.xml is a <diff> patch instead: new ware
-    definitions live inside <add sel="/wares"> blocks. Patches to existing
-    wares (<add sel="/wares/ware[@id='...']">) are intentionally skipped --
-    see the "Expansion ships" note in the module docstring.
+    expansion's wares_<suffix>.xml is a <diff> patch instead, with two
+    distinct block shapes:
+      - <add sel="/wares"> -- a brand-new ware definition. First file wins
+        on a duplicate id (prints the same "duplicate ware id" warning every
+        caller used to print itself -- centralized here now that dedup
+        happens once for every caller instead of separately per parser).
+      - <add sel="/wares/ware[@id='...']"> -- a patch to an *existing* ware
+        (new/replacement <production> methods, extra <owner> factions,
+        etc.) -- appended onto that ware's own Element in place. Silently
+        ignored if the target id was never actually defined by any file
+        (e.g. a patch aimed at DLC-gated content this dataset doesn't have
+        installed) -- nothing to merge onto, not an error.
+
+    Previously (see git history) the per-ware patch case was skipped
+    entirely, on the assumption it "mostly adds extra owner factions to
+    base-game ships" -- confirmed wrong: it's also how expansions attach
+    new production methods to *existing* wares (e.g. the Terran DLC adding
+    a Terran recipe to a thruster that only shipped with a Universal one),
+    which was silently dropping real, player-relevant build methods for
+    every ware category, not just ships.
     """
-    root = ET.parse(path).getroot()
-    if root.tag == "wares":
-        yield from root.findall("ware")
-    elif root.tag == "diff":
-        for add in root.findall("add"):
-            if add.get("sel") == "/wares":
-                yield from add.findall("ware")
-    else:
-        raise ValueError(f"Unexpected root tag '{root.tag}' in {path}")
+    wares_by_id: dict[str, ET.Element] = {}
+    patches: list[tuple[str, ET.Element, Path]] = []
+
+    for path in paths:
+        root = ET.parse(path).getroot()
+        if root.tag == "wares":
+            new_ware_elements = root.findall("ware")
+        elif root.tag == "diff":
+            new_ware_elements = []
+            for add in root.findall("add"):
+                sel = add.get("sel")
+                if sel == "/wares":
+                    new_ware_elements.extend(add.findall("ware"))
+                elif sel:
+                    match = WARE_PATCH_SEL_RE.match(sel)
+                    if match:
+                        patches.append((match.group(1), add, path))
+        else:
+            raise ValueError(f"Unexpected root tag '{root.tag}' in {path}")
+
+        for ware in new_ware_elements:
+            ware_id = ware.get("id")
+            if ware_id in wares_by_id:
+                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
+                continue
+            wares_by_id[ware_id] = ware
+
+    for target_id, patch_el, path in patches:
+        target = wares_by_id.get(target_id)
+        if target is None:
+            continue
+        for child in patch_el:
+            target.append(child)
+
+    return wares_by_id.values()
 
 
 def parse_ship_wares(paths: list[Path]) -> list[dict]:
     ships = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = (ware.get("tags") or "").split()
-            if "ship" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = (ware.get("tags") or "").split()
+        if "ship" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            owners = [o.get("faction") for o in ware.findall("owner")]
+        owners = [o.get("faction") for o in ware.findall("owner")]
 
-            price = ware.find("price")
-            macro_el = ware.find("component")
+        price = ware.find("price")
+        macro_el = ware.find("component")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "time": float(prod.get("time")),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            ships.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "owners": owners,
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "macro": macro_el.get("ref") if macro_el is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "time": float(prod.get("time")),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        ships.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "owners": owners,
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "macro": macro_el.get("ref") if macro_el is not None else None,
+                "productions": productions,
+            }
+        )
     return ships
 
 
@@ -871,46 +928,40 @@ def parse_economy_wares(paths: list[Path]) -> list[dict]:
     kept, not just the first.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = (ware.get("tags") or "").split()
-            if "economy" not in tags and "processed" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = (ware.get("tags") or "").split()
+        if "economy" not in tags and "processed" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
+        price = ware.find("price")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -926,49 +977,43 @@ def parse_equipment_wares(paths: list[Path]) -> list[dict]:
     ware's own hardpoint slots or combat stats, see the module docstring.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = set((ware.get("tags") or "").split())
-            equipment_type = classify_equipment_type(tags)
-            if "equipment" not in tags or equipment_type is None:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = set((ware.get("tags") or "").split())
+        equipment_type = classify_equipment_type(tags)
+        if "equipment" not in tags or equipment_type is None:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
+        price = ware.find("price")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "equipment_type": equipment_type,
-                    "missile_launcher": "missilelauncher" in tags,
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "equipment_type": equipment_type,
+                "missile_launcher": "missilelauncher" in tags,
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -986,48 +1031,42 @@ def parse_missile_wares(paths: list[Path]) -> list[dict]:
     blocks kept, not just the first).
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = (ware.get("tags") or "").split()
-            if "equipment" not in tags or "missile" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = (ware.get("tags") or "").split()
+        if "equipment" not in tags or "missile" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
-            component_el = ware.find("component")
+        price = ware.find("price")
+        component_el = ware.find("component")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "macro": component_el.get("ref") if component_el is not None else None,
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "macro": component_el.get("ref") if component_el is not None else None,
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -1048,50 +1087,44 @@ def parse_deployable_wares(paths: list[Path]) -> list[dict]:
     Same price/production parsing as parse_equipment_wares.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = set((ware.get("tags") or "").split())
-            deployable_type = classify_deployable_type(tags)
-            if "equipment" not in tags or deployable_type is None:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = set((ware.get("tags") or "").split())
+        deployable_type = classify_deployable_type(tags)
+        if "equipment" not in tags or deployable_type is None:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
-            component_el = ware.find("component")
+        price = ware.find("price")
+        component_el = ware.find("component")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "deployable_type": deployable_type,
-                    "macro": component_el.get("ref") if component_el is not None else None,
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "deployable_type": deployable_type,
+                "macro": component_el.get("ref") if component_el is not None else None,
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -1109,48 +1142,42 @@ def parse_drone_wares(paths: list[Path]) -> list[dict]:
     Same price/production parsing as parse_deployable_wares.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = set((ware.get("tags") or "").split())
-            if "equipment" not in tags or "drone" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = set((ware.get("tags") or "").split())
+        if "equipment" not in tags or "drone" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
-            component_el = ware.find("component")
+        price = ware.find("price")
+        component_el = ware.find("component")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "macro": component_el.get("ref") if component_el is not None else None,
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "macro": component_el.get("ref") if component_el is not None else None,
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -1163,46 +1190,40 @@ def parse_countermeasure_wares(paths: list[Path]) -> list[dict]:
     Same price/production parsing as parse_drone_wares.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = set((ware.get("tags") or "").split())
-            if "equipment" not in tags or "countermeasure" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = set((ware.get("tags") or "").split())
+        if "equipment" not in tags or "countermeasure" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            price = ware.find("price")
+        price = ware.find("price")
 
-            productions = []
-            for prod in ware.findall("production"):
-                wares_needed = {}
-                primary = prod.find("primary")
-                if primary is not None:
-                    for w in primary.findall("ware"):
-                        wares_needed[w.get("ware")] = int(w.get("amount"))
-                productions.append(
-                    {
-                        "method_name_ref": prod.get("name"),
-                        "produced_amount": int(prod.get("amount")),
-                        "wares": wares_needed,
-                    }
-                )
-
-            wares.append(
+        productions = []
+        for prod in ware.findall("production"):
+            wares_needed = {}
+            primary = prod.find("primary")
+            if primary is not None:
+                for w in primary.findall("ware"):
+                    wares_needed[w.get("ware")] = int(w.get("amount"))
+            productions.append(
                 {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": productions,
+                    "method_name_ref": prod.get("name"),
+                    "produced_amount": int(prod.get("amount")),
+                    "wares": wares_needed,
                 }
             )
+
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": productions,
+            }
+        )
     return wares
 
 
@@ -1214,27 +1235,21 @@ def parse_crew_ware(paths: list[Path]) -> list[dict]:
     crew" in this module's docstring.
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            if ware.get("id") != "crew":
-                continue
-            if "crew" in seen_ids:
-                print(f"WARNING: duplicate ware id 'crew' (in {path.name}), skipping")
-                continue
-            seen_ids.add("crew")
+    for ware in iter_ware_elements(paths):
+        if ware.get("id") != "crew":
+            continue
 
-            price = ware.find("price")
-            wares.append(
-                {
-                    "ware_id": "crew",
-                    "name_ref": ware.get("name"),
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                    "productions": [],
-                }
-            )
+        price = ware.find("price")
+        wares.append(
+            {
+                "ware_id": "crew",
+                "name_ref": ware.get("name"),
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+                "productions": [],
+            }
+        )
     return wares
 
 
@@ -1259,35 +1274,30 @@ def parse_thruster_wares(paths: list[Path]) -> list[dict]:
     data has no per-thruster faction/tier lock at all.
     """
     rows = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = (ware.get("tags") or "").split()
-            if "equipment" not in tags or "thruster" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = (ware.get("tags") or "").split()
+        if "equipment" not in tags or "thruster" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                continue  # parse_equipment_wares already warns on this dupe
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            match = THRUSTER_WARE_RE.match(ware_id)
-            if not match:
-                print(f"WARNING: thruster ware id '{ware_id}' doesn't match the expected pattern, skipping")
-                continue
-            size, thruster_class, mk = match.groups()
+        match = THRUSTER_WARE_RE.match(ware_id)
+        if not match:
+            print(f"WARNING: thruster ware id '{ware_id}' doesn't match the expected pattern, skipping")
+            continue
+        size, thruster_class, mk = match.groups()
 
-            component_el = ware.find("component")
-            rows.append(
-                {
-                    "ware_id": ware_id,
-                    "macro": component_el.get("ref") if component_el is not None else None,
-                    "mk": int(mk),
-                    "thruster_class": thruster_class,
-                    "size": size,
-                    "compatibility": THRUSTER_COMPATIBILITY,
-                }
-            )
+        component_el = ware.find("component")
+        rows.append(
+            {
+                "ware_id": ware_id,
+                "macro": component_el.get("ref") if component_el is not None else None,
+                "mk": int(mk),
+                "thruster_class": thruster_class,
+                "size": size,
+                "compatibility": THRUSTER_COMPATIBILITY,
+            }
+        )
     return rows
 
 
@@ -1316,37 +1326,31 @@ def parse_software_wares(paths: list[Path]) -> list[dict]:
     thruster vocabulary).
     """
     wares = []
-    seen_ids: set[str] = set()
-    for path in paths:
-        for ware in iter_ware_elements(path):
-            tags = (ware.get("tags") or "").split()
-            if "equipment" not in tags or "software" not in tags:
-                continue
+    for ware in iter_ware_elements(paths):
+        tags = (ware.get("tags") or "").split()
+        if "equipment" not in tags or "software" not in tags:
+            continue
 
-            ware_id = ware.get("id")
-            if ware_id in seen_ids:
-                print(f"WARNING: duplicate ware id '{ware_id}' (in {path.name}), skipping")
-                continue
-            seen_ids.add(ware_id)
+        ware_id = ware.get("id")
 
-            match = SOFTWARE_WARE_RE.match(ware_id)
-            if not match:
-                print(f"WARNING: software ware id '{ware_id}' doesn't match the expected pattern, skipping")
-                continue
-            category, mk = match.groups()
+        match = SOFTWARE_WARE_RE.match(ware_id)
+        if not match:
+            print(f"WARNING: software ware id '{ware_id}' doesn't match the expected pattern, skipping")
+            continue
+        category, mk = match.groups()
 
-            price = ware.find("price")
-            wares.append(
-                {
-                    "ware_id": ware_id,
-                    "name_ref": ware.get("name"),
-                    "category": category,
-                    "mk": int(mk),
-                    "price_min": price.get("min") if price is not None else None,
-                    "price_avg": price.get("average") if price is not None else None,
-                    "price_max": price.get("max") if price is not None else None,
-                }
-            )
+        price = ware.find("price")
+        wares.append(
+            {
+                "ware_id": ware_id,
+                "name_ref": ware.get("name"),
+                "category": category,
+                "mk": int(mk),
+                "price_min": price.get("min") if price is not None else None,
+                "price_avg": price.get("average") if price is not None else None,
+                "price_max": price.get("max") if price is not None else None,
+            }
+        )
     return wares
 
 

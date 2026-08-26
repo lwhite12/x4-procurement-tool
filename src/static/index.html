@@ -5,6 +5,9 @@
   <title>X4 Procurement Planner</title>
   <link rel="icon" type="image/png" href="/images/favicon.png" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Cloudflare Web Analytics -->
+  <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "ef63a12d174e416da4596fa04f414302"}'></script>
+  <!-- End Cloudflare Web Analytics -->
 </head>
 <body>
   <header id="main-header">
@@ -258,13 +261,9 @@
 
   <div id="build-method-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3>Build Method</h3>
-      <label>
-        Build focus
-        <select id="build-method-modal-focus-select"></select>
-      </label>
-      <div class="modal-section-title">Fallback methods (tried in order, top to bottom)</div>
-      <div id="build-method-modal-fallback-list" class="build-method-fallback-list"></div>
+      <h3>Build Method Priority</h3>
+      <div class="modal-section-title">Tried in order, top to bottom</div>
+      <div id="build-method-modal-priority-list" class="build-method-fallback-list"></div>
       <div class="modal-actions">
         <button type="button" id="build-method-modal-cancel-btn">Cancel</button>
         <button type="button" id="build-method-modal-save-btn">Save</button>

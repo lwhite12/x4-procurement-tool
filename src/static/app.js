@@ -17,7 +17,10 @@ let selectedShipWareId = "";
 // open when editCartEntry() was called -- see setActiveFleet()/deleteFleet().
 let editingIndex = null;
 
-// One fleet list: {name, cart, buildFocus, fallbackMethods, wareCostList, dirty}.
+// One fleet list: {name, cart, buildMethodPriority, wareCostList, dirty}.
+// buildMethodPriority is an ordered list of build method names (tried in
+// order, first available match wins per ware -- see resolve_method() in
+// summarize_production.py) or null to use the server's own default.
 // cart entries: {shipWareId, shipName, shipIcon, missingRequiredComponents, note,
 // loadoutMinimized, count, selections: {group_name: ware_id},
 // missileAmounts, droneAmounts, deployableAmounts, countermeasureAmounts: {ware_id: amount},
@@ -27,7 +30,7 @@ let editingIndex = null;
 // dirty starts true (nothing computed yet) and is cleared by
 // recomputeDirtyFleets() -- see that function for the lazy-recompute design.
 function makeFleet(name = "") {
-  return { name, cart: [], buildFocus: null, fallbackMethods: null, wareCostList: null, dirty: true };
+  return { name, cart: [], buildMethodPriority: null, wareCostList: null, dirty: true };
 }
 
 // Never empty -- always at least one fleet exists, mirroring the old
@@ -214,6 +217,7 @@ const BUILD_METHOD_TO_FACTION = {
   Split: "split",
   Teladi: "teladi",
   Terran: "terran",
+  Xenon: "xenon",
 };
 
 // Every FACTION_COLORS entry gets a solid backing panel instead of plain
@@ -225,10 +229,9 @@ const BUILD_METHOD_TO_FACTION = {
 // Paranid/Split/Xenon), a lighter steel-grey "slate" panel behind every
 // light color (Boron/Teladi/Terran/Kha'ak/Yaki) -- a light panel there
 // would fight with the text color the same way plain dark text does on
-// the page background. Not applied to <select><option> coloring
-// (raceColorForName()/buildMethodColor() alone, used by
-// buildGroupRow()/openBuildMethodModal()) since <option> background
-// styling doesn't reliably render in native dropdowns anyway.
+// the page background. Not applied to <select><option> coloring (used by
+// buildGroupRow() alone) since <option> background styling doesn't
+// reliably render in native dropdowns anyway.
 const FACTION_BG_CLASS = {
   argon: "faction-bg-silver",
   paranid: "faction-bg-silver",
@@ -246,10 +249,6 @@ function factionColor(factionKey) {
   return factionKey ? (FACTION_COLORS[factionKey] ?? null) : null;
 }
 
-function buildMethodColor(methodName) {
-  return factionColor(BUILD_METHOD_TO_FACTION[methodName]);
-}
-
 // Sets `el`'s text color to `factionKey`'s color (a no-op if `factionKey`
 // is null/unmapped) and, for FACTION_BG_CLASS entries, adds the matching
 // backing-panel class so the harder-to-read faction colors stay legible.
@@ -259,6 +258,27 @@ function applyFactionTextColor(el, factionKey) {
   el.style.color = color;
   const bgClass = FACTION_BG_CLASS[factionKey];
   if (bgClass) el.classList.add(bgClass);
+}
+
+// Like applyFactionTextColor(), but for a build method name specifically
+// (see BUILD_METHOD_TO_FACTION): a race-mapped method (Argon/Boron/.../
+// Xenon) gets that faction's usual colored pill, while a race-less one
+// (Universal/Closed Loop/Recycling -- deliberately absent from
+// BUILD_METHOD_TO_FACTION) still gets a pill, just a plain dark one with
+// white text, so every build method reads as a distinct button/row instead
+// of the race-less ones rendering as unstyled plain text.
+function applyBuildMethodColor(el, methodName) {
+  const factionKey = BUILD_METHOD_TO_FACTION[methodName];
+  if (factionKey) {
+    applyFactionTextColor(el, factionKey);
+    return;
+  }
+  // White "as if it were a race color" -- reuses the exact same slate
+  // backing panel every light race color (Boron/Teladi/Terran/Kha'ak/Yaki)
+  // already sits on, rather than a bespoke background, so a race-less
+  // method looks identical in style to a real one.
+  el.style.color = "#ffffff";
+  el.classList.add("faction-bg-slate");
 }
 
 // Matches a leading race token in an equipment display name, e.g. "PAR"
@@ -367,8 +387,7 @@ const loadCartInput = document.getElementById("load-cart-input");
 const cartNameInput = document.getElementById("cart-name-input");
 const fleetListTabsEl = document.getElementById("fleet-list-tabs");
 const buildMethodModalOverlay = document.getElementById("build-method-modal-overlay");
-const buildMethodModalFocusSelect = document.getElementById("build-method-modal-focus-select");
-const buildMethodModalFallbackList = document.getElementById("build-method-modal-fallback-list");
+const buildMethodModalPriorityList = document.getElementById("build-method-modal-priority-list");
 const buildMethodModalCancelBtn = document.getElementById("build-method-modal-cancel-btn");
 const buildMethodModalSaveBtn = document.getElementById("build-method-modal-save-btn");
 const equipmentPickerModalOverlay = document.getElementById("equipment-picker-modal-overlay");
@@ -412,27 +431,27 @@ const selectGameLoadoutCancelBtn = document.getElementById("select-game-loadout-
 // lastWareCostList/activeBuildFocus/activeFallbackMethods used to live here
 // as module-level globals for "the Active column" specifically -- now every
 // fleet (not just one "active" one) carries its own .wareCostList/
-// .buildFocus/.fallbackMethods directly (see makeFleet()), read via
+// .buildMethodPriority directly (see makeFleet()), read via
 // activeFleet().___ wherever the active fleet's own values are needed.
 
 // Every real build method, fetched once from GET /api/build_methods (see
 // BUILD_METHODS in generate_ships_table.py for how it's curated/ordered) --
-// both the options list for the modal's build-focus <select> and the
-// starting point for any column whose own fallbackMethods is still null.
+// both the options the modal's priority list offers and the starting point
+// for any column whose own buildMethodPriority is still null.
 let allBuildMethods = [];
 
 // Which column the Build Method modal is currently open for -- one of the
-// objects wareCostListColumns() builds ({fleetIndex, buildFocus,
-// fallbackMethods, ...}), read by the modal's own Save handler to call
+// objects wareCostListColumns() builds ({fleetIndex, buildMethodPriority,
+// ...}), read by the modal's own Save handler to call
 // recomputeFleetBuildConfig(column.fleetIndex, ...) on Save. null while the
 // modal is closed.
 let buildMethodModalTarget = null;
 
-// The modal's own working copy of the fallback-method list while open --
-// [{name, included}], in display/fallback order -- edited in place by the
-// checkbox/reorder controls (see renderBuildMethodModalFallbackList()) and
-// only committed to the target column's own fallbackMethods on Save.
-let buildMethodModalFallbackOrder = [];
+// The modal's own working copy of the priority list while open --
+// [{name, included}], in display/priority order -- edited in place by the
+// checkbox/reorder controls (see renderBuildMethodModalPriorityList()) and
+// only committed to the target column's own buildMethodPriority on Save.
+let buildMethodModalPriorityOrder = [];
 
 // A ships_base.icon value (e.g. "ship_s_fighter_01") names a PNG under
 // data/images/ships/symbols/ -- see generate_ship_icons.py -- served by
@@ -1344,16 +1363,15 @@ function cartWareIds() {
   return ids;
 }
 
-// ware_ids from every method bucket's "parts" within one summarize()-
-// shaped result ({"methods": {method: {"parts": {ware_id: amount}}}}),
-// unioned together -- a null result (e.g. a saved column that predates
-// price_summary or an empty cart) just contributes nothing.
+// ware_ids from one summarize()-shaped result's flat "parts"
+// ({"build_method_priority": [...], "parts": {ware_id: amount}, ...}) --
+// a null result (e.g. a fleet with no wareCostList yet) or one whose
+// build_method_priority resolved to nothing (no "parts" key at all) just
+// contributes nothing.
 function wareIdsFromSummarizeResult(result) {
   const ids = new Set();
   if (!result) return ids;
-  for (const method of Object.values(result.methods ?? {})) {
-    for (const wareId of Object.keys(method.parts ?? {})) ids.add(wareId);
-  }
+  for (const wareId of Object.keys(result.parts ?? {})) ids.add(wareId);
   return ids;
 }
 
@@ -2707,6 +2725,24 @@ function addSelectedShipToCart() {
       displayItems,
     };
   } else {
+    // Seeded once, here, rather than kept dynamic: the priority list is
+    // meant to be freely hand-edited afterward (see the Build Method modal)
+    // without this logic silently re-sorting it back out from under the
+    // user on every subsequent add/remove -- so this only ever fires for
+    // this fleet's very first ship, and only if its priority hasn't
+    // already been explicitly set (e.g. via the modal, before any ship was
+    // added). currentShip.production_method is that hull's own primary
+    // build method (see query_ship_groups()'s own comment) -- promoted to
+    // the front of the normal default order, not a full replacement, since
+    // components the ship itself doesn't gate (raw materials, generic
+    // equipment) may still need the rest of that order as fallback.
+    const isFirstShipInFleet = activeFleet().cart.length === 0;
+    if (isFirstShipInFleet && !activeFleet().buildMethodPriority && currentShip.production_method) {
+      activeFleet().buildMethodPriority = [
+        currentShip.production_method,
+        ...allBuildMethods.filter((method) => method !== currentShip.production_method),
+      ];
+    }
     activeFleet().cart.push({
       shipWareId: currentShip.ware_id,
       shipName: currentShip.name,
@@ -2920,7 +2956,7 @@ function renderLoadoutCell(loadoutTd, entry) {
 // recalculation -- cart edits just mark the active fleet dirty (see the qty
 // handlers/removeBtn below) and wait for recomputeDirtyFleets(), which only
 // actually runs on navigating into Cost Analysis (or immediately, for the
-// couple of triggers -- price overrides, build focus -- only reachable from
+// couple of triggers -- price overrides, build method priority -- only reachable from
 // within that page already). See PERSISTED_STATE plan notes / showPage().
 function renderCart() {
   // Saved synchronously here so a refresh in the brief gap before the next
@@ -3533,20 +3569,21 @@ function fetchPriceSummaryResult(groupByComponentType, baseBody) {
 }
 
 // Fetches all four summarize() depth x grouping-mode combinations plus both
-// price_summary grouping modes for one cart + build focus + fallback-method
-// list, returning the exact {total: {...}, component_type: {...}} shape
-// every fleet.wareCostList holds. fallbackMethods null is passed straight
+// price_summary grouping modes for one cart + build method priority list,
+// returning the exact {total: {...}, component_type: {...}} shape every
+// fleet.wareCostList holds. buildMethodPriority null is passed straight
 // through to the API as-is -- both /api/summarize and /api/price_summary
-// already treat a null fallback_methods as "use the server's own default"
-// (DEFAULT_FALLBACK_METHODS), same meaning fleet.fallbackMethods gives it
-// client-side. Shared by recomputeDirtyFleets() (called once per dirty
-// fleet) and recomputeFleetBuildConfig() (a single fleet, re-run only when
-// that fleet's own build method is explicitly edited) -- pure function of
-// its three arguments, doesn't know or care which fleet it's for.
-async function computeWareCostList(cartEntries, buildFocus, fallbackMethods) {
+// already treat a null build_method_priority as "use the server's own
+// default" (DEFAULT_BUILD_METHOD_PRIORITY), same meaning
+// fleet.buildMethodPriority gives it client-side. Shared by
+// recomputeDirtyFleets() (called once per dirty fleet) and
+// recomputeFleetBuildConfig() (a single fleet, re-run only when that
+// fleet's own build method is explicitly edited) -- pure function of its
+// two arguments, doesn't know or care which fleet it's for.
+async function computeWareCostList(cartEntries, buildMethodPriority) {
   const wares = cartEntries.map((entry) => ({ count: entry.count, wares_list: entry.wares_list }));
-  const summarizeBaseBody = { build_focus: buildFocus, fallback_methods: fallbackMethods, verbose: false, wares };
-  const priceBaseBody = { build_focus: buildFocus, fallback_methods: fallbackMethods, wares, price_overrides: priceOverrides };
+  const summarizeBaseBody = { build_method_priority: buildMethodPriority, verbose: false, wares };
+  const priceBaseBody = { build_method_priority: buildMethodPriority, wares, price_overrides: priceOverrides };
 
   const [
     totalRawMaterials,
@@ -3590,7 +3627,7 @@ async function computeWareCostList(cartEntries, buildFocus, fallbackMethods) {
 // directly into Cost Analysis (e.g. a bookmarked #cost-analysis link), and
 // eagerly from the two triggers only reachable from *within* that page
 // already -- price overrides (markAllFleetsDirtyAndRecompute()) and a
-// fleet's own build focus (recomputeFleetBuildConfig() below) -- since
+// fleet's own build method priority (recomputeFleetBuildConfig() below) -- since
 // "navigate in" will never fire again while already there.
 //
 // Promise.allSettled (not Promise.all) closing over fleet objects (not
@@ -3610,7 +3647,7 @@ async function recomputeDirtyFleets() {
         return;
       }
       try {
-        fleet.wareCostList = await computeWareCostList(fleet.cart, fleet.buildFocus, fleet.fallbackMethods);
+        fleet.wareCostList = await computeWareCostList(fleet.cart, fleet.buildMethodPriority);
         fleet.dirty = false;
       } catch (err) {
         // Left dirty -- retried on the next trigger. fleet.wareCostList
@@ -3629,65 +3666,48 @@ async function recomputeDirtyFleets() {
 // immediately -- this only ever fires from one deliberate action (editing
 // that fleet's own build method, from within the Cost Analysis page, where
 // "navigate in" won't happen again), so there's nothing to defer.
-function recomputeFleetBuildConfig(fleetIndex, buildFocus, fallbackMethods) {
+function recomputeFleetBuildConfig(fleetIndex, buildMethodPriority) {
   const fleet = fleets[fleetIndex];
   if (!fleet) return;
-  fleet.buildFocus = buildFocus;
-  fleet.fallbackMethods = fallbackMethods;
+  fleet.buildMethodPriority = buildMethodPriority;
   fleet.dirty = true;
   recomputeDirtyFleets();
 }
 
 // Opens the Build Method modal for `column` (one of wareCostListColumns()'s
-// own entries) -- populates the build-focus <select> from allBuildMethods
-// (plus a leading "no build focus" option) and the fallback-methods list
-// from column.fallbackMethods, defaulting to allBuildMethods itself (in its
+// own entries) -- populates the priority checklist from
+// column.buildMethodPriority, defaulting to allBuildMethods itself (in its
 // already-correct order) when that column has never had one set. Every
 // method in allBuildMethods is always shown, even ones this column's own
-// customized list had unchecked/excluded -- see buildMethodModalFallbackOrder's
+// customized list had unchecked/excluded -- see buildMethodModalPriorityOrder's
 // own comment for why order and inclusion are tracked independently.
 function openBuildMethodModal(column) {
   buildMethodModalTarget = column;
 
-  buildMethodModalFocusSelect.innerHTML = "";
-  const noneOption = document.createElement("option");
-  noneOption.value = "";
-  noneOption.textContent = "-- none --";
-  buildMethodModalFocusSelect.appendChild(noneOption);
-  for (const method of allBuildMethods) {
-    const opt = document.createElement("option");
-    opt.value = method;
-    opt.textContent = method;
-    const color = buildMethodColor(method);
-    if (color) opt.style.color = color;
-    buildMethodModalFocusSelect.appendChild(opt);
-  }
-  buildMethodModalFocusSelect.value = column.buildFocus ?? "";
-
-  const currentOrder = column.fallbackMethods ?? allBuildMethods;
+  const currentOrder = column.buildMethodPriority ?? allBuildMethods;
   const includedSet = new Set(currentOrder);
   // Anything in allBuildMethods but not in this column's own saved order
   // (e.g. a method added to the game data after this column's list was
   // last customized) is appended at the end, unchecked -- still editable,
   // never silently dropped.
   const extras = allBuildMethods.filter((m) => !includedSet.has(m));
-  buildMethodModalFallbackOrder = [...currentOrder, ...extras].map((name) => ({
+  buildMethodModalPriorityOrder = [...currentOrder, ...extras].map((name) => ({
     name,
     included: includedSet.has(name),
   }));
 
-  renderBuildMethodModalFallbackList();
+  renderBuildMethodModalPriorityList();
   buildMethodModalOverlay.classList.remove("hidden");
 }
 
-// Rebuilds the modal's fallback-methods checklist from
-// buildMethodModalFallbackOrder -- called on open and after every
+// Rebuilds the modal's priority checklist from
+// buildMethodModalPriorityOrder -- called on open and after every
 // checkbox/reorder edit (the list is small, a handful of rows, so a full
 // rebuild per edit is simpler than patching individual rows in place).
-function renderBuildMethodModalFallbackList() {
-  buildMethodModalFallbackList.innerHTML = "";
+function renderBuildMethodModalPriorityList() {
+  buildMethodModalPriorityList.innerHTML = "";
 
-  buildMethodModalFallbackOrder.forEach((entry, index) => {
+  buildMethodModalPriorityOrder.forEach((entry, index) => {
     const row = document.createElement("div");
     row.className = "build-method-fallback-row";
 
@@ -3700,7 +3720,7 @@ function renderBuildMethodModalFallbackList() {
     });
     label.appendChild(checkbox);
     const nameSpan = document.createElement("span");
-    applyFactionTextColor(nameSpan, BUILD_METHOD_TO_FACTION[entry.name]);
+    applyBuildMethodColor(nameSpan, entry.name);
     nameSpan.textContent = entry.name;
     label.appendChild(nameSpan);
     row.appendChild(label);
@@ -3711,11 +3731,11 @@ function renderBuildMethodModalFallbackList() {
     upBtn.textContent = "↑";
     upBtn.disabled = index === 0;
     upBtn.addEventListener("click", () => {
-      [buildMethodModalFallbackOrder[index - 1], buildMethodModalFallbackOrder[index]] = [
-        buildMethodModalFallbackOrder[index],
-        buildMethodModalFallbackOrder[index - 1],
+      [buildMethodModalPriorityOrder[index - 1], buildMethodModalPriorityOrder[index]] = [
+        buildMethodModalPriorityOrder[index],
+        buildMethodModalPriorityOrder[index - 1],
       ];
-      renderBuildMethodModalFallbackList();
+      renderBuildMethodModalPriorityList();
     });
     row.appendChild(upBtn);
 
@@ -3723,24 +3743,24 @@ function renderBuildMethodModalFallbackList() {
     downBtn.type = "button";
     downBtn.className = "build-method-reorder-btn";
     downBtn.textContent = "↓";
-    downBtn.disabled = index === buildMethodModalFallbackOrder.length - 1;
+    downBtn.disabled = index === buildMethodModalPriorityOrder.length - 1;
     downBtn.addEventListener("click", () => {
-      [buildMethodModalFallbackOrder[index], buildMethodModalFallbackOrder[index + 1]] = [
-        buildMethodModalFallbackOrder[index + 1],
-        buildMethodModalFallbackOrder[index],
+      [buildMethodModalPriorityOrder[index], buildMethodModalPriorityOrder[index + 1]] = [
+        buildMethodModalPriorityOrder[index + 1],
+        buildMethodModalPriorityOrder[index],
       ];
-      renderBuildMethodModalFallbackList();
+      renderBuildMethodModalPriorityList();
     });
     row.appendChild(downBtn);
 
-    buildMethodModalFallbackList.appendChild(row);
+    buildMethodModalPriorityList.appendChild(row);
   });
 }
 
 function closeBuildMethodModal() {
   buildMethodModalOverlay.classList.add("hidden");
   buildMethodModalTarget = null;
-  buildMethodModalFallbackOrder = [];
+  buildMethodModalPriorityOrder = [];
 }
 
 buildMethodModalCancelBtn.addEventListener("click", closeBuildMethodModal);
@@ -3748,12 +3768,11 @@ buildMethodModalCancelBtn.addEventListener("click", closeBuildMethodModal);
 buildMethodModalSaveBtn.addEventListener("click", () => {
   if (!buildMethodModalTarget) return;
 
-  const buildFocus = buildMethodModalFocusSelect.value || null;
-  const fallbackMethods = buildMethodModalFallbackOrder.filter((entry) => entry.included).map((entry) => entry.name);
+  const buildMethodPriority = buildMethodModalPriorityOrder.filter((entry) => entry.included).map((entry) => entry.name);
 
   const column = buildMethodModalTarget;
   closeBuildMethodModal();
-  recomputeFleetBuildConfig(column.fleetIndex, buildFocus, fallbackMethods);
+  recomputeFleetBuildConfig(column.fleetIndex, buildMethodPriority);
 });
 
 // Tab buttons are static markup (not rebuilt per render), so wiring them
@@ -3818,7 +3837,7 @@ function sortCategoriesForDisplay(categoryNames) {
 // (category -> (ware_id -> amount)) rather than the default flat
 // ware_id -> amount map -- distinguished by the type of its own values,
 // since summarize_production.py's request flag isn't echoed back in the
-// response itself. An empty "parts" (an explicit build_focus that turned
+// response itself. An empty "parts" (a build_method_priority that turned
 // out fully unresolvable) reads as flat either way -- there's nothing to
 // render regardless.
 function isGroupedParts(parts) {
@@ -3983,9 +4002,8 @@ function tierResultForColumn(column, tierKey) {
 // single method's data directly, compared ware-by-ware on the same row
 // regardless of which method it happened to resolve to -- comparing
 // different build methods now means comparing different *columns* (each
-// with its own "Build Focus: ..." button/modal -- see
-// renderWareCostListHead()), not separate method sections stacked inside
-// one column.
+// with its own "Priority: ..." button/modal -- see renderWareCostListHead()),
+// not separate method sections stacked inside one column.
 function appendWareCostListTier(tierKey, heading, columns) {
   const totalColumns = columns.length + 1;
   const tierCollapsed = appendCollapsibleHeader(tierKey, heading, "ware-cost-list-tier-title", totalColumns);
@@ -3993,9 +4011,7 @@ function appendWareCostListTier(tierKey, heading, columns) {
 
   const dataByColumn = columns.map((column) => {
     const tierResult = tierResultForColumn(column, tierKey);
-    if (!tierResult) return null;
-    const methodNames = Object.keys(tierResult.methods);
-    return methodNames.length > 0 ? tierResult.methods[methodNames[0]] : null;
+    return tierResult?.parts ? tierResult : null;
   });
 
   const sampleData = dataByColumn.find((data) => data != null);
@@ -4065,7 +4081,7 @@ function renderWareCostListHead(columns) {
   nameRow.appendChild(nameLabelTh);
   for (const column of columns) {
     const th = document.createElement("th");
-    th.appendChild(buildFleetTabButton(fleets[column.fleetIndex], column.fleetIndex, { showBuildFocus: true }));
+    th.appendChild(buildFleetTabButton(fleets[column.fleetIndex], column.fleetIndex, { showBuildPriority: true }));
     nameRow.appendChild(th);
   }
   wareCostListThead.appendChild(nameRow);
@@ -4255,18 +4271,8 @@ function appendMoneyTier(columns) {
 
   appendMoneyTopLevelEntry(columns);
 
-  const rawDataByColumn = columns.map((column) => {
-    const rawResult = tierResultForColumn(column, "raw_materials_price");
-    if (!rawResult) return null;
-    const methodNames = Object.keys(rawResult);
-    return methodNames.length > 0 ? rawResult[methodNames[0]] : null;
-  });
-  const productionDataByColumn = columns.map((column) => {
-    const productionResult = tierResultForColumn(column, "production_wares_price");
-    if (!productionResult) return null;
-    const methodNames = Object.keys(productionResult);
-    return methodNames.length > 0 ? productionResult[methodNames[0]] : null;
-  });
+  const rawDataByColumn = columns.map((column) => tierResultForColumn(column, "raw_materials_price"));
+  const productionDataByColumn = columns.map((column) => tierResultForColumn(column, "production_wares_price"));
 
   if (rawDataByColumn.every((data) => data == null) && productionDataByColumn.every((data) => data == null)) {
     const tr = document.createElement("tr");
@@ -4412,18 +4418,18 @@ function buildFleetTabShipIcon(icon, isActive) {
 }
 
 // One fleet's own tab button -- ship icon (see buildFleetTabShipIcon()),
-// name, an optional Build Focus line underneath the name (see
-// showBuildFocus below), and a delete "×" (unless only one fleet remains).
-// Clicking anywhere on the button switches to that fleet via
-// setActiveFleet(); the two sub-controls (Build Focus, "×") each stop that
+// name, an optional Build Method Priority line underneath the name (see
+// showBuildPriority below), and a delete "×" (unless only one fleet
+// remains). Clicking anywhere on the button switches to that fleet via
+// setActiveFleet(); the two sub-controls (priority, "×") each stop that
 // click from bubbling so they act independently of the tab-switch. Shared
 // by both renderFleetListTabs() (the Fleet Planner's own tab bar) and
 // renderWareCostListHead() (the Ware Cost List's column headers) so a
 // fleet looks and behaves identically -- same icon/color/box/click-to-
 // switch -- in both places; the Ware Cost List is the only one of the two
-// that needs the Build Focus line, since that's the only place it's
+// that needs the priority line, since that's the only place it's
 // otherwise ever set (see openBuildMethodModal()).
-function buildFleetTabButton(fleet, fleetIndex, { showBuildFocus = false } = {}) {
+function buildFleetTabButton(fleet, fleetIndex, { showBuildPriority = false } = {}) {
   const isActive = fleetIndex === activeFleetIndex;
   const tab = document.createElement("button");
   tab.type = "button";
@@ -4437,21 +4443,26 @@ function buildFleetTabButton(fleet, fleetIndex, { showBuildFocus = false } = {})
   nameStack.className = "fleet-list-tab-name-stack";
   nameStack.appendChild(document.createTextNode(fleet.name.trim() || DEFAULT_NEW_FLEET_LABEL));
 
-  if (showBuildFocus) {
-    const buildFocusBtn = document.createElement("button");
-    buildFocusBtn.type = "button";
-    buildFocusBtn.className = "ware-cost-list-build-focus-btn";
-    buildFocusBtn.appendChild(document.createTextNode("Build Focus: "));
-    const buildFocusNameSpan = document.createElement("span");
-    applyFactionTextColor(buildFocusNameSpan, BUILD_METHOD_TO_FACTION[fleet.buildFocus]);
-    buildFocusNameSpan.textContent = fleet.buildFocus ?? "none";
-    buildFocusBtn.appendChild(buildFocusNameSpan);
-    buildFocusBtn.title = "Set this list's build method";
-    buildFocusBtn.addEventListener("click", (event) => {
+  if (showBuildPriority) {
+    // fleet.buildMethodPriority null means "use the server's own default"
+    // (DEFAULT_BUILD_METHOD_PRIORITY -- see summarize_production.py), whose
+    // own top entry is allBuildMethods[0] -- so this button should always
+    // name a real method, never the literal word "default".
+    const topPriority = fleet.buildMethodPriority?.[0] ?? allBuildMethods[0];
+    const priorityBtn = document.createElement("button");
+    priorityBtn.type = "button";
+    priorityBtn.className = "ware-cost-list-build-focus-btn";
+    priorityBtn.appendChild(document.createTextNode("Priority: "));
+    const priorityNameSpan = document.createElement("span");
+    applyBuildMethodColor(priorityNameSpan, topPriority);
+    priorityNameSpan.textContent = topPriority ?? "default";
+    priorityBtn.appendChild(priorityNameSpan);
+    priorityBtn.title = "Set this list's build method priority";
+    priorityBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      openBuildMethodModal({ fleetIndex, buildFocus: fleet.buildFocus, fallbackMethods: fleet.fallbackMethods });
+      openBuildMethodModal({ fleetIndex, buildMethodPriority: fleet.buildMethodPriority });
     });
-    nameStack.appendChild(buildFocusBtn);
+    nameStack.appendChild(priorityBtn);
   }
   tab.appendChild(nameStack);
 
@@ -4521,8 +4532,7 @@ function buildAnalysisPayload() {
     fleets: fleets.map((fleet) => ({
       name: fleet.name,
       cart: JSON.parse(JSON.stringify(fleet.cart)),
-      build_focus: fleet.buildFocus,
-      fallback_methods: fleet.fallbackMethods,
+      build_method_priority: fleet.buildMethodPriority,
     })),
     active_fleet_index: activeFleetIndex,
   };
@@ -4550,8 +4560,7 @@ function applyAnalysisPayload(data) {
   fleets = data.fleets.map((fleet) => ({
     name: fleet.name || "",
     cart: JSON.parse(JSON.stringify(fleet.cart)),
-    buildFocus: fleet.build_focus ?? null,
-    fallbackMethods: fleet.fallback_methods ?? null,
+    buildMethodPriority: fleet.build_method_priority ?? null,
     wareCostList: null,
     dirty: true,
   }));
@@ -4793,11 +4802,11 @@ async function applyShareLinksFromUrl() {
 
 // --- Save / load ------------------------------------------------------------
 // The saved file is shaped exactly like summarize_production.py's own input
-// JSON (build_focus/search_depth/verbose/wares), plus two extra fields this
-// UI adds on top -- cart_name, and each wares entry's own note -- which
-// summarize_production.py itself ignores (extra keys are fine both for the
-// CLI's json.load and for the API's Pydantic model), so the file is still
-// also directly usable with the CLI tool.
+// JSON (build_method_priority/search_depth/verbose/wares), plus two extra
+// fields this UI adds on top -- cart_name, and each wares entry's own note
+// -- which summarize_production.py itself ignores (extra keys are fine both
+// for the CLI's json.load and for the API's Pydantic model), so the file is
+// still also directly usable with the CLI tool.
 // search_depth itself has no UI control any more (the Ware Cost List always
 // shows both fixed depths -- see RAW_MATERIALS_SEARCH_DEPTH above), so the
 // saved value is just that same fixed depth, purely for CLI compatibility.
@@ -4812,11 +4821,10 @@ saveCartBtn.addEventListener("click", () => {
 
   const body = {
     cart_name: cartName || null,
-    build_focus: activeFleet().buildFocus,
-    // Unlike cart_name/note, fallback_methods is a field
-    // summarize_production.py's CLI genuinely already reads (see this
-    // module's own docstring) -- not an extra/ignored key.
-    fallback_methods: activeFleet().fallbackMethods,
+    // build_method_priority is a field summarize_production.py's CLI
+    // genuinely already reads (see this module's own docstring) -- not an
+    // extra/ignored key, unlike cart_name/note.
+    build_method_priority: activeFleet().buildMethodPriority,
     search_depth: RAW_MATERIALS_SEARCH_DEPTH,
     verbose: true,
     // note is extra (summarize_production.py's CLI ignores unknown keys,
@@ -5027,8 +5035,7 @@ loadCartInput.addEventListener("change", async (event) => {
 
   activeFleet().name = data.cart_name || "";
   cartNameInput.value = activeFleet().name;
-  activeFleet().buildFocus = data.build_focus ?? null;
-  activeFleet().fallbackMethods = data.fallback_methods ?? null;
+  activeFleet().buildMethodPriority = data.build_method_priority ?? null;
   // A loaded file's own "search_depth"/"group_by_component_type" (if any --
   // old saves, or a CLI input file) are intentionally ignored: there's no
   // UI control for either any more, the Ware Cost List always shows both
@@ -5098,7 +5105,7 @@ function showPage(pageId) {
   if (location.hash !== `#${pageId}`) location.hash = pageId;
   // Navigating into Cost Analysis is the main lazy-recompute trigger (see
   // recomputeDirtyFleets()) -- edits made from *within* that page (price
-  // overrides, per-fleet build focus) recompute eagerly instead, since
+  // overrides, per-fleet build method priority) recompute eagerly instead, since
   // "navigate in" never fires again while already there. Does NOT cover the
   // very first page shown at load -- see bootstrap()'s own trailing check,
   // since this runs before fleets are ever restored from localStorage.
