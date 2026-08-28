@@ -33,6 +33,11 @@ ExtractionJob to EXTRACTION_JOBS under a suitable group name.
 Every file this script writes is fully reproducible from the game install,
 so groups can be freely skipped or deleted and regenerated later with no
 data-loss concern (see --only / --skip).
+
+Also copies version.dat and every installed extension's content.xml into
+data/ on every run (see copy_metadata_files()) -- these two aren't inside
+any .cat/.dat catalog so XRCatTool plays no part in it, and this step isn't
+one of the --only/--skip groups below.
 """
 
 import argparse
@@ -91,6 +96,36 @@ def extension_dirs() -> list[Path]:
     if not ext_root.exists():
         return []
     return sorted(p for p in ext_root.iterdir() if p.is_dir())
+
+
+def copy_metadata_files() -> None:
+    """Copies version.dat (the base game's own build number) and every
+    installed extension's content.xml (id/name/version/date -- see
+    generate_ships_table.py's parse_source_versions(), which reads these
+    back out for the About page's "built from these versions" section)
+    straight from the Steam install into data/. Unlike everything else this
+    script pulls, neither file lives inside a .cat/.dat catalog -- both are
+    plain loose files already sitting on disk -- so there's nothing for
+    XRCatTool to do here, just a copy. Always runs, not gated by
+    --only/--skip like the real extraction jobs below, since it's two kinds
+    of tiny, cheap file copy, not worth its own group.
+    """
+    dest_version = DATA_DIR / "version.dat"
+    shutil.copyfile(GAME_ROOT / "version.dat", dest_version)
+
+    ext_dirs = extension_dirs()
+    ext_out_dir = DATA_DIR / "extensions"
+    for ext_dir in ext_dirs:
+        content_xml = ext_dir / "content.xml"
+        if not content_xml.exists():
+            print(f"WARNING: no content.xml found for extension {ext_dir.name}")
+            continue
+        dest = ext_out_dir / ext_dir.name / "content.xml"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(content_xml, dest)
+
+    print(f"Copied version.dat -> {dest_version.relative_to(ROOT)}")
+    print(f"Copied content.xml for {len(ext_dirs)} extension(s) -> {ext_out_dir.relative_to(ROOT)}")
 
 
 def game_input_paths() -> list[str]:
@@ -293,6 +328,93 @@ def ship_icon_jobs() -> list[ExtractionJob]:
     ]
 
 
+def faction_icon_jobs() -> list[ExtractionJob]:
+    """Per-faction badge textures (assets/textures/ui/factions/
+    faction_<name>_diffhq.gz), for the ship picker's manufacturer-faction
+    icon (see generate_ships_table.py's ship_owner_faction() and
+    generate_faction_icons.py).
+
+    The game ships 38 of these (every minor/story faction included, e.g.
+    "buccaneers"/"holyorder"/"scaleplate"), but this app only ever displays
+    a ship's own *design race* (SHIP_RACE_PREFIX_TO_FACTION in
+    generate_ships_table.py -- argon/boron/paranid/split/teladi/terran/
+    xenon/khaak/yaki), matching src/static/app.js's own FACTION_COLORS --
+    so unlike ship_icon_jobs() this pattern is deliberately narrowed to
+    just those 9 real races rather than pulling the whole folder
+    unfiltered. "neutral" (the pseudo-faction gen/pir hulls map to) has no
+    real in-game texture and is correctly absent here.
+    """
+    return [
+        ExtractionJob(
+            name="faction_icons",
+            group="faction_icons",
+            include_pattern=(
+                r"assets/textures/ui/factions/faction_"
+                r"(argon|boron|paranid|split|teladi|terran|xenon|khaak|yaki)_diffhq\.gz$"
+            ),
+            out_dir=DATA_DIR / "images" / "factions_raw",
+        )
+    ]
+
+
+def minor_faction_icon_jobs() -> list[ExtractionJob]:
+    """The same assets/textures/ui/factions/faction_<name>_diffhq.gz badge
+    textures faction_icon_jobs() pulls the 9 major races from, but for the
+    *minor* factions that actually appear in ships_base.owners (the ship's
+    sales list, e.g. "buccaneers"/"hatikvah"/"scaleplate" alongside the
+    major race that actually designed the hull) -- one icon per owner
+    faction shown in the ship picker, not just the design race. A separate
+    job/group from faction_icon_jobs() (own raw output dir, own group name)
+    so the major pipeline stays completely untouched -- see
+    generate_minor_faction_icons.py, which tints each of these using its
+    own real in-game UI color from libraries/colors.xml (colors_xml_job()
+    below) rather than a hand-picked one.
+
+    This list is every faction name in ships_base.owners across the whole
+    ship dataset, minus the 9 majors already covered -- confirmed present
+    both here (real texture files) and in colors.xml (real faction_<name>
+    color mappings) before being added to this list; a future new owner
+    faction showing up in the game data would need both re-checked and
+    added here explicitly, not auto-discovered.
+    """
+    minor_names = (
+        "alliance|antigone|buccaneers|court|freesplit|hatikvah|holyorder|kaori"
+        "|loanshark|ministry|ownerless|pioneers|player|scaleplate|scavenger|trinity"
+    )
+    return [
+        ExtractionJob(
+            name="minor_faction_icons",
+            group="minor_faction_icons",
+            include_pattern=rf"assets/textures/ui/factions/faction_({minor_names})_diffhq\.gz$",
+            out_dir=DATA_DIR / "images" / "factions_minor_raw",
+        )
+    ]
+
+
+def colors_xml_job() -> list[ExtractionJob]:
+    """libraries/colors.xml -- the game's own UI color palette, including a
+    <mapping id="faction_<name>" ref="<color id>"/> for every real faction
+    (major and minor alike) resolving to a base <color r="" g="" b=""/>
+    entry elsewhere in the same file. Used by
+    generate_minor_faction_icons.py to tint each minor faction's badge with
+    its own real in-game color -- see minor_faction_icon_jobs() above.
+
+    Unlike wares.xml, this isn't diff-patched per extension -- pulling it
+    from the combined base-game-plus-every-extension catalog list (the
+    default `in_paths`) already returns the fully-patched result in one
+    file (confirmed: DLC-only factions like "kaori"/"court"/"freesplit" are
+    present), so this is one plain job, not one per extension.
+    """
+    return [
+        ExtractionJob(
+            name="colors_xml",
+            group="colors_xml",
+            include_pattern=r"libraries/colors\.xml$",
+            out_dir=DATA_DIR / "libraries",
+        )
+    ]
+
+
 def nav_icon_jobs() -> list[ExtractionJob]:
     """Three station-type icons *as they actually appear on the map*
     (assets/textures/ui/map_objects/mapob_<type>.gz), not the plain glyph
@@ -387,6 +509,48 @@ def wares_xml_jobs() -> list[ExtractionJob]:
     return jobs
 
 
+def factions_xml_jobs() -> list[ExtractionJob]:
+    """libraries/factions.xml from the base game and each extension -- the
+    game's own faction *definitions* (id, name="{page,id}" display-name
+    ref, primary race, etc.), for the factions DB table backing the ship
+    picker's owner-faction icon tooltips (see generate_ships_table.py's
+    parse_factions()) and a planned owner-faction filter group.
+
+    Diff-patched per extension exactly like wares.xml above (each DLC's own
+    factions.xml is a <diff> that <add sel="/factions">-appends its own new
+    <faction> entries, not a full list) -- same reasoning, same per-source
+    job-per-extension shape. Two of the seven extensions (ego_dlc_mini_01/
+    mini_02) don't actually ship a factions.xml at all -- like
+    wares_xml_jobs(), this doesn't special-case that; their own job here
+    just extracts 0 files (run_job()'s own "0 files matched" warning is
+    accurate and harmless), and generate_ships_table.py's factions_files()
+    simply never finds a factions_mini01.xml/factions_mini02.xml to read.
+    """
+    jobs = [
+        ExtractionJob(
+            name="factions_base",
+            group="factions",
+            include_pattern=r"libraries/factions\.xml",
+            out_dir=DATA_DIR / "libraries",
+            in_paths=catalog_files(GAME_ROOT),
+            dest_name="factions.xml",
+        )
+    ]
+    for ext_dir in extension_dirs():
+        suffix = extension_suffix(ext_dir)
+        jobs.append(
+            ExtractionJob(
+                name=f"factions_{suffix}",
+                group="factions",
+                include_pattern=r"libraries/factions\.xml",
+                out_dir=DATA_DIR / "libraries",
+                in_paths=catalog_files(ext_dir),
+                dest_name=f"factions_{suffix}.xml",
+            )
+        )
+    return jobs
+
+
 EXTRACTION_JOBS: list[ExtractionJob] = [
     *ship_macro_jobs(),
     *ship_component_jobs(),
@@ -395,9 +559,13 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *missile_jobs(),
     *deployable_jobs(),
     *wares_xml_jobs(),
+    *factions_xml_jobs(),
     *ship_icon_jobs(),
     *favicon_icon_jobs(),
     *nav_icon_jobs(),
+    *faction_icon_jobs(),
+    *minor_faction_icon_jobs(),
+    *colors_xml_job(),
 ]
 
 
@@ -475,6 +643,8 @@ def main() -> None:
         raise FileNotFoundError(f"XRCatTool.exe not found at {XRCATTOOL_EXE}")
     if not GAME_ROOT.exists():
         raise FileNotFoundError(f"Game install not found at {GAME_ROOT}")
+
+    copy_metadata_files()
 
     jobs = EXTRACTION_JOBS
     if args.only:

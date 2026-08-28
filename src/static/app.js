@@ -323,6 +323,8 @@ function appendNameWithFactionColor(parent, name) {
 const sizeFilterOptions = document.getElementById("size-filter-options");
 const purposeFilterOptions = document.getElementById("purpose-filter-options");
 const typeFilterOptions = document.getElementById("type-filter-options");
+const vendorFilterOptions = document.getElementById("vendor-filter-options");
+const raceFilterOptions = document.getElementById("race-filter-options");
 const shipOptionsList = document.getElementById("ship-options-list");
 const loadShipBtn = document.getElementById("load-ship-btn");
 const clearShipBtnTop = document.getElementById("clear-ship-btn-top");
@@ -408,6 +410,7 @@ const priceOverrideSummaryList = document.getElementById("price-override-summary
 const priceOverrideFilterProductionCheckbox = document.getElementById("price-override-filter-production");
 const priceOverrideFilterRawCheckbox = document.getElementById("price-override-filter-raw");
 const priceOverrideFilterProcurementCheckbox = document.getElementById("price-override-filter-procurement");
+const sourceVersionsTbody = document.getElementById("source-versions-tbody");
 const importLoadoutsModalOverlay = document.getElementById("import-loadouts-modal-overlay");
 const importLoadoutsPathSection = document.getElementById("import-loadouts-path-section");
 const importLoadoutsPathInput = document.getElementById("import-loadouts-path-input");
@@ -440,6 +443,15 @@ const selectGameLoadoutCancelBtn = document.getElementById("select-game-loadout-
 // for any column whose own buildMethodPriority is still null.
 let allBuildMethods = [];
 
+// faction_id -> real display name (e.g. "buccaneers" -> "Duke's
+// Buccaneers"), fetched once from GET /api/factions (see
+// generate_ships_table.py's parse_factions()) -- used for the ship
+// picker's owner-faction icon tooltips (see buildFactionIconImg()) instead
+// of showing the raw internal id. A faction key with no entry yet (fetch
+// still in flight, or a genuinely unmapped id) just falls back to showing
+// that raw id -- see buildFactionIconImg()'s own `?? factionKey`.
+const factionNames = {};
+
 // Which column the Build Method modal is currently open for -- one of the
 // objects wareCostListColumns() builds ({fleetIndex, buildMethodPriority,
 // ...}), read by the modal's own Save handler to call
@@ -460,6 +472,28 @@ let buildMethodModalPriorityOrder = [];
 // than showing a broken-image icon.
 function shipIconUrl(icon) {
   return icon ? `/images/ships/symbols/${icon}.png` : null;
+}
+
+// A faction key (major -- e.g. "argon", ships_base.owner_faction/
+// FACTION_COLORS -- or minor -- e.g. "buccaneers", one entry of
+// ships_base.owners) -> the tinted badge PNG generate_faction_icons.py
+// (majors) or generate_minor_faction_icons.py (minors) writes -- both sets
+// share the same data/images/factions/<key>.png output directory/naming,
+// so this one URL builder covers either. Null for "neutral" (the pseudo-
+// faction a gen_/pir_ ware_id's owner_faction resolves to), since there's
+// no in-game texture for that to have converted in the first place.
+function factionIconUrl(factionKey) {
+  return factionKey && factionKey !== "neutral" ? `/images/factions/${factionKey}.png` : null;
+}
+
+function buildFactionIconImg(factionKey, className) {
+  const img = document.createElement("img");
+  img.src = factionIconUrl(factionKey);
+  const displayName = factionNames[factionKey] ?? factionKey;
+  img.alt = displayName;
+  img.title = displayName;
+  img.className = className;
+  return img;
 }
 
 function buildIconImg(icon, className) {
@@ -583,7 +617,8 @@ function buildTypeFilterEntries() {
       if (ship.ship_type !== entry.ship_type || ship.size !== entry.size) continue;
       counts[ship.icon] = (counts[ship.icon] ?? 0) + 1;
     }
-    entry.icon = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    const bestIcon = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    entry.iconEl = buildIconImg(bestIcon, "type-icon");
   }
 
   entries.sort((a, b) => {
@@ -642,6 +677,12 @@ async function loadBuildMethods() {
   allBuildMethods = await response.json();
 }
 
+async function loadFactionNames() {
+  const response = await fetch("/api/factions");
+  const factions = await response.json();
+  for (const { faction_id, faction_name } of factions) factionNames[faction_id] = faction_name;
+}
+
 // Fills the size/type filter fieldsets with one checkbox per distinct value
 // actually present in allShips, sorted, so the filters never offer a choice
 // with zero matches. Multiple checkboxes in the same group can be checked
@@ -666,16 +707,77 @@ function populateFilterOptions() {
   buildCheckboxGroup(sizeFilterOptions, "size-filter", sizeEntries);
   buildCheckboxGroup(purposeFilterOptions, "purpose-filter", purposeEntries);
   buildCheckboxGroup(typeFilterOptions, "type-filter", buildTypeFilterEntries());
+  buildCheckboxGroup(vendorFilterOptions, "vendor-filter", buildVendorFilterEntries());
+  buildCheckboxGroup(raceFilterOptions, "race-filter", buildRaceFilterEntries());
+}
+
+// One checkbox per distinct 3-letter race-abbreviation prefix actually
+// present among allShips' own ware_ids (shipRaceAbbreviation() -- the raw
+// prefix, e.g. "ATF" kept distinct from "TER" even though both share
+// Terran's color, same as the picker's own per-ship label). The label
+// itself *is* that abbreviation, styled exactly like the picker's own
+// .ship-option-race plate (applyFactionTextColor() -- colored text, plus a
+// silver/slate backing panel for the harder-to-read colors) via a
+// dedicated labelEl span rather than plain text, since color/background
+// can't be expressed on a plain text node.
+function buildRaceFilterEntries() {
+  const races = new Set();
+  for (const ship of allShips) {
+    const race = shipRaceAbbreviation(ship.ware_id);
+    if (race) races.add(race);
+  }
+  return [...races].sort().map((race) => {
+    const labelEl = document.createElement("span");
+    labelEl.className = "filter-option-race-label";
+    applyFactionTextColor(labelEl, RACE_PREFIX_TO_FACTION[race.toLowerCase()]);
+    labelEl.textContent = race;
+    return { value: race, label: race, labelEl };
+  });
+}
+
+// One checkbox per real faction id appearing in any ship's own
+// ships_base.owners (majors and minors alike, e.g. "argon"/"buccaneers"),
+// sorted by display name. Icon is the faction's own tinted badge (see
+// buildFactionIconImg()/factionIconUrl()) -- "the faction symbol with its
+// color" -- while the label text stays plain/unstyled ("just regular
+// color"), unlike e.g. .ship-option-race elsewhere which does color its
+// own text. Entries with no real icon (shouldn't happen for a genuine
+// ships_base.owners value, but factionIconUrl() returning null is a cheap
+// defensive check) are silently skipped rather than shown broken.
+function buildVendorFilterEntries() {
+  const factionIds = new Set();
+  for (const ship of allShips) {
+    for (const ownerFaction of ship.owners ? ship.owners.split(",") : []) factionIds.add(ownerFaction);
+  }
+  return [...factionIds]
+    .filter((factionId) => factionIconUrl(factionId))
+    .sort((a, b) => (factionNames[a] ?? a).localeCompare(factionNames[b] ?? b))
+    .map((factionId) => ({
+      value: factionId,
+      label: factionNames[factionId] ?? factionId,
+      iconEl: buildFactionIconImg(factionId, "filter-option-faction-icon"),
+    }));
 }
 
 function buildCheckboxGroup(container, name, entries) {
   container.innerHTML = "";
   for (const entry of entries) {
-    container.appendChild(buildCheckboxOption(name, entry.value, entry.label, entry.icon ?? null));
+    container.appendChild(buildCheckboxOption(name, entry.value, entry.label, entry.iconEl ?? null, entry.labelEl ?? null));
   }
 }
 
-function buildCheckboxOption(name, value, displayLabel, icon = null) {
+// `iconEl` is a pre-built <img> (or null) rather than an icon name string --
+// each entries-builder constructs its own kind of icon (buildIconImg() for
+// a ship-class icon, e.g. buildTypeFilterEntries(); buildFactionIconImg()
+// for a faction badge, e.g. buildVendorFilterEntries()), since which URL
+// scheme/class applies depends entirely on which filter group this is, not
+// something buildCheckboxOption()/buildCheckboxGroup() themselves need to
+// know about. `labelEl`, similarly, is an optional pre-built element used
+// in place of a plain text node for the label itself -- e.g.
+// buildRaceFilterEntries()'s own colored/plated race-abbreviation span,
+// which a plain createTextNode(displayLabel) couldn't render (no styling on
+// a text node); `displayLabel` is simply ignored when `labelEl` is given.
+function buildCheckboxOption(name, value, displayLabel, iconEl = null, labelEl = null) {
   const label = document.createElement("label");
   const input = document.createElement("input");
   input.type = "checkbox";
@@ -683,8 +785,8 @@ function buildCheckboxOption(name, value, displayLabel, icon = null) {
   input.value = value;
   input.addEventListener("change", renderShipOptions);
   label.appendChild(input);
-  if (icon) label.appendChild(buildIconImg(icon, "type-icon"));
-  label.appendChild(document.createTextNode(displayLabel));
+  if (iconEl) label.appendChild(iconEl);
+  label.appendChild(labelEl ?? document.createTextNode(displayLabel));
   return label;
 }
 
@@ -727,10 +829,15 @@ function shipPassesCurrentFilters(ship) {
   const sizeValues = checkedValues("size-filter");
   const purposeValues = checkedValues("purpose-filter");
   const typeValues = checkedValues("type-filter");
+  const vendorValues = checkedValues("vendor-filter");
+  const raceValues = checkedValues("race-filter");
+  const shipOwners = ship.owners ? ship.owners.split(",") : [];
   return (
     (sizeValues.length === 0 || sizeValues.includes(ship.size)) &&
     (purposeValues.length === 0 || purposeValues.includes(ship.purpose)) &&
-    (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value)))
+    (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value))) &&
+    (vendorValues.length === 0 || vendorValues.some((value) => shipOwners.includes(value))) &&
+    (raceValues.length === 0 || raceValues.includes(shipRaceAbbreviation(ship.ware_id)))
   );
 }
 
@@ -802,6 +909,26 @@ function buildShipOptionRow(ship) {
   }
 
   row.appendChild(textCol);
+
+  // Owner faction badges -- right-aligned as one group at the far end of
+  // the row (see .ship-option-faction-icons' margin-left: auto), opposite
+  // the ship's own class icon on the left. One full-size badge per entry
+  // in ship.owners (the ship's actual sales list, majors and minors both
+  // -- e.g. "argon,buccaneers,hatikvah,scaleplate" -- see
+  // generate_minor_faction_icons.py for the minors' own real in-game
+  // colors). No separate manufacturer/design-race badge here any more --
+  // that's already shown as the colored race-abbreviation text under the
+  // ship's name (shipRaceAbbreviation()/.ship-option-race above), so
+  // showing it a second time as an icon would be redundant.
+  const factionIconsGroup = document.createElement("span");
+  factionIconsGroup.className = "ship-option-faction-icons";
+
+  for (const ownerFaction of ship.owners ? ship.owners.split(",") : []) {
+    if (factionIconUrl(ownerFaction)) {
+      factionIconsGroup.appendChild(buildFactionIconImg(ownerFaction, "ship-option-owner-icon"));
+    }
+  }
+  if (factionIconsGroup.children.length > 0) row.appendChild(factionIconsGroup);
 
   row.addEventListener("click", () => {
     applyShipSelection(ship.ware_id);
@@ -5070,6 +5197,43 @@ async function applyRemoteModeUI() {
   }
 }
 
+// The About page's "Built From" table -- this tool's own version
+// (/api/config's "version", same VERSION file api.py itself reads) as the
+// first row, then the base game and every installed extension
+// (/api/source_versions -- see generate_ships_table.py's
+// parse_source_versions(), base game row first, extensions after in that
+// table's own insertion order). Two separate fetches (applyRemoteModeUI()
+// above already hits /api/config for its own unrelated purpose) rather than
+// threading one response between two functions, so each stays a
+// self-contained, independently-readable "fetch X, render X" unit. A
+// fetch failure just leaves the table empty -- there's no fallback content
+// worth showing for version info that failed to load.
+async function renderSourceVersionsTable() {
+  try {
+    const [configResponse, sourcesResponse] = await Promise.all([
+      fetch("/api/config"),
+      fetch("/api/source_versions"),
+    ]);
+    const config = await configResponse.json();
+    const sources = await sourcesResponse.json();
+
+    sourceVersionsTbody.innerHTML = "";
+    const rows = [{ source_name: "X4 Fleet Planner (this tool)", source_version: config.version }, ...sources];
+    for (const { source_name, source_version } of rows) {
+      const tr = document.createElement("tr");
+      const nameTd = document.createElement("td");
+      nameTd.textContent = source_name;
+      const versionTd = document.createElement("td");
+      versionTd.textContent = source_version;
+      tr.appendChild(nameTd);
+      tr.appendChild(versionTd);
+      sourceVersionsTbody.appendChild(tr);
+    }
+  } catch {
+    // leave the table empty -- see comment above
+  }
+}
+
 // The nav bar's small "you are here" marker (see generate_nav_icons.py) --
 // ship_s_fighter_01 (a small fighter) when no ship is loaded, matching the
 // map's own default. Updates to the currently loaded ship's own icon in
@@ -5241,6 +5405,13 @@ function restorePersistedState(state) {
 }
 
 async function bootstrap() {
+  // Awaited before loadShips() specifically (not folded into the
+  // Promise.all below) so factionNames is already populated by the time
+  // loadShips() triggers its own first renderShipOptions() call --
+  // otherwise the very first paint's owner-faction icon tooltips would
+  // show raw ids until some later, unrelated re-render happened to pick up
+  // the (by-then-loaded) names.
+  await loadFactionNames();
   await loadShips(); // filter checkboxes (restorePersistedState needs them) live here
   await Promise.all([
     loadMissiles(),
@@ -5270,3 +5441,4 @@ async function bootstrap() {
 
 bootstrap();
 applyRemoteModeUI();
+renderSourceVersionsTable();

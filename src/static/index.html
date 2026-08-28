@@ -78,6 +78,23 @@
           <button id="clear-loadouts-btn" type="button" disabled>Clear Loadouts</button>
         </div>
       </fieldset>
+      <div class="filter-row-break"></div>
+      <fieldset class="filter-group">
+        <legend>Race</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="race-filter">All</button>
+          <button type="button" class="filter-none-btn" data-filter="race-filter">None</button>
+        </div>
+        <div id="race-filter-options" class="filter-options"></div>
+      </fieldset>
+      <fieldset class="filter-group vendor-filter-group">
+        <legend>Vendor</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="vendor-filter">All</button>
+          <button type="button" class="filter-none-btn" data-filter="vendor-filter">None</button>
+        </div>
+        <div id="vendor-filter-options" class="filter-options"></div>
+      </fieldset>
       <p class="filter-hint">Check none in a group to remove the filter.</p>
     </div>
     <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship"></div>
@@ -219,6 +236,15 @@
           >
         </p>
       </div>
+
+      <h3>Built From</h3>
+      <p class="modal-hint">
+        This site's ship/ware data is generated from these exact versions of the game and every installed
+        DLC, alongside this tool's own version:
+      </p>
+      <table id="source-versions-table" class="source-versions-table">
+        <tbody id="source-versions-tbody"></tbody>
+      </table>
 
       <h3>Future Plans</h3>
       <p class="modal-hint">A few bigger features on the roadmap, not built yet:</p>

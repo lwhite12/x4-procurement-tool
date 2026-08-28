@@ -13,7 +13,19 @@ Endpoints:
                                              served under /images/ships/
                                              symbols/<icon>.png (mounted
                                              below) -- see
-                                             generate_ship_icons.py
+                                             generate_ship_icons.py.
+                                             "owner_faction" (e.g. "argon",
+                                             from ships_base.owner_faction --
+                                             see generate_ships_table.py's
+                                             ship_owner_faction(), the ship's
+                                             own design race, not its sales-
+                                             owner list) similarly names a
+                                             PNG under /images/factions/
+                                             <owner_faction>.png, or is null
+                                             for a ship with no real design
+                                             race (see
+                                             SHIP_RACE_PREFIX_TO_FACTION) --
+                                             see generate_faction_icons.py
   GET  /api/ships/{identifier}/groups    -- query_ship_groups() as JSON
   GET  /api/missiles                     -- list every missile (ware_id/
                                              name/compatibility), for the
@@ -71,6 +83,23 @@ Endpoints:
                                              frontend's per-column editable
                                              build-method-priority list
                                              (defaults to this same list)
+  GET  /api/factions                      -- faction_id -> faction_name for
+                                             every real faction (factions
+                                             table -- see
+                                             generate_ships_table.py's
+                                             parse_factions()), for the ship
+                                             picker's owner-faction icon
+                                             tooltips and a planned owner-
+                                             faction filter group
+  GET  /api/source_versions               -- the base game's and every
+                                             installed extension's own
+                                             version (source_versions table
+                                             -- see generate_ships_table.py's
+                                             parse_source_versions()), for
+                                             the About page's "built from
+                                             these versions" section
+                                             alongside /api/config's own
+                                             tool "version"
   POST /api/summarize                    -- aggregate_target_wares() +
                                              summarize(), same input shape
                                              as the CLI's input JSON files
@@ -377,7 +406,8 @@ def list_ships() -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT name, ware_id, size, ship_type, purpose, owners, icon FROM ships_base ORDER BY name"
+            "SELECT name, ware_id, size, ship_type, purpose, owners, owner_faction, icon "
+            "FROM ships_base ORDER BY name"
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -468,6 +498,41 @@ def list_crew() -> list[dict]:
 @app.get("/api/build_methods")
 def list_build_methods() -> list[str]:
     return DEFAULT_BUILD_METHOD_PRIORITY
+
+
+# faction_id -> real display name (e.g. "buccaneers" -> "Duke's
+# Buccaneers") for every faction id that can appear in ships_base.owners
+# (and, later, other wares' own owner lists) -- see generate_ships_table.py's
+# parse_factions(). Powers the ship picker's owner-faction icon tooltips
+# (src/static/app.js) today; also the intended data source for a planned
+# owner-faction filter group.
+@app.get("/api/factions")
+def list_factions() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT faction_id, faction_name FROM factions ORDER BY faction_name").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# Powers the About page's "built from these versions" section, alongside
+# /api/config's own "version" (this tool's own version -- see VERSION at
+# module scope) -- the base game and every installed extension's own
+# version, base game first, then extensions in source_versions' own
+# insertion order (see generate_ships_table.py's parse_source_versions()).
+# Regenerated fresh every time the data pipeline runs, so it's always in
+# sync with whatever game files actually built the current database --
+# unlike VERSION, which is this tool's own code version and bumped
+# independently (see CHANGELOG.md).
+@app.get("/api/source_versions")
+def list_source_versions() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT source_name, source_version FROM source_versions").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 
 @app.post("/api/summarize")

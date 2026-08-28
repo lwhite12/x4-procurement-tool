@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS factions;
+DROP TABLE IF EXISTS source_versions;
 DROP TABLE IF EXISTS flight_model;
 DROP TABLE IF EXISTS ship_component_groups;
 DROP TABLE IF EXISTS production_wares;
@@ -21,6 +23,7 @@ CREATE TABLE ships_base (
     name TEXT PRIMARY KEY,
     ware_id TEXT NOT NULL UNIQUE,
     owners TEXT,
+    owner_faction TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER,
@@ -394,4 +397,14 @@ CREATE TABLE flight_model (
     "physics_mass" REAL,
     steeringcurve TEXT,
     FOREIGN KEY (ware_id) REFERENCES ships_base (ware_id)
+);
+
+CREATE TABLE source_versions (
+    source_name TEXT PRIMARY KEY,
+    source_version TEXT
+);
+
+CREATE TABLE factions (
+    faction_id TEXT PRIMARY KEY,
+    faction_name TEXT
 );

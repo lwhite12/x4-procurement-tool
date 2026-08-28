@@ -51,9 +51,27 @@ Reads:
                                    hull/radar/explosioneffect/
                                    explosiondamage/trigger/physics stats,
                                    also self-contained on the macro)
+  - data/version.dat                   (base game build number, a plain
+                                   number with no XML around it)
+  - data/extensions/<ext>/content.xml  (one per installed extension --
+                                   id/name/version/date attributes on the
+                                   root <content> element; extract_game_data
+                                   .py's copy_metadata_files() is what puts
+                                   these two under data/ in the first place,
+                                   since neither lives inside a .cat/.dat
+                                   catalog like everything else this module
+                                   reads)
+  - data/libraries/factions.xml        (base game faction definitions --
+                                   id/name="{page,id}"/primaryrace/etc on
+                                   each <faction> element)
+  - data/libraries/factions_<suffix>.xml  (each extension's own <diff>
+                                   patch -- new factions plus relation/
+                                   licence tweaks to existing ones; see
+                                   factions_files()/parse_factions() below.
+                                   Only 5 of 7 extensions ship one)
 
 Writes:
-  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 17 tables)
+  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 19 tables)
   - src/csv/ships_base.csv            (one row per ship ware)
   - src/csv/production_wares.csv      (one row per ware needed by a ship's,
                                         economy ware's, equipment ware's,
@@ -90,6 +108,18 @@ Writes:
                                         "Countermeasures and crew" below)
   - src/csv/crew_base.csv             (one row: the single "crew" ware, see
                                         "Countermeasures and crew" below)
+  - src/csv/source_versions.csv       (one row for the base game plus one
+                                        per installed extension -- see
+                                        parse_source_versions() below; for
+                                        the About page's "built from these
+                                        versions" section, not used by any
+                                        other part of this pipeline)
+  - src/csv/factions.csv              (one row per real faction id, its
+                                        display name resolved -- see
+                                        parse_factions() below; for the
+                                        ship picker's owner-faction icon
+                                        tooltips, src/static/app.js, and a
+                                        planned owner-faction filter)
   - data/x4.db                        (SQLite database rebuilt from the
                                         schema + CSVs above on every run)
 
@@ -595,6 +625,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 LANG_FILE = DATA / "names" / "0001-l044.xml"
 WARES_DIR = DATA / "libraries"
+VERSION_DAT_FILE = DATA / "version.dat"
+EXTENSIONS_DIR = DATA / "extensions"
 SQL_OUT = ROOT / "src" / "sql" / "ships_tables.sql"
 SHIPS_CSV_OUT = ROOT / "src" / "csv" / "ships_base.csv"
 PRODUCTION_WARES_CSV_OUT = ROOT / "src" / "csv" / "production_wares.csv"
@@ -614,6 +646,8 @@ DEPLOYABLES_CSV_OUT = ROOT / "src" / "csv" / "deployables_base.csv"
 DRONES_CSV_OUT = ROOT / "src" / "csv" / "drones_base.csv"
 COUNTERMEASURES_CSV_OUT = ROOT / "src" / "csv" / "countermeasures_base.csv"
 CREW_CSV_OUT = ROOT / "src" / "csv" / "crew_base.csv"
+SOURCE_VERSIONS_CSV_OUT = ROOT / "src" / "csv" / "source_versions.csv"
+FACTIONS_CSV_OUT = ROOT / "src" / "csv" / "factions.csv"
 DB_OUT = DATA / "x4.db"
 
 EQUIPMENT_SIZES = ("s", "m", "l", "xl")
@@ -676,6 +710,8 @@ TABLE_CSV_FILES = {
     "production_wares": PRODUCTION_WARES_CSV_OUT,
     "ship_component_groups": COMPONENT_GROUPS_CSV_OUT,
     "flight_model": FLIGHT_MODEL_CSV_OUT,
+    "source_versions": SOURCE_VERSIONS_CSV_OUT,
+    "factions": FACTIONS_CSV_OUT,
 }
 
 EQUIPMENT_TYPE_TAGS = ("engine", "shield", "weapon", "turret", "thruster")
@@ -795,6 +831,17 @@ def resolve_ref_attr(attr_value: str | None, table: dict) -> str:
 def wares_files() -> list[Path]:
     """Base game wares.xml plus every expansion's wares_<suffix>.xml."""
     return sorted(WARES_DIR.glob("wares*.xml"))
+
+
+def factions_files() -> list[Path]:
+    """Base game factions.xml plus every extension's own
+    factions_<suffix>.xml -- see factions_xml_jobs() in
+    extract_game_data.py. Only 5 of 7 extensions actually ship one
+    (ego_dlc_mini_01/mini_02 don't), so this glob naturally comes up short
+    for those two rather than erroring -- same "whichever files actually
+    exist" approach as wares_files() above.
+    """
+    return sorted(WARES_DIR.glob("factions*.xml"))
 
 
 WARE_PATCH_SEL_RE = re.compile(r"^/wares/ware\[@id='([^']+)'\]$")
@@ -1795,6 +1842,48 @@ def ship_size_code(ware_id: str) -> str | None:
     return parts[2]
 
 
+# The race token embedded as the second underscore-delimited segment of a
+# ship's own ware_id (e.g. "ship_xen_m_corvette_01_a" -> "xen" -> "xenon")
+# mapped to a faction key matching this app's own FACTION_COLORS/
+# faction icon set (src/static/app.js, data/images/factions/<key>.png --
+# see generate_faction_icons.py) -- same convention app.js's own
+# RACE_PREFIX_TO_FACTION already applies client-side, ported here so the
+# manufacturer faction is a real ships_base column instead of something
+# every caller has to re-derive from the ware_id itself. "atf" (Terran
+# capital-ship/ATF-branded hulls) deliberately shares Terran's faction, same
+# as everywhere else in this app; "gen"/"pir" (generic/pirate hulls with no
+# single consistent owning race -- see ships_base.owners, a real mix of
+# minor factions for these) map to "neutral", which has no in-game faction
+# icon texture at all -- the frontend just shows no icon for those.
+SHIP_RACE_PREFIX_TO_FACTION = {
+    "arg": "argon",
+    "bor": "boron",
+    "par": "paranid",
+    "spl": "split",
+    "tel": "teladi",
+    "ter": "terran",
+    "atf": "terran",
+    "xen": "xenon",
+    "kha": "khaak",
+    "yak": "yaki",
+    "gen": "neutral",
+    "pir": "neutral",
+}
+
+
+def ship_owner_faction(ware_id: str) -> str | None:
+    """A ship's own manufacturer/design-race faction, e.g.
+    "ship_arg_l_destroyer_01_a" -> "argon" -- see
+    SHIP_RACE_PREFIX_TO_FACTION above for why this (the ware_id's own naming
+    convention) is used rather than ships_base.owners, which is a sales
+    list, not a single design race.
+    """
+    parts = ware_id.split("_")
+    if len(parts) < 2 or parts[0] != "ship":
+        return None
+    return SHIP_RACE_PREFIX_TO_FACTION.get(parts[1])
+
+
 def _float_attrs(el, prefix: str) -> dict[str, float]:
     return {f"{prefix}_{attr}": float(value) for attr, value in el.attrib.items()}
 
@@ -2187,7 +2276,9 @@ def write_sql_schema(
     flight_model_col_defs = "".join(
         f'    "{col}" REAL,\n' for col in jerk_columns + physics_columns
     )
-    sql = f"""DROP TABLE IF EXISTS flight_model;
+    sql = f"""DROP TABLE IF EXISTS factions;
+DROP TABLE IF EXISTS source_versions;
+DROP TABLE IF EXISTS flight_model;
 DROP TABLE IF EXISTS ship_component_groups;
 DROP TABLE IF EXISTS production_wares;
 DROP TABLE IF EXISTS turrets_base;
@@ -2210,6 +2301,7 @@ CREATE TABLE ships_base (
     name TEXT PRIMARY KEY,
     ware_id TEXT NOT NULL UNIQUE,
     owners TEXT,
+    owner_faction TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER,
@@ -2557,6 +2649,16 @@ CREATE TABLE flight_model (
 {flight_model_col_defs}    steeringcurve TEXT,
     FOREIGN KEY (ware_id) REFERENCES ships_base (ware_id)
 );
+
+CREATE TABLE source_versions (
+    source_name TEXT PRIMARY KEY,
+    source_version TEXT
+);
+
+CREATE TABLE factions (
+    faction_id TEXT PRIMARY KEY,
+    faction_name TEXT
+);
 """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(sql, encoding="utf-8")
@@ -2570,6 +2672,7 @@ def write_ships_csv(
             "name",
             "ware_id",
             "owners",
+            "owner_faction",
             "price_min",
             "price_avg",
             "price_max",
@@ -2604,6 +2707,7 @@ def write_ships_csv(
                 "name": s["name"],
                 "ware_id": s["ware_id"],
                 "owners": ",".join(s["owners"]),
+                "owner_faction": s["owner_faction"] or "",
                 "price_min": s["price_min"] or "",
                 "price_avg": s["price_avg"] or "",
                 "price_max": s["price_max"] or "",
@@ -2916,6 +3020,8 @@ DRONE_FIELDNAMES = [
 COUNTERMEASURE_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
 CREW_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
 EQUIPMENT_WARE_ALIASES_FIELDNAMES = ["alias_ware_id", "target_ware_id", "equipment_type"]
+SOURCE_VERSIONS_FIELDNAMES = ["source_name", "source_version"]
+FACTIONS_FIELDNAMES = ["faction_id", "faction_name"]
 
 
 def load_database(db_path: Path, schema_path: Path, table_csv_files: dict[str, Path]) -> None:
@@ -2982,6 +3088,115 @@ def filter_to_real_equipment_wares(
             f"{equip_type}s_base row: {sorted(missing)}"
         )
     return filtered
+
+
+def format_egosoft_build_version(raw: str) -> str:
+    """Egosoft's own build-number convention is the public version times
+    100, zero-padded to always show two decimal places (e.g. base game
+    version.dat's "900" -> public "9.00", a hypothetical "750" -> "7.50")
+    -- confirmed against the current public release (build 900 = the "9.00
+    Empire Update", released 2026-06-10). Falls back to the raw string
+    unchanged if it isn't a plain integer, rather than raising -- a
+    defensive fallback only, since every real Egosoft version.dat/
+    content.xml value seen so far has always been one.
+    """
+    try:
+        return f"{int(raw) / 100:.2f}"
+    except ValueError:
+        return raw
+
+
+def parse_factions(paths: list[Path], lang_table: dict) -> list[dict]:
+    """Every real <faction id="..." name="{page,id}" .../> across
+    factions_files()'s base+extension set, resolved to its display name --
+    for the factions DB table backing the ship picker's owner-faction icon
+    tooltips (see src/static/app.js) and a planned owner-faction filter.
+
+    Each extension's own factions.xml is a <diff> patch, same convention as
+    wares.xml -- but unlike iter_ware_elements() (which has to distinguish
+    "new ware" <add sel="/wares"> blocks from "patch an existing ware"
+    <add sel="/wares/ware[@id='...']"> blocks), a plain root.iter("faction")
+    here is sufficient: every *actual* <faction id=... name=...> definition
+    is a real <faction> element regardless of how deeply it's nested inside
+    its own <add sel="/factions">, while every other per-extension patch in
+    these files (relation/licence tweaks to an *existing* faction, e.g.
+    <add sel="/factions/faction[@id='court']/relations">) only ever
+    reaches into a faction by its `sel` path string, never by containing an
+    actual nested <faction> tag itself -- so this can't accidentally
+    mistake one of those for a real definition.
+
+    First definition of a given id wins, across every file in `paths` in
+    that list's own order -- covers factions_tim.xml's own guarded re-add
+    of "terran" (if="not(//faction[@id='terran'])", to stay valid whether
+    or not the Terran DLC is also installed) as a harmless duplicate,
+    without needing to parse that guard condition at all.
+
+    Factions with no name attribute at all (currently just "ownerless", a
+    hidden placeholder/no-owner faction with no real in-game display
+    string) fall back to a title-cased version of their own id.
+    """
+    by_id: dict[str, ET.Element] = {}
+    for path in paths:
+        root = ET.parse(path).getroot()
+        for faction_el in root.iter("faction"):
+            faction_id = faction_el.get("id")
+            if faction_id and faction_id not in by_id:
+                by_id[faction_id] = faction_el
+
+    rows = []
+    for faction_id, faction_el in sorted(by_id.items()):
+        name_ref = faction_el.get("name")
+        faction_name = resolve_ref_attr(name_ref, lang_table) if name_ref else faction_id.replace("_", " ").title()
+        rows.append({"faction_id": faction_id, "faction_name": faction_name})
+    return rows
+
+
+def parse_source_versions() -> list[dict]:
+    """Base game build number (data/version.dat, a plain number with no XML
+    around it) plus every installed extension's own version (data/
+    extensions/<ext>/content.xml's version attribute, name attribute for
+    display) -- for the About page's "built from these versions" section.
+
+    Unlike wares.xml, content.xml is a plain file, never a <diff> patch, and
+    version.dat isn't XML at all -- both are read directly, no
+    iter_ware_elements()/resolve_ref_attr() involved. The base game row
+    always comes first; extensions follow in data/extensions' own
+    alphabetical (by folder name, e.g. "ego_dlc_boron") order, which isn't
+    necessarily install/release order but is at least stable run to run.
+
+    format_egosoft_build_version() above is only ever applied to the base
+    game row and to an extension whose own content.xml has
+    author="Egosoft GmbH" -- official DLCs are versioned to match the
+    current base-game build, not their own independent number, so the same
+    public-version formatting is correct for them too. A third-party mod's
+    content.xml can carry any version string at all (semantic version, a
+    date, anything), so its own author's value is displayed completely
+    unformatted -- reformatting it under the same "divide by 100" assumption
+    would silently misrepresent it.
+    """
+    rows = [
+        {
+            "source_name": "X4: Foundations",
+            "source_version": format_egosoft_build_version(VERSION_DAT_FILE.read_text(encoding="utf-8").strip()),
+        }
+    ]
+
+    if EXTENSIONS_DIR.exists():
+        for ext_dir in sorted(EXTENSIONS_DIR.iterdir()):
+            content_xml = ext_dir / "content.xml"
+            if not content_xml.exists():
+                continue
+            content_el = ET.parse(content_xml).getroot()
+            raw_version = content_el.get("version") or ""
+            is_egosoft = content_el.get("author") == "Egosoft GmbH"
+            rows.append(
+                {
+                    "source_name": content_el.get("name") or ext_dir.name,
+                    "source_version": format_egosoft_build_version(raw_version) if is_egosoft else raw_version,
+                }
+            )
+
+    return rows
 
 
 def main() -> None:
@@ -3144,6 +3359,7 @@ def main() -> None:
     for s in ships:
         size = ship_size_code(s["ware_id"])
         s["size"] = size
+        s["owner_faction"] = ship_owner_faction(s["ware_id"])
         analysis = analyze_ship_components(s, size)
         s["component_groups"] = analysis["groups"]
         s["missile_capacity"] = analysis["missile_capacity"]
@@ -3236,6 +3452,12 @@ def main() -> None:
         countermeasure_wares, COUNTERMEASURE_FIELDNAMES, COUNTERMEASURES_CSV_OUT
     )
     crew_row_count = write_equipment_component_csv(crew_wares, CREW_FIELDNAMES, CREW_CSV_OUT)
+    source_versions = parse_source_versions()
+    source_versions_row_count = write_equipment_component_csv(
+        source_versions, SOURCE_VERSIONS_FIELDNAMES, SOURCE_VERSIONS_CSV_OUT
+    )
+    factions = parse_factions(factions_files(), lang_table)
+    factions_row_count = write_equipment_component_csv(factions, FACTIONS_FIELDNAMES, FACTIONS_CSV_OUT)
     write_sql_schema(turret_sizes_sorted, bonus_weapon_sizes_sorted, jerk_columns_sorted, physics_columns_sorted, SQL_OUT)
 
     print(
@@ -3253,7 +3475,9 @@ def main() -> None:
         f"{deployable_row_count} deployables_base rows, "
         f"{drone_row_count} drones_base rows, "
         f"{countermeasure_row_count} countermeasures_base rows, "
-        f"{crew_row_count} crew_base rows"
+        f"{crew_row_count} crew_base rows, "
+        f"{source_versions_row_count} source_versions rows, "
+        f"{factions_row_count} factions rows"
     )
     print(f"  -> {SQL_OUT.relative_to(ROOT)}")
     print(f"  -> {SHIPS_CSV_OUT.relative_to(ROOT)}")
@@ -3274,6 +3498,8 @@ def main() -> None:
     print(f"  -> {DRONES_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {COUNTERMEASURES_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {CREW_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {SOURCE_VERSIONS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {FACTIONS_CSV_OUT.relative_to(ROOT)}")
 
     load_database(DB_OUT, SQL_OUT, TABLE_CSV_FILES)
     print(f"  -> {DB_OUT.relative_to(ROOT)} (rebuilt)")

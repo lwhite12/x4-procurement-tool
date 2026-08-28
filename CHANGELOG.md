@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
+**Production** marks whichever version is currently live at
+[x4.fly.dev](https://x4.fly.dev) -- there's always exactly one. **Development** collects
+changes already made but not yet deployed there; preview them at
+[x4-staging.fly.dev](https://x4-staging.fly.dev) first. When a Development batch actually
+ships to production: give it its own version number and today's date, move the Production
+tag down from the previous entry onto it, and start a fresh empty Development section above
+it.
+
+## [Unreleased] - Development
+
+## [0.4.0] - 2026-08-28 - Production
+
+### Added
+
+- About page "Built From" section: this tool's own version alongside the base game's and
+  every installed DLC's real version (resolved from the game's own install files, not
+  hand-entered).
+- Ship picker: every ship now shows one badge per real vendor/owner faction (not just its
+  major race), tinted to that faction's actual in-game color -- including minor/story
+  factions (Buccaneers, Hatikvah Free League, Scale Plate Pact, etc.), pulled from the game's
+  own UI color palette rather than picked by hand. Hovering a badge shows that faction's real
+  display name.
+- Vendor and Race filter groups in the ship picker, alongside the existing Size/Purpose/Type
+  filters -- Vendor filters by any of a ship's real vendor/owner factions (badge + real name),
+  Race filters by the ship's own 3-letter design-race code (colored the same as the picker's
+  own race label under each ship's name).
+- A staging deployment at [x4-staging.fly.dev](https://x4-staging.fly.dev) for previewing
+  changes before they go live, plus this changelog's own Production/Development convention
+  and `DEPLOY_PROCESS.md` describing the full release process.
+
+### Changed
+
+- Size filter box now matches the fixed height of the Purpose/Type/Vendor/Race boxes, instead
+  of shrinking to fit its own shorter list.
+
 ## [0.3.1] - 2026-08-26
 
 ### Added

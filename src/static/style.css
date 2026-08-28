@@ -873,6 +873,16 @@ label {
   margin-bottom: 0.75rem;
 }
 
+/* Forces the Vendor filter group onto its own new row below Size/Purpose/
+   Type/Loadout Manager, regardless of viewport width -- same "flex-basis:
+   100% forces a flex-wrap line break" trick .filter-hint below already
+   relies on for its own always-own-line placement, just with no visible
+   content of its own here. */
+.filter-row-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;
@@ -882,6 +892,18 @@ label {
   padding: 0.5rem 0.75rem;
   min-width: 140px;
   background: var(--bg-panel);
+}
+
+/* Wider than the shared .filter-group min-width -- faction display names
+   (e.g. "Holy Order of the Pontifex") are much longer than any other
+   filter group's own labels, and .filter-options label's white-space:
+   nowrap means a too-narrow box shows an unwanted horizontal scrollbar
+   instead of just wrapping. Wide enough for the longest real entry
+   (checkbox + icon + text) plus room for the vertical scrollbar this box
+   also has (140px tall, 25 possible entries) without that eating back into
+   the text's own space. */
+.vendor-filter-group {
+  min-width: 300px;
 }
 
 /* Ware Cost List's own title+button on the left (its natural 2-line
@@ -994,11 +1016,16 @@ label {
   font-size: 0.8rem;
 }
 
+/* Fixed (not max-) height: every filter box -- Size/Purpose/Type/Vendor
+   alike -- ends up the same height regardless of how few or many entries
+   it actually has (e.g. Size's own 4 entries never came close to filling
+   this before), scrolling only once a box's own entries actually exceed
+   it. */
 .filter-options {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  max-height: 140px;
+  height: 140px;
   overflow-y: auto;
 }
 
@@ -1052,6 +1079,22 @@ label {
   flex-shrink: 0;
 }
 
+.filter-option-faction-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* The Race filter's own checkbox label -- same colored-text-plus-plate
+   look as the ship picker's own .ship-option-race, minus that label's
+   padding-left: 1em (meant to separate it from a preceding ship-name text
+   node that doesn't exist here -- .filter-options label's own flex gap
+   already spaces this from the checkbox). Color/background themselves
+   come from applyFactionTextColor() in app.js, not from here. */
+.filter-option-race-label {
+  font-weight: 700;
+}
+
 /* Custom listbox replacing a native <select> for the ship picker -- a
    native <option> can't render an <img>, but every ship here needs its own
    class symbol shown inline, so this is a plain scrollable list of
@@ -1102,6 +1145,28 @@ label {
   font-weight: 700;
   color: var(--text-muted);
   padding-left: 1em;
+}
+
+/* One full-size badge per real owner faction (see buildShipOptionRow() in
+   app.js) -- this whole group is pushed to the far right of the row via
+   margin-left: auto, opposite the ship's own class icon (.ship-icon) on
+   the left; .ship-option-row's own align-items: center keeps it vertically
+   centered against the two-line name/race text column next to it. Wraps
+   rather than overflowing since a ship can have several owner factions
+   (e.g. "argon,buccaneers,hatikvah,scaleplate"). */
+.ship-option-faction-icons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.ship-option-owner-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
 }
 
 /* Solid backing panels for faction-colored text whose color is too hard
@@ -1417,6 +1482,20 @@ input[type="checkbox"] {
 }
 
 .about-disclaimer a {
+  color: var(--text-muted);
+}
+
+/* This tool's own version row plus one row per game/DLC source (see
+   renderSourceVersionsTable() in app.js) -- capped width so this short
+   name/version list doesn't stretch across the whole fieldset the way the
+   Ware Cost List's dense tables are meant to. */
+.source-versions-table {
+  width: auto;
+  min-width: 280px;
+  margin: 0.5rem 0 1.5rem;
+}
+
+.source-versions-table td:last-child {
   color: var(--text-muted);
 }
 
