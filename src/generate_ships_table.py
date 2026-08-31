@@ -1107,7 +1107,12 @@ FULL_REF_RE = re.compile(r"^\{(\d+),\s*(\d+)\}$")
 # Dev-comment prefix, e.g. "(Magnetar \(Gas\) Vanguard){20101,11101} ...".
 # Escaped \( \) inside the comment must not be treated as the closing paren.
 LEADING_PAREN_RE = re.compile(r"^\((?:\\.|[^()])*\)\s*")
-ESCAPED_PAREN_RE = re.compile(r"\\([()])")
+# Also covers escaped hyphens ("\-"), needed for German compound-word
+# names (e.g. "Expeditions\-schiff", "Silizium\-karbid") -- the game's own
+# text format escapes a literal hyphen the same way it escapes literal
+# parens, and both need the same backslash stripped before display.
+# Confirmed narrow: only German data has ever used this, 24 ware_ids total.
+ESCAPED_CHAR_RE = re.compile(r"\\([()-])")
 # Bare trailing "(...)" dev-comment annotation, e.g. "Marines(plural)" ->
 # "Marines" -- NOT applied generically by resolve_text() (see that
 # function's own docstring/LEADING_PAREN_RE's comment for why a blanket
@@ -1152,7 +1157,7 @@ def strip_trailing_dev_comment(text: str) -> str:
 #   giant leaked dev comment -- its own name="{20206,1301}" resolves via a
 #   *trailing*, not leading, "(...)" comment, which resolve_text() has no
 #   safe way to strip generically: a regex matching an unescaped trailing
-#   "(...)" also matches inside strings using ESCAPED_PAREN_RE's own escape
+#   "(...)" also matches inside strings using ESCAPED_CHAR_RE's own escape
 #   convention (e.g. ship names like "Magnetar \(Gas\) Vanguard"), silently
 #   corrupting them. Still dropped -- unlike Xenon/Recycling above this
 #   isn't a noplayerbuild judgment call, it's a cosmetic text-resolution
@@ -1332,7 +1337,7 @@ def resolve_text(raw: str, table: dict, depth: int = 0) -> str:
         return resolve_text(inner, table, depth + 1) if inner is not None else m.group(0)
 
     text = REF_RE.sub(_sub, text)
-    text = ESCAPED_PAREN_RE.sub(r"\1", text)
+    text = ESCAPED_CHAR_RE.sub(r"\1", text)
     return text.strip()
 
 

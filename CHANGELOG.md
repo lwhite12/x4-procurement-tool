@@ -15,7 +15,15 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.5.0] - 2026-08-31 - Production
+## [0.5.1] - 2026-08-31 - Production
+
+### Fixed
+
+- German ship/equipment names using a compound word with an escaped hyphen in the game's own
+  text (e.g. "Expeditions\-schiff", "Silizium\-karbid") showed the literal backslash instead
+  of a clean hyphen -- affected 24 names across ships/turrets/weapons/wares.
+
+## [0.5.0] - 2026-08-31
 
 ### Added
 
