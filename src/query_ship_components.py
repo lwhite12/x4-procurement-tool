@@ -28,10 +28,10 @@ guessing broadly. Separately, mount-tag compatibility alone is not enough
 to keep Xenon/Kha'ak-exclusive equipment off ordinary ships -- roughly
 half of it carries no faction-exclusivity tag on its mount connection at
 all, physically indistinguishable from ordinary equipment of the same
-tier -- so matching_items() also takes the querying ship's own race (see
-race_from_ware_id()) and separately excludes any equipment owned by a
-HOSTILE_ONLY_FACTIONS faction unless the ship being queried is that same
-faction. The "thruster" group is one
+tier -- so matching_items() also takes whether the querying ship is itself
+HOSTILE_ONLY_FACTIONS-owned (see is_hostile_only_ware()) and separately
+excludes any equipment owned by a HOSTILE_ONLY_FACTIONS faction unless the
+ship being queried is that same faction. The "thruster" group is one
 exception: every ship's ship_component_groups row for it carries the
 synthetic "universal" class (see generate_ships_table.py's
 THRUSTER_COMPATIBILITY), since thrusters have no real per-ware faction/
@@ -121,39 +121,65 @@ DB_PATH = ROOT / "data" / "x4.db"
 # applied as its own filter in matching_items(), not folded into the tag
 # comparison. Ships owned by one of these factions (a few appear in
 # ships_base for comparison purposes even though a player can't fly one)
-# still see their own faction's equipment -- see race_from_ware_id().
+# still see their own faction's equipment -- see is_hostile_only_ware().
 HOSTILE_ONLY_FACTIONS = {"xenon", "khaak"}
 
-# The race token embedded as the second underscore-delimited segment of a
-# ship or equipment ware_id (e.g. "ship_xen_m_corvette_01_a" or
-# "shield_xen_m_standard_02_mk1" -> "xen" -> "xenon"). Only the prefixes
-# relevant to HOSTILE_ONLY_FACTIONS are mapped, since that's the only
-# thing this lookup is used for.
+# Narrow, last-resort fallback for is_hostile_only_ware() below -- only
+# used when the real maker_races table (see load_maker_races()) has no row
+# at all for a given ware_id. Only the prefixes relevant to
+# HOSTILE_ONLY_FACTIONS are mapped, since that's the only thing this
+# fallback is for -- not a general race-mapping utility (see
+# generate_ships_table.py's SHIP_CLASS_TO_SIZE_CODE/build_maker_race_rows()
+# for the real, current one of those).
 WARE_ID_RACE_PREFIXES = {
     "xen": "xenon",
     "kha": "khaak",
 }
 
 
-def race_from_ware_id(ware_id: str) -> str | None:
-    """A ship's or equipment ware's own design race, read straight from its
-    ware_id's naming convention (<kind>_<race>_...) rather than from a
-    per-ware owners/makerrace column. Two reasons to prefer the ware_id
-    over that column: ships_base.owners is a comma-joined *sales* list
-    across potentially many minor factions, not a single race at all (a
-    Paranid-built ship is commonly sold through Buccaneers/Holy Order/
-    Trinity too, without "paranid" itself ever appearing there); and even
-    engines_base/shields_base/weapons_base/turrets_base's own single-value
-    `owners` column (sourced from the macro's <identification
-    makerrace="..."/>) is sometimes simply missing on the game's own data
-    -- e.g. shield_xen_m_standard_02_mk1 has no makerrace attribute at all,
-    despite obviously being Xenon equipment by its own ware_id. The
-    ware_id's naming convention has no such gaps. Same technique
-    src/static/app.js uses client-side to color a ship's race abbreviation
-    in the picker.
+def load_maker_races(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """{ware_id -> set(race_id)}, built once from the real maker_races
+    table (see generate_ships_table.py's "Design race and race/faction
+    shortcodes" docstring section -- the same golden-source design-race
+    data every other part of this app now uses, replacing the ware_id-
+    prefix guess this module used to make its own separate copy of).
+    Covers ships and turrets/engines/shields/weapons; thrusters/missiles/
+    software/deployables have no makerrace concept in the game's own data
+    at all, and simply have no entry here -- same as is_hostile_only_ware()'s
+    own fallback case for the handful of equipment items whose own macro
+    has no <properties> block to read a makerrace from.
     """
+    result: dict[str, set[str]] = {}
+    for row in conn.execute("SELECT ware_id, race_id FROM maker_races").fetchall():
+        result.setdefault(row["ware_id"], set()).add(row["race_id"])
+    return result
+
+
+def is_hostile_only_ware(ware_id: str, maker_races: dict[str, set[str]]) -> bool:
+    """True if `ware_id` (a ship or equipment ware) is owned by a
+    HOSTILE_ONLY_FACTIONS race (xenon/khaak) -- checked against the real
+    maker_races table first (see load_maker_races()), falling back to the
+    ware_id's own naming convention (<kind>_<race>_...) only when
+    maker_races has no row for it at all.
+
+    That fallback isn't just theoretical caution: shield_xen_m_standard_02_
+    mk1 is a confirmed real case -- it's an alias macro
+    (<macro alias="shield_xen_m_standard_04_mk1_macro" .../>) with no
+    <properties> block of its own at all, so generate_ships_table.py never
+    captures a makerrace for it (macro-alias inheritance is deliberately
+    not resolved there -- see parse_equipment_component_wares()'s own
+    docstring), even though it's unambiguously Xenon equipment by its own
+    ware_id and carries no faction-exclusivity tag on its mount connection
+    either (compatibility="standard", not "xenon"). Without this fallback,
+    exactly this kind of ware would silently stop being recognized as
+    Xenon-owned and start appearing as an ordinary option on non-Xenon
+    ships, defeating the whole point of this check.
+    """
+    races = maker_races.get(ware_id)
+    if races is not None:
+        return bool(races & HOSTILE_ONLY_FACTIONS)
     match = re.match(r"^[a-z]+_([a-z]+)_", ware_id)
-    return WARE_ID_RACE_PREFIXES.get(match.group(1)) if match else None
+    return bool(match and WARE_ID_RACE_PREFIXES.get(match.group(1)) in HOSTILE_ONLY_FACTIONS)
 
 
 COMPONENT_TYPE_TABLES = {
@@ -181,14 +207,43 @@ def load_input(source: str) -> dict:
     return json.loads(text)
 
 
-def resolve_ship(conn: sqlite3.Connection, identifier: str) -> sqlite3.Row | None:
+def resolve_ship(conn: sqlite3.Connection, identifier: str, lang: str = "en") -> sqlite3.Row | None:
+    """`identifier` can be a ware_id or a display name (the CLI accepts
+    either) -- the name lookup always matches against ships_base's own
+    base English name column regardless of `lang` (a CLI user typing a
+    name would type the English one), only the *returned* "name" field is
+    localized, via the same COALESCE-against-localized_strings pattern
+    GET /api/ships uses.
+    """
     row = conn.execute(
-        "SELECT name, ware_id, icon, production_method FROM ships_base WHERE ware_id = ?", (identifier,)
+        """
+        SELECT
+            COALESCE(localized_strings.text, ships_base.name) AS name,
+            ships_base.ware_id AS ware_id,
+            ships_base.icon AS icon,
+            ships_base.production_method AS production_method
+        FROM ships_base
+        LEFT JOIN localized_strings
+            ON localized_strings.ware_id = ships_base.ware_id AND localized_strings.lang_id = ?
+        WHERE ships_base.ware_id = ?
+        """,
+        (lang, identifier),
     ).fetchone()
     if row is not None:
         return row
     return conn.execute(
-        "SELECT name, ware_id, icon, production_method FROM ships_base WHERE name = ?", (identifier,)
+        """
+        SELECT
+            COALESCE(localized_strings.text, ships_base.name) AS name,
+            ships_base.ware_id AS ware_id,
+            ships_base.icon AS icon,
+            ships_base.production_method AS production_method
+        FROM ships_base
+        LEFT JOIN localized_strings
+            ON localized_strings.ware_id = ships_base.ware_id AND localized_strings.lang_id = ?
+        WHERE ships_base.name = ?
+        """,
+        (lang, identifier),
     ).fetchone()
 
 
@@ -204,7 +259,13 @@ def fetch_groups(conn: sqlite3.Connection, ship_id: str) -> list[sqlite3.Row]:
 
 
 def matching_items(
-    conn: sqlite3.Connection, component_type: str, size: str, compat_class: str | None, ship_race: str | None = None
+    conn: sqlite3.Connection,
+    component_type: str,
+    size: str,
+    compat_class: str | None,
+    maker_races: dict[str, set[str]],
+    ship_is_hostile: bool = False,
+    lang: str = "en",
 ) -> list[dict]:
     """Every equipment_wares_base-joined row from the type's table matching
     this group's size, whose own compatibility tag set is a *subset* of
@@ -213,13 +274,14 @@ def matching_items(
     rather than an equality/membership test. An unset compat_class yields
     no matches -- see the module docstring for why.
 
-    `ship_race` (see race_from_ware_id()) additionally excludes equipment
-    whose own ware_id identifies it as built by a HOSTILE_ONLY_FACTIONS
-    faction, unless the ship being queried is itself that same faction --
-    a separate ownership/licensing check, not part of the tag-subset mount
+    `ship_is_hostile` (whether the querying ship itself is
+    HOSTILE_ONLY_FACTIONS-owned -- see is_hostile_only_ware()) gates an
+    additional exclusion of equipment identified the same way as hostile-
+    owned, unless the ship being queried is itself that same faction -- a
+    separate ownership/licensing check, not part of the tag-subset mount
     compatibility above (see HOSTILE_ONLY_FACTIONS' own comment for why
     this can't be folded into the tag comparison). A no-op for thrusters
-    and any other race's equipment (race_from_ware_id() returns None for
+    and any other race's equipment (is_hostile_only_ware() is false for
     both), and for software (handled entirely separately below, never
     faction-locked).
 
@@ -239,7 +301,19 @@ def matching_items(
     if component_type == "software":
         ware_ids = compat_class.split(",")
         placeholders = ", ".join("?" for _ in ware_ids)
-        query = f"SELECT ware_id, name, mk, price_min, price_avg, price_max FROM software_base WHERE ware_id IN ({placeholders})"
+        query = f"""
+            SELECT
+                software_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, software_base.name) AS name,
+                software_base.mk AS mk,
+                software_base.price_min AS price_min,
+                software_base.price_avg AS price_avg,
+                software_base.price_max AS price_max
+            FROM software_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = software_base.ware_id AND localized_strings.lang_id = ?
+            WHERE software_base.ware_id IN ({placeholders})
+        """
         return [
             {
                 "ware_id": row["ware_id"],
@@ -260,7 +334,7 @@ def matching_items(
                 "price_avg": row["price_avg"],
                 "price_max": row["price_max"],
             }
-            for row in conn.execute(query, ware_ids).fetchall()
+            for row in conn.execute(query, [lang, *ware_ids]).fetchall()
         ]
 
     table = COMPONENT_TYPE_TABLES[component_type]
@@ -287,19 +361,28 @@ def matching_items(
     # clause, and the per-size row count here is small (at most a few
     # hundred) so there's no real cost to doing it this way.
     query = f"""
-        SELECT ew.ware_id, ew.name, t.size, t.compatibility, ew.price_min, ew.price_avg, ew.price_max{ammo_select}
+        SELECT
+            ew.ware_id AS ware_id,
+            COALESCE(localized_strings.text, ew.name) AS name,
+            t.size AS size,
+            t.compatibility AS compatibility,
+            ew.price_min AS price_min,
+            ew.price_avg AS price_avg,
+            ew.price_max AS price_max{ammo_select}
         FROM {table} t
         JOIN equipment_wares_base ew ON ew.ware_id = t.ware_id
+        LEFT JOIN localized_strings
+            ON localized_strings.ware_id = ew.ware_id AND localized_strings.lang_id = ?
         WHERE t.size = ? {missile_filter}
     """
-    candidates = [dict(row) for row in conn.execute(query, [size]).fetchall()]
+    candidates = [dict(row) for row in conn.execute(query, [lang, size]).fetchall()]
     rows = [
         row
         for row in candidates
         if set(row["compatibility"].split(",") if row["compatibility"] else []) <= group_tags
     ]
-    if ship_race not in HOSTILE_ONLY_FACTIONS:
-        rows = [row for row in rows if race_from_ware_id(row["ware_id"]) not in HOSTILE_ONLY_FACTIONS]
+    if not ship_is_hostile:
+        rows = [row for row in rows if not is_hostile_only_ware(row["ware_id"], maker_races)]
     if not has_ammo_columns:
         for row in rows:
             row["ammunition_tags"] = None
@@ -312,7 +395,8 @@ def query_ship(conn: sqlite3.Connection, identifier: str) -> dict:
     if ship is None:
         return {"input": identifier, "error": "ship not found"}
 
-    ship_race = race_from_ware_id(ship["ware_id"])
+    maker_races = load_maker_races(conn)
+    ship_is_hostile = is_hostile_only_ware(ship["ware_id"], maker_races)
     all_groups = fetch_groups(conn, ship["ware_id"])
     types_by_group_name: dict[str, set[str]] = {}
     for group in all_groups:
@@ -332,7 +416,12 @@ def query_ship(conn: sqlite3.Connection, identifier: str) -> dict:
         if bucket_name is None:
             continue
         for item in matching_items(
-            conn, group["component_type"], group["size"], group["equipment_compatibility_class"], ship_race
+            conn,
+            group["component_type"],
+            group["size"],
+            group["equipment_compatibility_class"],
+            maker_races,
+            ship_is_hostile,
         ):
             buckets[bucket_name][item["ware_id"]] = item
 
@@ -346,7 +435,7 @@ def query_ship(conn: sqlite3.Connection, identifier: str) -> dict:
     }
 
 
-def query_ship_groups(conn: sqlite3.Connection, identifier: str) -> dict:
+def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en") -> dict:
     """Like query_ship, but preserves per-group structure instead of
     flattening/deduplicating options across every group of the same
     component_type -- needed for a picker UI, since two groups of the same
@@ -381,7 +470,7 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str) -> dict:
     independently pickable), and ships_base's flat total is just their
     summed slot counts.
     """
-    ship = resolve_ship(conn, identifier)
+    ship = resolve_ship(conn, identifier, lang)
     if ship is None:
         return {"input": identifier, "error": "ship not found"}
 
@@ -390,11 +479,18 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str) -> dict:
         (ship["ware_id"],),
     ).fetchone()
 
-    ship_race = race_from_ware_id(ship["ware_id"])
+    maker_races = load_maker_races(conn)
+    ship_is_hostile = is_hostile_only_ware(ship["ware_id"], maker_races)
     groups = []
     for group in fetch_groups(conn, ship["ware_id"]):
         options = matching_items(
-            conn, group["component_type"], group["size"], group["equipment_compatibility_class"], ship_race
+            conn,
+            group["component_type"],
+            group["size"],
+            group["equipment_compatibility_class"],
+            maker_races,
+            ship_is_hostile,
+            lang,
         )
         groups.append(
             {

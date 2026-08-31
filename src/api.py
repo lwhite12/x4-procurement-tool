@@ -14,19 +14,55 @@ Endpoints:
                                              symbols/<icon>.png (mounted
                                              below) -- see
                                              generate_ship_icons.py.
-                                             "owner_faction" (e.g. "argon",
-                                             from ships_base.owner_faction --
+                                             "maker_races" (e.g. ["argon"],
+                                             occasionally more than one, e.g.
+                                             ["argon", "teladi"] -- from the
+                                             maker_races table, the ship's
+                                             own real design race(s), not
+                                             its sales-owner list; see
+                                             generate_ships_table.py's
+                                             "Design race and race/faction
+                                             shortcodes" docstring section)
+                                             each name a PNG under
+                                             /images/factions/<race_id>.png
+                                             -- see generate_faction_icons.py.
+                                             Empty for the handful of
+                                             raceless drone/utility ships.
+                                             "production_method" (e.g.
+                                             "Universal", from ships_base.
+                                             production_method -- the same
+                                             vocabulary GET /api/build_methods
+                                             returns) is null for the
+                                             handful of unbuildable ships
+                                             (Khaak hulls, drop/terraforming
+                                             drones) with no production
+                                             block at all -- powers the
+                                             ship picker's Build Method
+                                             filter.
+                                             "?lang=de" (any code, default
+                                             "en") returns each ship's own
+                                             name in that language where a
+                                             real translation exists
+                                             (localized_strings table --
                                              see generate_ships_table.py's
-                                             ship_owner_faction(), the ship's
-                                             own design race, not its sales-
-                                             owner list) similarly names a
-                                             PNG under /images/factions/
-                                             <owner_faction>.png, or is null
-                                             for a ship with no real design
-                                             race (see
-                                             SHIP_RACE_PREFIX_TO_FACTION) --
-                                             see generate_faction_icons.py
-  GET  /api/ships/{identifier}/groups    -- query_ship_groups() as JSON
+                                             parse_localized_strings()),
+                                             falling back to English
+                                             per-ship rather than per-
+                                             request. This is game-data
+                                             localization -- entirely
+                                             separate from the website's
+                                             own UI text (src/static/
+                                             i18n.js), which this endpoint
+                                             has no effect on
+  GET  /api/ships/{identifier}/groups    -- query_ship_groups() as JSON.
+                                             "?lang=de" works the same way
+                                             as /api/ships' own -- the
+                                             ship's own name and every
+                                             equipment option's name in
+                                             every group are both resolved
+                                             through it (query_ship_
+                                             components.py's resolve_ship()/
+                                             matching_items())
   GET  /api/missiles                     -- list every missile (ware_id/
                                              name/compatibility), for the
                                              frontend to filter client-side
@@ -35,7 +71,9 @@ Endpoints:
                                              selected -- see the "Missiles
                                              and deployables" docstring
                                              section in
-                                             generate_ships_table.py
+                                             generate_ships_table.py.
+                                             "?lang=de" works the same way
+                                             as /api/ships' own
   GET  /api/drones                       -- list every drone (ware_id/
                                              name); unlike missiles, no
                                              per-launcher compatibility
@@ -44,7 +82,9 @@ Endpoints:
                                              pool (ships_base.drone_capacity,
                                              see the "Drones" docstring
                                              section in
-                                             generate_ships_table.py)
+                                             generate_ships_table.py).
+                                             "?lang=de" works the same way
+                                             as /api/ships' own
   GET  /api/deployables                  -- list every deployable (ware_id/
                                              name/deployable_type); same
                                              "shared pool" shape as drones,
@@ -55,7 +95,9 @@ Endpoints:
                                              ship size (DEPLOYABLE_CAPACITY_
                                              BY_SIZE in app.js: 50/100/250/
                                              450 for S/M/L/XL) rather than
-                                             something this API returns
+                                             something this API returns.
+                                             "?lang=de" works the same way
+                                             as /api/ships' own
   GET  /api/countermeasures               -- list every countermeasure
                                              (ware_id/name) -- just "Flares"
                                              in the base game. Same "shared
@@ -67,14 +109,34 @@ Endpoints:
                                              in app.js) -- see the
                                              "Countermeasures and crew"
                                              docstring section in
-                                             generate_ships_table.py
+                                             generate_ships_table.py.
+                                             "?lang=de" works the same way
+                                             as /api/ships' own
   GET  /api/crew                         -- list the single "crew" ware
                                              (ware_id/name); the shared pool
                                              it fills is ships_base.crew
                                              (query_ship_groups()'s own
                                              summary.crew_capacity), a real
                                              per-ship column unlike
-                                             countermeasures/deployables
+                                             countermeasures/deployables.
+                                             "?lang=de" resolves this one
+                                             real ware's own name the same
+                                             way as /api/ships, but note
+                                             app.js's own loadCrew()
+                                             immediately overwrites it with
+                                             GET /api/crew_roles' own
+                                             "Marines"/"Service Crew" split
+                                             names instead -- see that
+                                             endpoint's own docstring
+  GET  /api/crew_roles                    -- crew_role_id -> crew_role_name
+                                             for the two real crew-role
+                                             codes (crew_roles table -- see
+                                             generate_ships_table.py's
+                                             parse_crew_roles()/
+                                             CREW_ROLE_NAME_REF), for the
+                                             ship builder's Marines/Service
+                                             Crew rows. "?lang=de" works the
+                                             same way as /api/ships' own
   GET  /api/build_methods                 -- every real build method
                                              (DEFAULT_BUILD_METHOD_PRIORITY --
                                              see BUILD_METHODS in
@@ -83,14 +145,61 @@ Endpoints:
                                              frontend's per-column editable
                                              build-method-priority list
                                              (defaults to this same list)
-  GET  /api/factions                      -- faction_id -> faction_name for
-                                             every real faction (factions
-                                             table -- see
-                                             generate_ships_table.py's
+  GET  /api/factions                      -- faction_id -> faction_name/
+                                             faction_shortname for every
+                                             real faction (factions table --
+                                             see generate_ships_table.py's
                                              parse_factions()), for the ship
                                              picker's owner-faction icon
-                                             tooltips and a planned owner-
-                                             faction filter group
+                                             tooltips and the Vendor filter
+                                             group's own labels. "?lang=de"
+                                             works the same way as
+                                             /api/ships' own -- see that
+                                             endpoint's docstring. Confirmed
+                                             faction_shortname genuinely
+                                             differs by language (unlike
+                                             /api/races' own)
+  GET  /api/races                         -- race_id -> race_name/
+                                             race_shortname for every real
+                                             race (races table -- see
+                                             generate_ships_table.py's
+                                             parse_races()), for the ship
+                                             picker's per-ship race badges
+                                             (keyed against /api/ships' own
+                                             "maker_races") and the Race
+                                             filter group's labels.
+                                             "?lang=de" works the same way
+  GET  /api/purposes                      -- purpose_id -> purpose_name for
+                                             every real purpose (purposes
+                                             table -- see
+                                             generate_ships_table.py's
+                                             parse_purposes()), for the ship
+                                             picker's Purpose filter labels.
+                                             "?lang=de" works the same way
+                                             as /api/ships' own
+  GET  /api/ship_types                    -- ship_type_id -> ship_type_name
+                                             for every real ship_type value
+                                             actually present in ships_base
+                                             (ship_types table -- see
+                                             generate_ships_table.py's
+                                             parse_ship_types()/
+                                             SHIP_TYPE_NAME_REF), for the
+                                             ship picker's Type filter
+                                             labels. "?lang=de" works the
+                                             same way as /api/ships' own
+  GET  /api/build_method_names            -- build_method_name ->
+                                             build_method_display_name for
+                                             every real build method
+                                             (build_methods table -- see
+                                             generate_ships_table.py's
+                                             parse_build_methods()). Purely
+                                             a display-text lookup for the
+                                             same stable English keys
+                                             GET /api/build_methods returns
+                                             unlocalized -- see that
+                                             endpoint's own docstring for
+                                             why. "?lang=de" works the same
+                                             way as /api/ships' own
   GET  /api/source_versions               -- the base game's and every
                                              installed extension's own
                                              version (source_versions table
@@ -99,7 +208,11 @@ Endpoints:
                                              the About page's "built from
                                              these versions" section
                                              alongside /api/config's own
-                                             tool "version"
+                                             tool "version". "?lang=de"
+                                             resolves each DLC's display
+                                             name (not the base game's own
+                                             row, which has no ref) -- see
+                                             SOURCE_VERSION_NAME_REF
   POST /api/summarize                    -- aggregate_target_wares() +
                                              summarize(), same input shape
                                              as the CLI's input JSON files
@@ -167,6 +280,9 @@ Endpoints:
                                              dynamic "level 1 wares"
                                              columns (see app.js's
                                              openEquipmentPickerModal()).
+                                             Body's "lang" (default "en")
+                                             resolves part_names against
+                                             localized_strings.
   GET  /api/config                         -- {"remote_mode": bool}, true
                                              when this process is running as
                                              a deployed Fly.io app (detected
@@ -336,6 +452,7 @@ class PriceSummaryRequest(BaseModel):
 class Level1PartsRequest(BaseModel):
     ware_ids: list[str]
     build_method_priority: list[str] | None = None
+    lang: str = "en"
 
 
 class ImportLoadoutsRequest(BaseModel):
@@ -402,51 +519,110 @@ async def no_cache_api_responses(request: Request, call_next):
 
 
 @app.get("/api/ships")
-def list_ships() -> list[dict]:
+def list_ships(lang: str = "en") -> list[dict]:
+    """`lang` (default "en", the only language guaranteed correct today --
+    see localized_strings' own module-docstring note in
+    generate_ships_table.py) left-joins against localized_strings for that
+    ware_id/lang_id pair, falling back to ships_base's own English "name"
+    whenever no row exists there -- a ware with no real translation for
+    the requested language (or a request for a language that was never
+    generated at all -- there's no validation against a known-language
+    list here, since a garbage/unsupported value just naturally never
+    matches any row and safely falls back to English the same way) reads
+    as pure English, never a raw {page,id} ref or an error. Sorted by the
+    resolved (COALESCEd) name, not always the English one, so a non-English
+    ship list is actually alphabetized in that language.
+    """
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT name, ware_id, size, ship_type, purpose, owners, owner_faction, icon "
-            "FROM ships_base ORDER BY name"
+            """
+            SELECT
+                COALESCE(localized_strings.text, ships_base.name) AS name,
+                ships_base.ware_id AS ware_id,
+                ships_base.size AS size,
+                ships_base.ship_type AS ship_type,
+                ships_base.purpose AS purpose,
+                ships_base.owners AS owners,
+                ships_base.icon AS icon,
+                ships_base.production_method AS production_method
+            FROM ships_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = ships_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        ships = [dict(row) for row in rows]
+
+        # A ship's real design race(s) -- see generate_ships_table.py's
+        # "Design race and race/faction shortcodes" docstring section.
+        # Usually one race_id, occasionally more (e.g. the Envoy is both
+        # "argon" and "teladi") -- ordinal preserves makerrace's own listed
+        # order. No FK-friendly array type in SQLite, so this is a second
+        # query merged in here rather than a single joined row per ship.
+        maker_race_rows = conn.execute(
+            "SELECT ware_id, race_id FROM maker_races ORDER BY ware_id, ordinal"
+        ).fetchall()
+        maker_races_by_ware_id: dict[str, list[str]] = {}
+        for row in maker_race_rows:
+            maker_races_by_ware_id.setdefault(row["ware_id"], []).append(row["race_id"])
+        for ship in ships:
+            ship["maker_races"] = maker_races_by_ware_id.get(ship["ware_id"], [])
+
+        return ships
     finally:
         conn.close()
 
 
 @app.get("/api/ships/{identifier}/groups")
-def ship_groups(identifier: str) -> dict:
+def ship_groups(identifier: str, lang: str = "en") -> dict:
     conn = get_connection()
     try:
-        return query_ship_groups(conn, identifier)
+        return query_ship_groups(conn, identifier, lang)
     finally:
         conn.close()
 
 
 # Powers the price-override picker -- every ware in the database, not just
 # ones appearing in the current procurement list, so the popup can offer
-# an override for anything regardless of whether it's in use yet.
+# an override for anything regardless of whether it's in use yet -- and the
+# Cost Analysis Ware Cost List's ware_id -> name lookup (see app.js's
+# wareNames/loadWareNames()). ?lang=de resolves each ware's name against
+# localized_strings, same COALESCE pattern as every other endpoint.
 @app.get("/api/wares")
-def list_wares() -> list[dict]:
+def list_wares(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        return fetch_all_wares(conn)
+        return fetch_all_wares(conn, lang)
     finally:
         conn.close()
 
 
 @app.get("/api/missiles")
-def list_missiles() -> list[dict]:
+def list_missiles(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT ware_id, name, compatibility FROM missiles_base ORDER BY name").fetchall()
+        rows = conn.execute(
+            """
+            SELECT
+                missiles_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, missiles_base.name) AS name,
+                missiles_base.compatibility AS compatibility
+            FROM missiles_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = missiles_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
 
 
 @app.get("/api/drones")
-def list_drones() -> list[dict]:
+def list_drones(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
         # UI-only exclusion: faction-specific police drones (ware_id
@@ -456,7 +632,17 @@ def list_drones() -> list[dict]:
         # drones_base itself still has all 13 rows, this only narrows what
         # the UI shows as addable.
         rows = conn.execute(
-            "SELECT ware_id, name FROM drones_base WHERE ware_id LIKE 'ship_gen_%' ORDER BY name"
+            """
+            SELECT
+                drones_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, drones_base.name) AS name
+            FROM drones_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = drones_base.ware_id AND localized_strings.lang_id = ?
+            WHERE drones_base.ware_id LIKE 'ship_gen_%'
+            ORDER BY name
+            """,
+            (lang,),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -464,11 +650,21 @@ def list_drones() -> list[dict]:
 
 
 @app.get("/api/deployables")
-def list_deployables() -> list[dict]:
+def list_deployables(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT ware_id, name, deployable_type FROM deployables_base ORDER BY name"
+            """
+            SELECT
+                deployables_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, deployables_base.name) AS name,
+                deployables_base.deployable_type AS deployable_type
+            FROM deployables_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = deployables_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -476,20 +672,70 @@ def list_deployables() -> list[dict]:
 
 
 @app.get("/api/countermeasures")
-def list_countermeasures() -> list[dict]:
+def list_countermeasures(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT ware_id, name FROM countermeasures_base ORDER BY name").fetchall()
+        rows = conn.execute(
+            """
+            SELECT
+                countermeasures_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, countermeasures_base.name) AS name
+            FROM countermeasures_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = countermeasures_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
 
 
 @app.get("/api/crew")
-def list_crew() -> list[dict]:
+def list_crew(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT ware_id, name FROM crew_base ORDER BY name").fetchall()
+        rows = conn.execute(
+            """
+            SELECT
+                crew_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, crew_base.name) AS name
+            FROM crew_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = crew_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# crew_role_id -> real display name (e.g. "marine" -> "Marines") for the
+# ship builder's Marines/Service Crew rows (see app.js's CREW_ROLES) --
+# crew_roles table, see generate_ships_table.py's parse_crew_roles()/
+# CREW_ROLE_NAME_REF. Confirmed real, verified in-game text (traced through
+# the game's own crew-assignment UI Lua -- see CREW_ROLE_NAME_REF's own
+# docstring for the full story), not this app's own invented UI labels, so
+# it's localized this way rather than through i18next. "lang" works exactly
+# like GET /api/ship_types' own.
+@app.get("/api/crew_roles")
+def list_crew_roles(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                crew_roles.crew_role_id AS crew_role_id,
+                COALESCE(localized_strings.text, crew_roles.crew_role_name) AS crew_role_name
+            FROM crew_roles
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = crew_roles.crew_role_id AND localized_strings.lang_id = ?
+            """,
+            (lang,),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
@@ -500,17 +746,180 @@ def list_build_methods() -> list[str]:
     return DEFAULT_BUILD_METHOD_PRIORITY
 
 
+# build_method_name -> real display name (e.g. "Terran" -> "Terraner" in
+# German) for every real production method (build_methods table -- see
+# generate_ships_table.py's parse_build_methods()/collect_build_method_refs()).
+# Deliberately separate from GET /api/build_methods above, not a `lang`
+# param added to it: this app's own internal build-method "id" is the
+# plain English name itself (ships_base.production_method, persisted fleet
+# build_method_priority state, summarize_production.py's own cost-calc
+# grouping all key off it directly), so GET /api/build_methods must keep
+# returning that exact, unlocalized list for anything that matches/
+# persists/calculates against it -- see collect_build_method_refs()'s own
+# docstring for why that's deliberately not being changed. This endpoint
+# is purely for resolving a real display string for that same stable key
+# wherever a build method name is actually shown to a user (the Build
+# Method filter, the Cost Analysis Build Method modal, the fleet-tab
+# priority button). "lang" works exactly like GET /api/ship_types' own.
+@app.get("/api/build_method_names")
+def list_build_method_names(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                build_methods.build_method_name AS build_method_name,
+                COALESCE(localized_strings.text, build_methods.build_method_name) AS build_method_display_name
+            FROM build_methods
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = build_methods.build_method_name AND localized_strings.lang_id = ?
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 # faction_id -> real display name (e.g. "buccaneers" -> "Duke's
 # Buccaneers") for every faction id that can appear in ships_base.owners
 # (and, later, other wares' own owner lists) -- see generate_ships_table.py's
 # parse_factions(). Powers the ship picker's owner-faction icon tooltips
-# (src/static/app.js) today; also the intended data source for a planned
-# owner-faction filter group.
+# and the Vendor filter group's own labels (src/static/app.js) today.
+#
+# "lang" (default "en") works exactly like GET /api/ships' own -- left-joins
+# localized_strings on this faction's own id (parse_factions() feeds its
+# rows into parse_localized_strings() the same way every ware list does,
+# under "ware_id" even though a faction isn't really a ware -- see that
+# function's own docstring), COALESCING to the English faction_name
+# whenever no translation row exists, sorted by the resolved name so a
+# non-English list is actually alphabetized in that language too.
+#
+# faction_shortname (e.g. "YAK" for Yaki) is resolved the same way but
+# against the separate localized_shortnames table (see
+# generate_ships_table.py's "Design race and race/faction shortcodes"
+# docstring section for why shortname needed its own table rather than a
+# second row per faction in localized_strings). Confirmed several faction
+# shortcodes genuinely differ by language (e.g. "buccaneers" is "BUC" in
+# English, "KDH" in German) -- unlike race_shortname (see GET /api/races),
+# which is identical in every language this app currently supports, so this
+# join is not a no-op the way it might look.
 @app.get("/api/factions")
-def list_factions() -> list[dict]:
+def list_factions(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT faction_id, faction_name FROM factions ORDER BY faction_name").fetchall()
+        rows = conn.execute(
+            """
+            SELECT
+                factions.faction_id AS faction_id,
+                COALESCE(localized_strings.text, factions.faction_name) AS faction_name,
+                COALESCE(localized_shortnames.text, factions.faction_shortname) AS faction_shortname
+            FROM factions
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = factions.faction_id AND localized_strings.lang_id = ?
+            LEFT JOIN localized_shortnames
+                ON localized_shortnames.ware_id = factions.faction_id AND localized_shortnames.lang_id = ?
+            ORDER BY faction_name
+            """,
+            (lang, lang),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# race_id -> real display name + short in-game callsign (e.g. "argon" ->
+# "Argon"/"ARG") -- see generate_ships_table.py's parse_races(). Powers the
+# ship picker's per-ship race badges (src/static/app.js, one per entry in
+# GET /api/ships' own "maker_races") and the Race filter group's labels.
+#
+# "lang" works like GET /api/factions' own, but joins against
+# localized_race_names/localized_race_shortnames instead of
+# localized_strings/localized_shortnames -- races get their own dedicated
+# pair of tables because several race ids collide with a same-named
+# faction id (e.g. "argon" is both), and sharing factions' tables was
+# confirmed (via a live query) to silently return the faction's own
+# translation for the race. See generate_ships_table.py's "Design race and
+# race/faction shortcodes" docstring section. Confirmed separately that
+# race_shortname (unlike faction_shortname) is identical across every
+# language this app currently supports, so in practice this join always
+# falls back to races.race_shortname today -- but it's still wired the
+# same principled way in case a future language (or a mod's own race)
+# ever makes it not a no-op.
+@app.get("/api/races")
+def list_races(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                races.race_id AS race_id,
+                COALESCE(localized_race_names.text, races.race_name) AS race_name,
+                COALESCE(localized_race_shortnames.text, races.race_shortname) AS race_shortname
+            FROM races
+            LEFT JOIN localized_race_names
+                ON localized_race_names.ware_id = races.race_id AND localized_race_names.lang_id = ?
+            LEFT JOIN localized_race_shortnames
+                ON localized_race_shortnames.ware_id = races.race_id AND localized_race_shortnames.lang_id = ?
+            ORDER BY race_name
+            """,
+            (lang, lang),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# purpose_id -> real display name (e.g. "dismantling" -> "Dismantling") for
+# every real purpose the game defines (purposes table -- see
+# generate_ships_table.py's parse_purposes()), covering ships_base.purpose's
+# own vocabulary and more (several purposes only ever apply to stations).
+# Powers the ship picker's Purpose filter labels, replacing the raw
+# internal code capitalized client-side with no real translation behind
+# it. "lang" works exactly like GET /api/ships'/GET /api/factions' own.
+@app.get("/api/purposes")
+def list_purposes(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                purposes.purpose_id AS purpose_id,
+                COALESCE(localized_strings.text, purposes.purpose_name) AS purpose_name
+            FROM purposes
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = purposes.purpose_id AND localized_strings.lang_id = ?
+            ORDER BY purpose_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# ship_type_id -> real display name (e.g. "destroyer" -> "Destroyer") for
+# every real ship_type value actually present in ships_base (ship_types
+# table -- see generate_ships_table.py's parse_ship_types()/
+# SHIP_TYPE_NAME_REF). Powers the ship picker's Type filter labels,
+# replacing the raw internal code shown unstyled. "lang" works exactly
+# like GET /api/purposes' own.
+@app.get("/api/ship_types")
+def list_ship_types(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                ship_types.ship_type_id AS ship_type_id,
+                COALESCE(localized_strings.text, ship_types.ship_type_name) AS ship_type_name
+            FROM ship_types
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = ship_types.ship_type_id AND localized_strings.lang_id = ?
+            ORDER BY ship_type_name
+            """,
+            (lang,),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
@@ -525,11 +934,26 @@ def list_factions() -> list[dict]:
 # sync with whatever game files actually built the current database --
 # unlike VERSION, which is this tool's own code version and bumped
 # independently (see CHANGELOG.md).
+# ?lang=de resolves each DLC's own display name against localized_strings
+# (see SOURCE_VERSION_NAME_REF in generate_ships_table.py) -- the base
+# game's own row has no ref and always shows its literal "X4: Foundations"
+# name regardless of lang.
 @app.get("/api/source_versions")
-def list_source_versions() -> list[dict]:
+def list_source_versions(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT source_name, source_version FROM source_versions").fetchall()
+        rows = conn.execute(
+            """
+            SELECT source_versions.source_id AS source_id,
+                   COALESCE(localized_strings.text, source_versions.source_name) AS source_name,
+                   source_versions.source_version AS source_version
+            FROM source_versions
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = source_versions.source_id
+                AND localized_strings.lang_id = ?
+            """,
+            (lang,),
+        ).fetchall()
         return [dict(row) for row in rows]
     finally:
         conn.close()
@@ -675,6 +1099,9 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
     every part_ware_id that appears in any row, looked up from whichever of
     economy_wares_base/equipment_wares_base actually has it (a depth-1
     input is normally a raw/economy ware, but doesn't have to be).
+    request.lang (default "en") resolves each part_names entry against
+    localized_strings, same COALESCE pattern as every other endpoint --
+    see app.js's openEquipmentPickerModal().
     """
     conn = get_connection()
     try:
@@ -695,7 +1122,16 @@ def level1_parts_endpoint(request: Level1PartsRequest) -> dict:
                 break
             placeholders = ", ".join("?" for _ in remaining)
             for row in conn.execute(
-                f"SELECT ware_id, name FROM {table} WHERE ware_id IN ({placeholders})", remaining
+                f"""
+                SELECT {table}.ware_id AS ware_id,
+                       COALESCE(localized_strings.text, {table}.name) AS name
+                FROM {table}
+                LEFT JOIN localized_strings
+                    ON localized_strings.ware_id = {table}.ware_id
+                    AND localized_strings.lang_id = ?
+                WHERE {table}.ware_id IN ({placeholders})
+                """,
+                (request.lang, *remaining),
             ).fetchall():
                 part_names[row["ware_id"]] = row["name"]
     finally:

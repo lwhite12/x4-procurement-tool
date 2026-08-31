@@ -84,6 +84,18 @@ body {
   margin-right: 1rem;
 }
 
+/* The language picker (see #language-picker in index.html, wired up by
+   setupLanguagePicker() in i18n.js) -- sits directly after the Share
+   button in the DOM, so it lands immediately to its right; .header-
+   share-btn's own margin-left: auto is what pushes both of them to the
+   header's far right edge as a pair, not this element's own doing. */
+#language-picker {
+  align-self: center;
+  margin-right: 1rem;
+  width: auto;
+  padding: 0.3rem 0.5rem;
+}
+
 #main-nav {
   display: flex;
   align-items: stretch;
@@ -334,15 +346,14 @@ body {
    measures the *widest* thing anywhere in the picker (a long ship name in
    the list can out-measure the filter row, since max-content assumes no
    wrapping even for text that would normally wrap), so it doesn't
-   reliably land at "just past Loadout Manager" the way a fixed value
-   does. 62rem (992px) is estimated to fit Size + Purpose + Type + Loadout
-   Manager (the widest of the four, since its own buttons stack vertically
-   -- see .loadout-manager-actions -- so its width is set by its single
-   longest button label, "Import Raw XML Loadout") plus the section's own
-   padding, without wrapping Loadout Manager onto its own line -- nudge
-   this value directly if it's off (50rem was too narrow and did wrap it).
-   The right column (1fr) picks up whatever width that leaves for the
-   procurement list. */
+   reliably land at a sensible value the way a fixed one does. 56rem
+   (896px) is estimated to comfortably fit Size + Purpose + Type on one
+   row (each capped at .filter-group's own max-width: 160px) plus the
+   section's own padding -- nudge this value directly if it's off.
+   Loadout Manager no longer factors in here at all -- it's a full-width
+   row of its own below #ship-filters now, not one of the flex-wrapped
+   boxes inside it. The right column (1fr) picks up whatever width that
+   leaves for the procurement list. */
 #page-fleet-planner {
   display: grid;
   grid-template-columns: 56rem 1fr;
@@ -883,6 +894,24 @@ label {
   height: 0;
 }
 
+/* Flat hardcoded width, not shrink-to-fit -- meant to be sized so exactly
+   3 boxes tile one #ship-filters row with no leftover slack or overflow.
+   The on-paper math (56rem left grid column, minus #picker-section's own
+   padding/border, minus 2 inter-box gaps, divided by 3, minus this
+   element's own padding/border) landed on ~244-246px, but that measurably
+   still wraps Type onto a second row in practice -- something in that
+   chain (possibly still-unaccounted-for box-model overhead somewhere) is
+   off by more than rounding, not yet root-caused. 220px is a deliberately
+   more conservative value than the math suggested, while that gets
+   pinned down exactly -- nudge this down further (or, once actual
+   rendered measurements are in hand, replace this whole approach with the
+   real correct value) if 3 still don't fit.
+   flex-shrink: 0 keeps #ship-filters' own flex-wrap row from squeezing a
+   box narrower than this and silently invalidating the math above.
+   .loadout-manager-group (a sibling of #ship-filters now, not one of its
+   flex items -- see index.html) overrides the sizing/layout back to a
+   plain full-width block below, keeping just the shared border/padding/
+   background/legend look. */
 .filter-group {
   display: flex;
   flex-direction: column;
@@ -890,20 +919,28 @@ label {
   border: 1px solid var(--border-blue);
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
-  min-width: 140px;
+  width: 220px;
+  /* <fieldset> defaults to min-width: min-content (not auto like most
+     elements) -- without overriding it, the fixed width above is silently
+     only a *minimum* in practice: a fieldset refuses to shrink below its
+     own content's intrinsic width regardless, which is exactly what was
+     pushing Type onto a second row (its own content happened to want more
+     than 244px). Same fix .section-box already needed for the same
+     underlying reason, see that rule's own comment. */
+  min-width: 0;
+  flex-shrink: 0;
   background: var(--bg-panel);
 }
 
-/* Wider than the shared .filter-group min-width -- faction display names
-   (e.g. "Holy Order of the Pontifex") are much longer than any other
-   filter group's own labels, and .filter-options label's white-space:
-   nowrap means a too-narrow box shows an unwanted horizontal scrollbar
-   instead of just wrapping. Wide enough for the longest real entry
-   (checkbox + icon + text) plus room for the vertical scrollbar this box
-   also has (140px tall, 25 possible entries) without that eating back into
-   the text's own space. */
-.vendor-filter-group {
-  min-width: 300px;
+/* A full-width row below #ship-filters (see index.html) rather than one
+   of its own flex-wrapped boxes -- its buttons sit side by side
+   horizontally now (see .loadout-manager-actions), not stacked, so it no
+   longer needs a fixed height or a width driven by its widest button. */
+.loadout-manager-group {
+  display: block;
+  width: auto;
+  max-width: none;
+  margin-bottom: 0.75rem;
 }
 
 /* Ware Cost List's own title+button on the left (its natural 2-line
@@ -1008,6 +1045,7 @@ label {
 
 .filter-actions {
   display: flex;
+  height: 24px;
   gap: 0.4rem;
 }
 
@@ -1021,27 +1059,51 @@ label {
    it actually has (e.g. Size's own 4 entries never came close to filling
    this before), scrolling only once a box's own entries actually exceed
    it. */
+/* min-width: 0 overrides a flex item's own default min-width: auto --
+   without it, a flex item refuses to shrink below its content's natural
+   (unwrapped) width no matter what wrapping rules apply, which silently
+   defeats .filter-group's own max-width cap for anything nested this deep
+   in the flex chain. */
 .filter-options {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
   height: 140px;
   overflow-y: auto;
+  min-width: 0;
 }
 
+/* align-items: flex-start (not center) is deliberate -- once a long entry
+   wraps onto a second line (no more white-space: nowrap forcing it onto
+   one), centering would float the checkbox/icon in the vertical middle of
+   the wrapped text instead of level with its first line.
+
+   overflow-wrap: break-word covers entries with no space to wrap at at
+   all -- e.g. Purpose's raw single-word values ("Dismantling",
+   "Auxiliary") -- normal wrapping only breaks between words, so a long
+   lone word with nowhere to break just overflowed the box instead
+   (triggering the same unwanted horizontal scrollbar as before, just for
+   a different reason than Type's multi-word entries did). min-width: 0
+   here for the same flex-item reason as .filter-options above. */
 .filter-options label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  min-width: 0;
+  overflow-wrap: break-word;
   gap: 0.4rem;
   margin-bottom: 0;
   font-size: 0.9rem;
   font-weight: normal;
-  white-space: nowrap;
 }
 
+/* Row, not column -- buttons sit side by side, wrapping onto additional
+   rows (rather than overflowing horizontally) if the viewport is ever too
+   narrow for all four at once. No fixed height any more -- .loadout-
+   manager-group is a plain full-width block now, sized to its own
+   content's actual height like any normal box. */
 .loadout-manager-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 
@@ -1090,7 +1152,7 @@ label {
    padding-left: 1em (meant to separate it from a preceding ship-name text
    node that doesn't exist here -- .filter-options label's own flex gap
    already spaces this from the checkbox). Color/background themselves
-   come from applyFactionTextColor() in app.js, not from here. */
+   come from applyRaceTextColor() in app.js, not from here. */
 .filter-option-race-label {
   font-weight: 700;
 }
@@ -1140,11 +1202,21 @@ label {
   color: var(--text-primary);
 }
 
+/* Wraps one or more .ship-option-race badges (see buildShipOptionRow() in
+   app.js -- usually one, occasionally more, e.g. a ship with multiple
+   design races shows one badge per race) in a row with a small gap between
+   them, replacing what padding-left on a single .ship-option-race used to
+   provide. */
+.ship-option-races {
+  display: flex;
+  gap: 0.5em;
+  padding-left: 1em;
+}
+
 .ship-option-race {
   font-size: 0.7em;
   font-weight: 700;
   color: var(--text-muted);
-  padding-left: 1em;
 }
 
 /* One full-size badge per real owner faction (see buildShipOptionRow() in
@@ -1169,24 +1241,24 @@ label {
   flex-shrink: 0;
 }
 
-/* Solid backing panels for faction-colored text whose color is too hard
+/* Solid backing panels for race-colored text whose color is too hard
    to read as plain text against this app's dark background -- see
-   FACTION_BG_CLASS in app.js for which faction gets which. A light
+   RACE_BG_CLASS in app.js for which race gets which. A light
    "silver" panel behind the darker colors (Argon/Paranid/Split/Xenon), a
    lighter steel-grey "slate" panel behind every light color (Boron,
-   Teladi, Terran, Kha'ak, Yaki) -- still dark enough to stay under even
+   Teladi, Terran, Kha'ak) -- still dark enough to stay under even
    the lightest of those (Terran's pale blue) with a clear margin. */
-.faction-bg-silver,
-.faction-bg-slate {
+.race-bg-silver,
+.race-bg-slate {
   padding: 0 0.3em;
   border-radius: 3px;
 }
 
-.faction-bg-silver {
+.race-bg-silver {
   background: #c0c0c0;
 }
 
-.faction-bg-slate {
+.race-bg-slate {
   background: #4a5a66;
 }
 

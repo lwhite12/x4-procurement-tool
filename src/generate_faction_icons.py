@@ -15,11 +15,15 @@ Writes:
   - data/images/factions/<name>.png  (decompressed, converted from DDS,
                                        tinted, and renamed to just the bare
                                        race key -- "faction_argon_diffhq.gz"
-                                       -> "argon.png" -- matching
-                                       ships_base.owner_faction's own values
-                                       directly, so the frontend can build
-                                       the URL straight from that column
-                                       with no extra lookup)
+                                       -> "argon.png" -- matching the
+                                       maker_races table's own race_id
+                                       values directly (see
+                                       generate_ships_table.py's "Design
+                                       race and race/faction shortcodes"
+                                       docstring section), so the frontend
+                                       can build the URL straight from
+                                       GET /api/ships' own "maker_races"
+                                       entries with no extra lookup)
 
 Run after `python src/extract_game_data.py --only faction_icons` (or a full
 extraction run). Every output here is fully reproducible from

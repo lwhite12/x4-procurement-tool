@@ -11,7 +11,7 @@
 </head>
 <body>
   <header id="main-header">
-    <h1>X4 Procurement Planner</h1>
+    <h1 data-i18n="app.title">X4 Procurement Planner</h1>
     <nav id="main-nav">
       <button type="button" class="main-nav-btn active" data-page="fleet-planner">
         <span class="main-nav-icon-wrap">
@@ -19,7 +19,7 @@
           <img src="/images/nav_icons/fleet_planner_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
           <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
         </span>
-        Fleet Planner
+        <span data-i18n="nav.fleet_planner">Fleet Planner</span>
       </button>
       <button type="button" class="main-nav-btn" data-page="cost-analysis">
         <span class="main-nav-icon-wrap">
@@ -27,7 +27,7 @@
           <img src="/images/nav_icons/cost_analysis_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
           <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
         </span>
-        Cost Analysis
+        <span data-i18n="nav.cost_analysis">Cost Analysis</span>
       </button>
       <button type="button" class="main-nav-btn" data-page="about">
         <span class="main-nav-icon-wrap">
@@ -35,83 +35,108 @@
           <img src="/images/nav_icons/about_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
           <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
         </span>
-        About
+        <span data-i18n="nav.about">About</span>
       </button>
     </nav>
-    <button type="button" id="header-share-btn" class="header-share-btn">Share</button>
+    <button type="button" id="header-share-btn" class="header-share-btn" data-i18n="header.share">Share</button>
+    <select id="language-picker" aria-label="Language" title="Language" data-i18n-aria-label="header.language_picker_label" data-i18n-title="header.language_picker_label">
+      <option value="en">EN</option>
+      <option value="de">DE</option>
+      <option value="es">ES</option>
+      <option value="fr">FR</option>
+      <option value="it">IT</option>
+      <option value="pt">PT</option>
+      <option value="cs">CS</option>
+      <option value="pl">PL</option>
+      <option value="ru">RU</option>
+      <option value="uk">UK</option>
+      <option value="zh">ZH</option>
+      <option value="ko">KO</option>
+      <option value="ja">JA</option>
+      <option value="bg">BG</option>
+      <option value="tr">TR</option>
+    </select>
   </header>
 
   <div id="page-fleet-planner" class="page">
   <fieldset id="picker-section" class="section-box">
-    <legend class="section-box-legend">Ship Builder</legend>
+    <legend class="section-box-legend" data-i18n="ship_builder.section_title">Ship Builder</legend>
     <div id="ship-filters">
       <fieldset class="filter-group">
-        <legend>Size</legend>
+        <legend data-i18n="filter.size">Size</legend>
         <div class="filter-actions">
-          <button type="button" class="filter-all-btn" data-filter="size-filter">All</button>
-          <button type="button" class="filter-none-btn" data-filter="size-filter">None</button>
+          <button type="button" class="filter-all-btn" data-filter="size-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="size-filter" data-i18n="filter.none">None</button>
         </div>
         <div id="size-filter-options" class="filter-options"></div>
       </fieldset>
       <fieldset class="filter-group">
-        <legend>Purpose</legend>
+        <legend data-i18n="filter.purpose">Purpose</legend>
         <div class="filter-actions">
-          <button type="button" class="filter-all-btn" data-filter="purpose-filter">All</button>
-          <button type="button" class="filter-none-btn" data-filter="purpose-filter">None</button>
+          <button type="button" class="filter-all-btn" data-filter="purpose-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="purpose-filter" data-i18n="filter.none">None</button>
         </div>
         <div id="purpose-filter-options" class="filter-options"></div>
       </fieldset>
       <fieldset class="filter-group">
-        <legend>Type</legend>
+        <legend data-i18n="filter.type">Type</legend>
         <div class="filter-actions">
-          <button type="button" class="filter-all-btn" data-filter="type-filter">All</button>
-          <button type="button" class="filter-none-btn" data-filter="type-filter">None</button>
+          <button type="button" class="filter-all-btn" data-filter="type-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="type-filter" data-i18n="filter.none">None</button>
         </div>
         <div id="type-filter-options" class="filter-options"></div>
       </fieldset>
-      <fieldset class="filter-group loadout-manager-group">
-        <legend>Loadout Manager</legend>
-        <div class="loadout-manager-actions">
-          <button id="import-loadouts-btn" type="button">Import Game Loadouts</button>
-          <button id="import-raw-xml-loadout-btn" type="button">Import Raw XML Loadout</button>
-          <button id="export-loadouts-btn" type="button" disabled>Export Loadouts</button>
-          <button id="clear-loadouts-btn" type="button" disabled>Clear Loadouts</button>
-        </div>
-      </fieldset>
       <div class="filter-row-break"></div>
       <fieldset class="filter-group">
-        <legend>Race</legend>
+        <legend data-i18n="filter.race">Race</legend>
         <div class="filter-actions">
-          <button type="button" class="filter-all-btn" data-filter="race-filter">All</button>
-          <button type="button" class="filter-none-btn" data-filter="race-filter">None</button>
+          <button type="button" class="filter-all-btn" data-filter="race-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="race-filter" data-i18n="filter.none">None</button>
         </div>
         <div id="race-filter-options" class="filter-options"></div>
       </fieldset>
-      <fieldset class="filter-group vendor-filter-group">
-        <legend>Vendor</legend>
+      <fieldset class="filter-group">
+        <legend data-i18n="filter.vendor">Vendor</legend>
         <div class="filter-actions">
-          <button type="button" class="filter-all-btn" data-filter="vendor-filter">All</button>
-          <button type="button" class="filter-none-btn" data-filter="vendor-filter">None</button>
+          <button type="button" class="filter-all-btn" data-filter="vendor-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="vendor-filter" data-i18n="filter.none">None</button>
         </div>
         <div id="vendor-filter-options" class="filter-options"></div>
       </fieldset>
-      <p class="filter-hint">Check none in a group to remove the filter.</p>
+      <fieldset class="filter-group">
+        <legend data-i18n="filter.build_method">Build Method</legend>
+        <div class="filter-actions">
+          <button type="button" class="filter-all-btn" data-filter="build-method-filter" data-i18n="filter.all">All</button>
+          <button type="button" class="filter-none-btn" data-filter="build-method-filter" data-i18n="filter.none">None</button>
+        </div>
+        <div id="build-method-filter-options" class="filter-options"></div>
+      </fieldset>
+      <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
     </div>
-    <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship"></div>
+    <fieldset class="filter-group loadout-manager-group">
+      <legend data-i18n="filter.loadout_manager">Loadout Manager</legend>
+      <div class="loadout-manager-actions">
+        <button id="import-loadouts-btn" type="button" data-i18n="loadout_manager.import_game_loadouts">Import Game Loadouts</button>
+        <button id="import-raw-xml-loadout-btn" type="button" data-i18n="loadout_manager.import_raw_xml_loadout">Import Raw XML Loadout</button>
+        <button id="export-loadouts-btn" type="button" disabled data-i18n="loadout_manager.export_loadouts">Export Loadouts</button>
+        <button id="clear-loadouts-btn" type="button" disabled data-i18n="loadout_manager.clear_loadouts">Clear Loadouts</button>
+      </div>
+    </fieldset>
+    <div id="ship-options-list" class="ship-options-list" role="listbox" aria-label="Select a ship" data-i18n-aria-label="ship_builder.list_aria_label"></div>
     <div class="ship-picker-actions-row">
-      <button id="load-ship-btn" disabled>Load</button>
-      <button id="clear-ship-btn-top" type="button" class="clear-ship-btn">Clear</button>
-      <button id="select-game-loadout-btn" type="button" disabled>Select Filter Loadout</button>
-      <button id="add-to-saved-loadouts-btn-top" type="button">Add To Saved Loadouts</button>
-      <button id="add-to-cart-btn-top" type="button">Add To Fleet List</button>
+      <button id="load-ship-btn" disabled data-i18n="ship_builder.load">Load</button>
+      <button id="clear-ship-btn-top" type="button" class="clear-ship-btn" data-i18n="ship_builder.clear">Clear</button>
+      <button id="select-game-loadout-btn" type="button" disabled data-i18n="ship_builder.select_filter_loadout">Select Filter Loadout</button>
+      <button id="add-to-saved-loadouts-btn-top" type="button" data-i18n="ship_builder.add_to_saved_loadouts">Add To Saved Loadouts</button>
+      <button id="add-to-cart-btn-top" type="button" data-i18n="ship_builder.add_to_fleet_list">Add To Fleet List</button>
     </div>
 
     <div id="ship-detail" class="hidden">
       <div class="ship-name-row">
         <h3 id="ship-name"></h3>
-        <button id="select-chassis-loadout-btn" type="button" disabled>Select Loadout</button>
-        <button id="ship-high-preset-btn" type="button" class="section-preset-btn">High Preset</button>
-        <button id="ship-minimum-preset-btn" type="button" class="section-preset-btn">Minimum Preset</button>
+        <button id="select-chassis-loadout-btn" type="button" disabled data-i18n="ship_builder.select_loadout">Select Loadout</button>
+        <button id="ship-high-preset-btn" type="button" class="section-preset-btn" data-i18n="ship_builder.high_preset">High Preset</button>
+        <button id="ship-minimum-preset-btn" type="button" class="section-preset-btn" data-i18n="ship_builder.minimum_preset">Minimum Preset</button>
       </div>
       <div id="imported-loadout-warnings" class="imported-loadout-warnings hidden"></div>
 
@@ -132,57 +157,57 @@
       <div id="crew-container"></div>
 
       <label>
-        Loadout Name
-        <input id="ship-note-input" type="text" placeholder="e.g. Boron Border Patrol" />
+        <span data-i18n="ship_builder.loadout_name_label">Loadout Name</span>
+        <input id="ship-note-input" type="text" placeholder="e.g. Boron Border Patrol" data-i18n-placeholder="ship_builder.loadout_name_placeholder" />
       </label>
 
       <div class="ship-detail-actions-row">
-        <button id="add-to-saved-loadouts-btn" type="button">Add To Saved Loadouts</button>
-        <button id="clear-ship-btn-bottom" type="button" class="clear-ship-btn">Clear</button>
-        <button id="add-to-cart-btn">Add To Fleet List</button>
+        <button id="add-to-saved-loadouts-btn" type="button" data-i18n="ship_builder.add_to_saved_loadouts">Add To Saved Loadouts</button>
+        <button id="clear-ship-btn-bottom" type="button" class="clear-ship-btn" data-i18n="ship_builder.clear">Clear</button>
+        <button id="add-to-cart-btn" data-i18n="ship_builder.add_to_fleet_list">Add To Fleet List</button>
       </div>
       <div id="add-to-saved-loadouts-status" class="import-loadouts-status hidden"></div>
     </div>
   </fieldset>
 
   <fieldset id="cart-section" class="section-box">
-    <legend class="section-box-legend">Fleet Lists</legend>
+    <legend class="section-box-legend" data-i18n="fleet_lists.section_title">Fleet Lists</legend>
     <nav id="fleet-list-tabs" class="fleet-list-tabs"></nav>
     <label>
-      Fleet list name
-      <input id="cart-name-input" type="text" placeholder="e.g. Sector Defense Fleet" />
+      <span data-i18n="fleet_lists.name_label">Fleet list name</span>
+      <input id="cart-name-input" type="text" placeholder="e.g. Sector Defense Fleet" data-i18n-placeholder="fleet_lists.name_placeholder" />
     </label>
     <div id="cart-toolbar">
-      <button id="save-cart-btn">Download Fleet List…</button>
+      <button id="save-cart-btn" data-i18n="fleet_lists.download">Download Fleet List…</button>
       <label class="file-input-label">
-        Upload Fleet List…
+        <span data-i18n="fleet_lists.upload">Upload Fleet List…</span>
         <input id="load-cart-input" type="file" accept="application/json,.json" class="hidden" />
       </label>
     </div>
     <table id="cart-table">
       <thead>
         <tr>
-          <th>Ship</th>
-          <th>Loadout</th>
+          <th data-i18n="fleet_lists.table_ship_header">Ship</th>
+          <th data-i18n="fleet_lists.table_loadout_header">Loadout</th>
         </tr>
       </thead>
       <tbody id="cart-body"></tbody>
     </table>
-    <p id="cart-empty-msg">Fleet list is empty.</p>
+    <p id="cart-empty-msg" data-i18n="fleet_lists.empty_msg">Fleet list is empty.</p>
   </fieldset>
   </div>
 
   <div id="page-cost-analysis" class="page hidden">
   <fieldset id="calculate-section" class="section-box">
-    <legend class="section-box-legend">Calculate Production</legend>
+    <legend class="section-box-legend" data-i18n="cost_analysis.section_title">Calculate Production</legend>
     <label>
-      Analysis file name
-      <input id="analysis-file-name-input" type="text" placeholder="e.g. fleet_comparison" />
+      <span data-i18n="cost_analysis.file_name_label">Analysis file name</span>
+      <input id="analysis-file-name-input" type="text" placeholder="e.g. fleet_comparison" data-i18n-placeholder="cost_analysis.file_name_placeholder" />
     </label>
     <div id="analysis-toolbar">
-      <button id="download-analysis-btn">Download Analysis…</button>
+      <button id="download-analysis-btn" data-i18n="cost_analysis.download">Download Analysis…</button>
       <label class="file-input-label">
-        Upload Analysis…
+        <span data-i18n="cost_analysis.upload">Upload Analysis…</span>
         <input id="upload-analysis-input" type="file" accept="application/json,.json" class="hidden" />
       </label>
     </div>
@@ -190,19 +215,19 @@
     <div id="ware-cost-list" class="hidden">
       <div class="ware-cost-list-header-row">
         <div class="ware-cost-list-header-left">
-          <h3>Ware Cost List</h3>
-          <button id="price-override-btn" type="button">Set Ware Price Overrides</button>
+          <h3 data-i18n="ware_cost_list.title">Ware Cost List</h3>
+          <button id="price-override-btn" type="button" data-i18n="ware_cost_list.set_overrides_btn">Set Ware Price Overrides</button>
         </div>
         <fieldset class="filter-group price-override-summary-box">
-          <legend>Configured Ware Price Overrides</legend>
+          <legend data-i18n="ware_cost_list.overrides_legend">Configured Ware Price Overrides</legend>
           <div id="price-override-summary-list" class="price-override-summary-list">
-            <span class="price-override-summary-empty">None configured.</span>
+            <span class="price-override-summary-empty" data-i18n="ware_cost_list.overrides_none">None configured.</span>
           </div>
         </fieldset>
       </div>
       <div id="ware-cost-list-tabs" class="tab-bar">
-        <button type="button" class="tab-btn active" data-ware-cost-list-tab="total">Total Cost Breakdown</button>
-        <button type="button" class="tab-btn" data-ware-cost-list-tab="component_type">Component Type Cost Breakdown</button>
+        <button type="button" class="tab-btn active" data-ware-cost-list-tab="total" data-i18n="ware_cost_list.tab_total">Total Cost Breakdown</button>
+        <button type="button" class="tab-btn" data-ware-cost-list-tab="component_type" data-i18n="ware_cost_list.tab_component_type">Component Type Cost Breakdown</button>
       </div>
       <div id="ware-cost-list-table-wrapper">
         <table id="ware-cost-list-table">
@@ -216,20 +241,20 @@
 
   <div id="page-about" class="page hidden">
     <fieldset id="about-section" class="section-box">
-      <legend class="section-box-legend">About</legend>
+      <legend class="section-box-legend" data-i18n="about.section_title">About</legend>
       <div class="about-disclaimer">
-        <p>
+        <p data-i18n="about.disclaimer">
           This is an unofficial fan project. It is not affiliated with, endorsed, or supported by Egosoft. Egosoft
           assumes no technical support or liability (e.g., for corrupted save games). Use at your own risk. All
           names, trademarks, and content related to X4: Foundations are the property of Egosoft or their respective
           owners.
         </p>
-        <p>
+        <p data-i18n-html="about.steam_link_html">
           <a href="https://store.steampowered.com/app/392160/X4_Foundations/" target="_blank" rel="noopener"
             >X4: Foundations on Steam</a
           >
         </p>
-        <p>
+        <p data-i18n-html="about.github_link_html">
           View this project on GitHub:
           <a href="https://github.com/lwhite12/x4-procurement-tool" target="_blank" rel="noopener"
             >https://github.com/lwhite12/x4-procurement-tool</a
@@ -237,8 +262,8 @@
         </p>
       </div>
 
-      <h3>Built From</h3>
-      <p class="modal-hint">
+      <h3 data-i18n="about.built_from_title">Built From</h3>
+      <p class="modal-hint" data-i18n="about.built_from_hint">
         This site's ship/ware data is generated from these exact versions of the game and every installed
         DLC, alongside this tool's own version:
       </p>
@@ -246,66 +271,67 @@
         <tbody id="source-versions-tbody"></tbody>
       </table>
 
-      <h3>Future Plans</h3>
-      <p class="modal-hint">A few bigger features on the roadmap, not built yet:</p>
-      <h4>User Accounts &amp; Saved States</h4>
-      <p class="modal-hint">
+      <h3 data-i18n="about.future_plans_title">Future Plans</h3>
+      <p class="modal-hint" data-i18n="about.future_plans_hint">A few bigger features on the roadmap, not built yet:</p>
+      <h4 data-i18n="about.user_accounts_title">User Accounts &amp; Saved States</h4>
+      <p class="modal-hint" data-i18n="about.user_accounts_body">
         Right now, sharing a fleet list, ship loadout, or price override preset means generating a one-off link
         (see the Share button above). The plan is to eventually add real user accounts, so you can save and
         recall your own fleet lists, ship loadouts, and price override presets directly -- without needing to
         keep track of links.
       </p>
-      <h4>Language Support</h4>
-      <p class="modal-hint">
+      <h4 data-i18n="about.language_support_title">Language Support</h4>
+      <p class="modal-hint" data-i18n="about.language_support_body">
         Ship and ware names/descriptions are currently only pulled from the game's English-language files.
         Support for reading other languages X4 itself supports is planned.
       </p>
 
-      <h3>Running this locally against your own game install</h3>
-      <p class="modal-hint">
+      <h3 data-i18n="about.local_install_title">Running this locally against your own game install</h3>
+      <p class="modal-hint" data-i18n="about.local_install_hint">
         The hosted website covers the base game and all DLCs. The eventual goal of this is to run against a local install with any
         combination of DLCs/mods you want to use. However, this is untested so who knows if it works. If you want to try it, here's how:
       </p>
       <ol>
-        <li>Clone the repository (see the GitHub link above) and install Python dependencies: <code>pip install -r requirements.txt</code>.</li>
-        <li>
+        <li data-i18n-html="about.local_install_step1_html">Clone the repository (see the GitHub link above) and install Python dependencies: <code>pip install -r requirements.txt</code>.</li>
+        <li data-i18n-html="about.local_install_step2_html">
           Obtain <strong>XRCatTool</strong> (an egosoft first-party X4 catalog-extraction tool -- not included in this
-          repository) and place it at <code>XTools_1.11/XRCatTool.exe</code> under the repo root, or modify the repo code to point to your cli path. 
+          repository) and place it at <code>XTools_1.11/XRCatTool.exe</code> under the repo root, or modify the repo code to point to your cli path.
           <span class="modal-hint">[link to the current XRCatTool download to be added here]</span>
         </li>
-        <li>
+        <li data-i18n-html="about.local_install_step3_html">
           Run <code>python src/extract_game_data.py</code> to pull ship/equipment/ware data out of your local X4
           installation's <code>.cat</code>/<code>.dat</code> catalogs. By default this expects the game installed at
           <code>C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations</code> -- edit <code>GAME_ROOT</code> at
           the top of that script if yours lives somewhere else.
         </li>
-        <li>Run <code>python src/generate_ships_table.py</code> to build <code>data/x4.db</code> from the extracted files.</li>
-        <li>Run <code>python src/api.py</code> and open <code>http://127.0.0.1:8000/</code>.</li>
+        <li data-i18n-html="about.local_install_step4_html">Run <code>python src/generate_ships_table.py</code> to build <code>data/x4.db</code> from the extracted files.</li>
+        <li data-i18n-html="about.local_install_step5_html">Run <code>python src/api.py</code> and open <code>http://127.0.0.1:8000/</code>.</li>
       </ol>
     </fieldset>
   </div>
 
   <div id="build-method-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3>Build Method Priority</h3>
-      <div class="modal-section-title">Tried in order, top to bottom</div>
+      <h3 data-i18n="build_method_modal.title">Build Method Priority</h3>
+      <div class="modal-section-title" data-i18n="build_method_modal.section_title">Tried in order, top to bottom</div>
       <div id="build-method-modal-priority-list" class="build-method-fallback-list"></div>
       <div class="modal-actions">
-        <button type="button" id="build-method-modal-cancel-btn">Cancel</button>
-        <button type="button" id="build-method-modal-save-btn">Save</button>
+        <button type="button" id="build-method-modal-cancel-btn" data-i18n="build_method_modal.cancel">Cancel</button>
+        <button type="button" id="build-method-modal-save-btn" data-i18n="build_method_modal.save">Save</button>
       </div>
     </div>
   </div>
 
   <div id="equipment-picker-modal-overlay" class="modal-overlay hidden">
     <div class="modal modal-wide">
-      <h3 id="equipment-picker-modal-title">Select Equipment</h3>
+      <h3 id="equipment-picker-modal-title" data-i18n="equipment_picker_modal.title">Select Equipment</h3>
       <label class="equipment-picker-apply-all-label">
         <input type="checkbox" id="equipment-picker-apply-all-checkbox" />
-        Apply to all matching slots on this ship
+        <span data-i18n="equipment_picker_modal.apply_all_label">Apply to all matching slots on this ship</span>
         <span
           class="equipment-picker-apply-all-hint"
           title="Applies this choice to every other slot of the same type and size (bonus/surface element shields only apply to other bonus shields, main shields only to other main shields). A slot where this item isn't actually a valid option is left unchanged."
+          data-i18n-title="equipment_picker_modal.apply_all_hint_title"
           >?</span
         >
       </label>
@@ -317,8 +343,8 @@
         </table>
       </div>
       <div class="modal-actions">
-        <button type="button" id="equipment-picker-clear-btn">Clear Selection</button>
-        <button type="button" id="equipment-picker-cancel-btn">Cancel</button>
+        <button type="button" id="equipment-picker-clear-btn" data-i18n="equipment_picker_modal.clear_selection">Clear Selection</button>
+        <button type="button" id="equipment-picker-cancel-btn" data-i18n="equipment_picker_modal.cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -326,19 +352,19 @@
   <div id="price-override-modal-overlay" class="modal-overlay hidden">
     <div class="modal modal-wide">
       <div class="price-override-modal-heading-row">
-        <h3>Set Ware Price Overrides</h3>
+        <h3 data-i18n="price_override_modal.title">Set Ware Price Overrides</h3>
         <div class="price-override-filter-checkboxes">
           <label class="checkbox-label">
             <input type="checkbox" id="price-override-filter-production" />
-            Production wares
+            <span data-i18n="price_override_modal.filter_production">Production wares</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" id="price-override-filter-raw" />
-            Raw resources
+            <span data-i18n="price_override_modal.filter_raw">Raw resources</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" id="price-override-filter-procurement" />
-            Fleet list wares
+            <span data-i18n="price_override_modal.filter_procurement">Fleet list wares</span>
           </label>
         </div>
         <input
@@ -346,6 +372,7 @@
           type="text"
           class="price-override-search-input"
           placeholder="Search wares…"
+          data-i18n-placeholder="price_override_modal.search_placeholder"
         />
       </div>
       <div id="price-override-modal-status" class="equipment-picker-modal-status hidden"></div>
@@ -353,26 +380,26 @@
         <table id="price-override-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Min Price</th>
-              <th>Avg Price</th>
-              <th>Max Price</th>
-              <th>Override</th>
+              <th data-i18n="price_override_modal.table_name_header">Name</th>
+              <th data-i18n="price_override_modal.table_min_header">Min Price</th>
+              <th data-i18n="price_override_modal.table_avg_header">Avg Price</th>
+              <th data-i18n="price_override_modal.table_max_header">Max Price</th>
+              <th data-i18n="price_override_modal.table_override_header">Override</th>
             </tr>
           </thead>
           <tbody id="price-override-tbody"></tbody>
         </table>
       </div>
       <div class="modal-actions">
-        <button type="button" id="price-override-close-btn">Close</button>
+        <button type="button" id="price-override-close-btn" data-i18n="price_override_modal.close">Close</button>
       </div>
     </div>
   </div>
 
   <div id="import-loadouts-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3>Import Game Loadouts</h3>
-      <p class="modal-hint">
+      <h3 data-i18n="import_loadouts_modal.title">Import Game Loadouts</h3>
+      <p class="modal-hint" data-i18n-html="import_loadouts_modal.hint_html">
         Reads a player-saved <code>loadouts.xml</code> (not a savegame itself -- typically under
         <code>Documents\Egosoft\X4\&lt;id&gt;\loadouts.xml</code>) and matches each saved ship loadout against this
         app's own data. Station-module loadouts (turret/shield/storage modules, not ships) are skipped
@@ -380,90 +407,92 @@
       </p>
       <div id="import-loadouts-path-section">
         <label>
-          Path to loadouts.xml (read directly by this app's own server -- only works when running locally)
-          <input id="import-loadouts-path-input" type="text" placeholder="C:\Users\...\Documents\Egosoft\X4\...\loadouts.xml" />
+          <span data-i18n="import_loadouts_modal.path_label">Path to loadouts.xml (read directly by this app's own server -- only works when running locally)</span>
+          <input id="import-loadouts-path-input" type="text" placeholder="C:\Users\...\Documents\Egosoft\X4\...\loadouts.xml" data-i18n-placeholder="import_loadouts_modal.path_placeholder" />
         </label>
-        <p class="modal-hint">...or upload the file instead:</p>
+        <p class="modal-hint" data-i18n="import_loadouts_modal.upload_instead_hint">...or upload the file instead:</p>
       </div>
       <label>
-        Upload loadouts.xml
+        <span data-i18n="import_loadouts_modal.upload_label">Upload loadouts.xml</span>
         <input id="import-loadouts-file-input" type="file" accept=".xml" />
       </label>
       <div id="import-loadouts-status" class="import-loadouts-status hidden"></div>
       <div class="modal-actions">
-        <button type="button" id="import-loadouts-cancel-btn">Cancel</button>
-        <button type="button" id="import-loadouts-run-btn">Import</button>
+        <button type="button" id="import-loadouts-cancel-btn" data-i18n="import_loadouts_modal.cancel">Cancel</button>
+        <button type="button" id="import-loadouts-run-btn" data-i18n="import_loadouts_modal.import">Import</button>
       </div>
     </div>
   </div>
 
   <div id="import-raw-xml-loadout-modal-overlay" class="modal-overlay hidden">
     <div class="modal modal-wide">
-      <h3>Import Raw XML Loadout</h3>
-      <p class="modal-hint">
+      <h3 data-i18n="import_raw_xml_modal.title">Import Raw XML Loadout</h3>
+      <p class="modal-hint" data-i18n-html="import_raw_xml_modal.hint_html">
         Paste a single <code>&lt;loadout ...&gt;...&lt;/loadout&gt;</code> element, or a full
         <code>&lt;loadouts&gt;...&lt;/loadouts&gt;</code> block containing several -- the same shape found in a saved
         <code>loadouts.xml</code>. Parsed ship loadout(s) are added to this app's own working set of imported
         loadouts (see "Select Filter Loadout") alongside anything already imported, rather than replacing it. This
         never writes to any file.
       </p>
-      <textarea id="import-raw-xml-loadout-textarea" class="import-raw-xml-loadout-textarea" placeholder="<loadout id=&quot;...&quot; name=&quot;...&quot; macro=&quot;...&quot;>...</loadout>" spellcheck="false"></textarea>
+      <textarea id="import-raw-xml-loadout-textarea" class="import-raw-xml-loadout-textarea" placeholder="<loadout id=&quot;...&quot; name=&quot;...&quot; macro=&quot;...&quot;>...</loadout>" spellcheck="false" data-i18n-placeholder="import_raw_xml_modal.textarea_placeholder"></textarea>
       <div id="import-raw-xml-loadout-status" class="import-loadouts-status hidden"></div>
       <div class="modal-actions">
-        <button type="button" id="import-raw-xml-loadout-cancel-btn">Cancel</button>
-        <button type="button" id="import-raw-xml-loadout-confirm-btn">Confirm</button>
+        <button type="button" id="import-raw-xml-loadout-cancel-btn" data-i18n="import_raw_xml_modal.cancel">Cancel</button>
+        <button type="button" id="import-raw-xml-loadout-confirm-btn" data-i18n="import_raw_xml_modal.confirm">Confirm</button>
       </div>
     </div>
   </div>
 
   <div id="select-game-loadout-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3 id="select-game-loadout-modal-title">Select Filter Loadout</h3>
+      <h3 id="select-game-loadout-modal-title" data-i18n="select_game_loadout_modal.title">Select Filter Loadout</h3>
       <div id="select-game-loadout-list" class="select-game-loadout-list"></div>
       <div class="modal-actions">
-        <button type="button" id="select-game-loadout-cancel-btn">Cancel</button>
+        <button type="button" id="select-game-loadout-cancel-btn" data-i18n="select_game_loadout_modal.cancel">Cancel</button>
       </div>
     </div>
   </div>
 
   <div id="share-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <h3>Share</h3>
-      <p class="modal-hint">
+      <h3 data-i18n="share_modal.title">Share</h3>
+      <p class="modal-hint" data-i18n="share_modal.hint">
         Create a link others can open to load a copy of your data. Only the checked sections below are
         included -- anyone with the link can view whatever you check here.
       </p>
       <div id="share-modal-options" class="share-modal-options">
         <label class="checkbox-label">
           <input type="checkbox" id="share-option-fleets" />
-          Fleet Lists
+          <span data-i18n="share_modal.option_fleets">Fleet Lists</span>
         </label>
         <label class="checkbox-label">
           <input type="checkbox" id="share-option-price_overrides" />
-          Ware Price Overrides
+          <span data-i18n="share_modal.option_price_overrides">Ware Price Overrides</span>
         </label>
         <label class="checkbox-label">
           <input type="checkbox" id="share-option-loadouts" />
-          Ship Loadouts
+          <span data-i18n="share_modal.option_loadouts">Ship Loadouts</span>
         </label>
       </div>
       <div id="share-modal-status" class="import-loadouts-status hidden"></div>
       <div id="share-modal-result" class="share-modal-result hidden">
         <label>
-          Share link
+          <span data-i18n="share_modal.result_label">Share link</span>
           <div class="share-modal-result-row">
             <input id="share-modal-result-input" type="text" readonly />
-            <button type="button" id="share-modal-copy-btn">Copy</button>
+            <button type="button" id="share-modal-copy-btn" data-i18n="share_modal.copy">Copy</button>
           </div>
         </label>
       </div>
       <div class="modal-actions">
-        <button type="button" id="share-modal-cancel-btn">Cancel</button>
-        <button type="button" id="share-modal-generate-btn">Generate Share Link</button>
+        <button type="button" id="share-modal-cancel-btn" data-i18n="share_modal.cancel">Cancel</button>
+        <button type="button" id="share-modal-generate-btn" data-i18n="share_modal.generate">Generate Share Link</button>
       </div>
     </div>
   </div>
 
+  <script src="vendor/i18next.min.js"></script>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -24,14 +24,24 @@ Reads:
                                    "equipment" plus "countermeasure", and the
                                    single "crew" ware has no tags at all so
                                    it's matched by id directly)
-  - data/ships/size_*_macros/*.xml     (each ship's macro: component ref,
+  - data/ships/<class>_macros/*.xml     (each ship's macro: component ref,
                                    ship type/hull/crew/travel drive/missile
                                    capacity, the full flight model --
                                    jerk/physics/steeringcurve -- and its
-                                   <software> compatibility list)
-  - data/ships/size_*_components/*.xml (each ship's component/model
+                                   <software> compatibility list. <class> is
+                                   whatever the macro's own <macro
+                                   class="..."/> attribute says (e.g.
+                                   "ship_l"), sorted there by extract_game_
+                                   data.py's sort_ship_files_by_class() --
+                                   see index_ship_files()/
+                                   SHIP_CLASS_TO_SIZE_CODE below for how
+                                   that maps to ships_base.size)
+  - data/ships/<class>_components/*.xml (each ship's component/model
                                    definition, analyzed for engine/shield/
-                                   weapon/turret connection slots)
+                                   weapon/turret connection slots -- same
+                                   <class>_ folder convention as macros
+                                   above, from each file's own <component
+                                   class="..."/>)
   - data/<type>s/<type>_*_macros/*.xml     (<type> in engine/shield/weapon/
                                    turret: each ware's identification/mk +
                                    type-specific stats -- boost/travel/
@@ -69,9 +79,29 @@ Reads:
                                    licence tweaks to existing ones; see
                                    factions_files()/parse_factions() below.
                                    Only 5 of 7 extensions ship one)
+  - data/names/0001-l<id>.xml          (one per LANGUAGE_FILES entry --
+                                   id/page-keyed strings for that language,
+                                   base-game-only same as 0001-l044.xml
+                                   itself; see parse_localized_strings()
+                                   below for the non-English ones)
+  - data/libraries/purposes.xml        (base game ship/station purpose
+                                   category definitions -- id/name=
+                                   "{page,id}" on each <purpose> element,
+                                   base-game-only same as colors.xml; see
+                                   parse_purposes() below)
+  - data/libraries/races.xml           (base game race definitions -- id/
+                                   name/shortname="{page,id}" on each
+                                   <race> element, base-game-only same as
+                                   purposes.xml/colors.xml; see
+                                   parse_races() below. A race's own id
+                                   (e.g. "argon") is the same value every
+                                   ship/turret/engine/shield/weapon's own
+                                   makerrace attribute uses directly -- see
+                                   "Design race and race/faction
+                                   shortcodes" below)
 
 Writes:
-  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 19 tables)
+  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 30 tables)
   - src/csv/ships_base.csv            (one row per ship ware)
   - src/csv/production_wares.csv      (one row per ware needed by a ship's,
                                         economy ware's, equipment ware's,
@@ -115,11 +145,72 @@ Writes:
                                         versions" section, not used by any
                                         other part of this pipeline)
   - src/csv/factions.csv              (one row per real faction id, its
-                                        display name resolved -- see
+                                        display name and shortname (e.g.
+                                        "YAK" for Yaki) resolved -- see
                                         parse_factions() below; for the
                                         ship picker's owner-faction icon
-                                        tooltips, src/static/app.js, and a
-                                        planned owner-faction filter)
+                                        tooltips, src/static/app.js, and the
+                                        Vendor filter)
+  - src/csv/races.csv                 (one row per real race id, its
+                                        display name and shortname (e.g.
+                                        "ARG" for Argon) resolved -- see
+                                        parse_races() below; a race's own id
+                                        is the same value maker_races.csv's
+                                        race_id column and every ship/
+                                        equipment ware's own makerrace
+                                        attribute use directly)
+  - src/csv/maker_races.csv           (one row per (ware_id, race_id) pair
+                                        -- a ship/turret/engine/shield/
+                                        weapon's own real design race(s),
+                                        read directly from its macro's
+                                        makerrace attribute; see "Design
+                                        race and race/faction shortcodes"
+                                        below)
+  - src/csv/localized_shortnames.csv  (one row per (ware_id, lang_id) pair
+                                        with a real non-English translation
+                                        of a race's or faction's own short
+                                        callsign (e.g. "ARG"/"YAK") --
+                                        same shape as localized_strings.csv,
+                                        kept separate since it's a second,
+                                        independently-localizable text field
+                                        on the same entities; see "Design
+                                        race and race/faction shortcodes"
+                                        below)
+  - src/csv/purposes.csv              (one row per real purpose id, its
+                                        display name resolved -- see
+                                        parse_purposes() below; for the
+                                        ship picker's Purpose filter labels)
+  - src/csv/ship_types.csv            (one row per real ship_type value
+                                        actually present in ships_base, its
+                                        display name resolved where known --
+                                        see parse_ship_types()/
+                                        SHIP_TYPE_NAME_REF below; for the
+                                        ship picker's Type filter labels)
+  - src/csv/build_methods.csv         (one row per real production method
+                                        name (BUILD_METHODS) -- see
+                                        parse_build_methods()/
+                                        collect_build_method_refs() below;
+                                        for the Build Method filter, the
+                                        Cost Analysis Build Method modal,
+                                        and the fleet-tab priority button.
+                                        build_method_name doubles as the
+                                        real internal key used everywhere
+                                        else in this app -- see
+                                        collect_build_method_refs()'s own
+                                        docstring for why that's
+                                        deliberately unchanged here)
+  - src/csv/crew_roles.csv            (one row per real crew-role code
+                                        (CREW_ROLE_NAME_REF) -- see
+                                        parse_crew_roles() below; for the
+                                        ship builder's Marines/Service Crew
+                                        rows)
+  - src/csv/localized_strings.csv     (one row per (ware_id, lang_id) pair
+                                        with a real non-English translation
+                                        available -- see
+                                        parse_localized_strings() below;
+                                        game-data localization, separate
+                                        from the website's own UI text --
+                                        see src/static/i18n.js for that)
   - data/x4.db                        (SQLite database rebuilt from the
                                         schema + CSVs above on every run)
 
@@ -135,10 +226,12 @@ decoded the same way ship names are.
 Component slot analysis
 ------------------------
 A ware's <component ref="..."/> (stored as `macro`) points to a *macro* file
-(data/ships/size_X_macros/<macro>.xml), which itself has its own
-<component ref="..."/> pointing to the *component* file
-(data/ships/size_X_components/<component>.xml) that actually defines the
-ship's hardpoints as <connection tags="..." group="..."/> entries. Most connections
+(data/ships/<class>_macros/<macro>.xml, looked up by name via
+index_ship_files() -- see that function's own docstring), which itself has
+its own <component ref="..."/> pointing to the *component* file
+(data/ships/<class>_components/<component>.xml, same name-based lookup)
+that actually defines the ship's hardpoints as
+<connection tags="..." group="..."/> entries. Most connections
 aren't equipment slots at all (cockpit, lights, cosmetic model attachment
 points); the ones that are carry one of "engine"/"shield"/"weapon"/"turret"
 plus a size token ("small"/"medium"/"large"/"extralarge") in their tags.
@@ -523,8 +616,12 @@ checks both.
 Laser towers are the one deployable_type extracted from ship-macro
 territory (assets/units/size_s|xs/macros/) rather than a dedicated
 standalone-equipment catalog folder -- see extract_game_data.py's
-deployable_jobs() docstring for why the XS variant needed its own
-extraction job despite SHIP_SIZES excluding "xs" entirely.
+deployable_jobs() docstring. That job pulls the file into its own
+data/deployables/lasertowers/ folder independently of (and in addition
+to) the general ship macro extraction, which -- since generalizing to a
+class-discovered scan, see extract_game_data.py's ship_macro_jobs() --
+now also picks up the same file into ship_xs_macros/, harmlessly unused
+there since no real <ware tags="ship"> ever references it.
 
 Missiles DO have a compatibility concept after all -- it just isn't a
 separate mount/component file the way turrets/engines/shields/weapons
@@ -613,6 +710,72 @@ name="{20208,10401}" reference resolves to "Crewman(male)" (page 20208 is a
 table of gendered per-NPC display strings, and Egosoft's own wares.xml just
 points this ware's name at the "male" variant instead of a proper generic
 name). See the crew_wares loop in main() for the full explanation.
+
+Design race and race/faction shortcodes
+-----------------------------------------
+A ship/turret/engine/shield/weapon's own design race (e.g. "who built this")
+comes from its macro's <properties><identification makerrace="argon" .../>
+attribute -- read directly (see load_macro_data()/
+parse_equipment_component_wares()), never inferred from the ware_id's own
+naming convention. This replaced an earlier ware_id-prefix-parsing approach
+(SHIP_RACE_PREFIX_TO_FACTION/ship_owner_faction(), both removed) once it
+became clear makerrace is a real, per-entity, per-mod-respected game
+attribute -- unlike a ware_id's shape, which no mod is under any obligation
+to follow. makerrace can be multi-valued (space-separated, e.g. "argon
+teladi" on ship_gen_m_corvette_01, the Envoy) -- see split_maker_races()/
+build_maker_race_rows(), which produce one maker_races row per (ware_id,
+race_id) pair rather than collapsing to a single value. Missiles,
+deployables, thrusters, and software have no makerrace concept in the base
+game at all (confirmed by inspection), so they simply get no maker_races
+rows.
+
+Separately, a race's or faction's own short in-game callsign (e.g. "ARG" for
+Argon, "YAK" for Yaki) comes from races.xml's/factions*.xml's own
+shortname="{page,id}" attribute (parse_races()/parse_factions()) -- purely
+a display concern now, not a lookup key (a ship's race is found via
+maker_races/makerrace directly, never by matching a shortcode string back
+against a ware_id prefix).
+
+Both race_name/race_shortname and faction_name/faction_shortname need two
+independently-localizable text fields per entity, but localized_strings'
+schema only has room for one text column per (ware_id, lang_id) pair --
+solved with one extra table per extra field, all built by the same shared
+parse_localized_strings(), just given a different `ref_key` and/or a
+different, smaller entity_lists each time: factions' own name stays in the
+main shared localized_strings table (alongside ships/wares/purposes, whose
+ware_id namespace never collides with a faction id in practice);
+faction_shortname gets its own localized_shortnames table
+(ref_key="shortname_ref", entity_lists=[factions]). races is deliberately
+NOT mixed into either of those -- see the next paragraph -- and instead
+gets two more dedicated tables of its own, localized_race_names
+(entity_lists=[races]) and localized_race_shortnames
+(entity_lists=[races], ref_key="shortname_ref").
+
+Why races needed full isolation rather than just joining factions' tables
+the same way: several race ids collide with a same-named faction id (e.g.
+"argon" is both a race id and a faction id), and parse_localized_strings()'s
+own `seen` dedup keeps only the first (ware_id, lang_id) row it finds
+across all lists passed to one call -- so mixing races into factions'
+shared keyspace was confirmed, via a live GET /api/races?lang=de test, to
+silently return the *faction's* German text for a race (e.g. "Argonische
+Föderation", the Argon Federation faction's own name, instead of the
+race's own "Argonen"). This was caught by testing an actual API response,
+not by inspection -- the bug produced no errors or warnings anywhere in
+the pipeline, since every step involved was individually working exactly
+as designed; the only sign was the wrong text showing up end to end.
+
+Confirmed empirically: race shortcodes are identical in English and German
+(all 8 match byte-for-byte), but faction shortcodes are not -- 9 of 25
+differ (e.g. "buccaneers" is "BUC" in English, "KDH" in German). One,
+"scavenger", carries a pre-existing data-quality quirk in Egosoft's own
+German text: its shortname reference resolves to
+"STU(Riptide Rakers RIP = Sturmflut-Streicher STU)" -- a *trailing*, not
+leading, dev comment, which resolve_text() has no safe way to strip
+generically (see LEADING_PAREN_RE's own comment on why a trailing-paren
+strip would corrupt real names that use escaped, backslash-prefixed parens,
+e.g. "Magnetar (Gas) Vanguard") --
+same class of bug as the "Processing" production method noted above, left
+unfixed for the same reason, not something introduced by this pipeline.
 """
 
 import csv
@@ -624,6 +787,33 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 LANG_FILE = DATA / "names" / "0001-l044.xml"
+
+# lang_id -> data/names/<file>.xml, one entry per language the database has
+# any localized_strings coverage for (see parse_localized_strings() below).
+# "en" is deliberately excluded from that table -- see this module's own
+# note on LOCALIZED_STRINGS_FIELDNAMES for why -- but is listed here too so
+# every other piece of code that needs "every supported language" (not
+# just "every language with its own localized_strings rows") has one
+# single place to read it from. Must stay in sync with LANGUAGE_IDS in
+# extract_game_data.py (that's the other place a new language needs
+# adding -- the actual extraction job).
+LANGUAGE_FILES = {
+    "en": "0001-l044.xml",
+    "de": "0001-l049.xml",
+    "es": "0001-l034.xml",
+    "fr": "0001-l033.xml",
+    "it": "0001-l039.xml",
+    "pt": "0001-l055.xml",
+    "cs": "0001-l042.xml",
+    "pl": "0001-l048.xml",
+    "ru": "0001-l007.xml",
+    "uk": "0001-l380.xml",
+    "zh": "0001-l086.xml",
+    "ko": "0001-l082.xml",
+    "ja": "0001-l081.xml",
+    "bg": "0001-l359.xml",
+    "tr": "0001-l090.xml",
+}
 WARES_DIR = DATA / "libraries"
 VERSION_DAT_FILE = DATA / "version.dat"
 EXTENSIONS_DIR = DATA / "extensions"
@@ -648,6 +838,18 @@ COUNTERMEASURES_CSV_OUT = ROOT / "src" / "csv" / "countermeasures_base.csv"
 CREW_CSV_OUT = ROOT / "src" / "csv" / "crew_base.csv"
 SOURCE_VERSIONS_CSV_OUT = ROOT / "src" / "csv" / "source_versions.csv"
 FACTIONS_CSV_OUT = ROOT / "src" / "csv" / "factions.csv"
+RACES_FILE = WARES_DIR / "races.xml"
+RACES_CSV_OUT = ROOT / "src" / "csv" / "races.csv"
+PURPOSES_FILE = WARES_DIR / "purposes.xml"
+PURPOSES_CSV_OUT = ROOT / "src" / "csv" / "purposes.csv"
+SHIP_TYPES_CSV_OUT = ROOT / "src" / "csv" / "ship_types.csv"
+BUILD_METHODS_CSV_OUT = ROOT / "src" / "csv" / "build_methods.csv"
+CREW_ROLES_CSV_OUT = ROOT / "src" / "csv" / "crew_roles.csv"
+MAKER_RACES_CSV_OUT = ROOT / "src" / "csv" / "maker_races.csv"
+LOCALIZED_STRINGS_CSV_OUT = ROOT / "src" / "csv" / "localized_strings.csv"
+LOCALIZED_SHORTNAMES_CSV_OUT = ROOT / "src" / "csv" / "localized_shortnames.csv"
+LOCALIZED_RACE_NAMES_CSV_OUT = ROOT / "src" / "csv" / "localized_race_names.csv"
+LOCALIZED_RACE_SHORTNAMES_CSV_OUT = ROOT / "src" / "csv" / "localized_race_shortnames.csv"
 DB_OUT = DATA / "x4.db"
 
 EQUIPMENT_SIZES = ("s", "m", "l", "xl")
@@ -712,6 +914,16 @@ TABLE_CSV_FILES = {
     "flight_model": FLIGHT_MODEL_CSV_OUT,
     "source_versions": SOURCE_VERSIONS_CSV_OUT,
     "factions": FACTIONS_CSV_OUT,
+    "races": RACES_CSV_OUT,
+    "purposes": PURPOSES_CSV_OUT,
+    "ship_types": SHIP_TYPES_CSV_OUT,
+    "build_methods": BUILD_METHODS_CSV_OUT,
+    "crew_roles": CREW_ROLES_CSV_OUT,
+    "maker_races": MAKER_RACES_CSV_OUT,
+    "localized_strings": LOCALIZED_STRINGS_CSV_OUT,
+    "localized_shortnames": LOCALIZED_SHORTNAMES_CSV_OUT,
+    "localized_race_names": LOCALIZED_RACE_NAMES_CSV_OUT,
+    "localized_race_shortnames": LOCALIZED_RACE_SHORTNAMES_CSV_OUT,
 }
 
 EQUIPMENT_TYPE_TAGS = ("engine", "shield", "weapon", "turret", "thruster")
@@ -720,10 +932,175 @@ EQUIPMENT_TYPE_TAGS = ("engine", "shield", "weapon", "turret", "thruster")
 def classify_equipment_type(tags: set[str]) -> str | None:
     return next((t for t in EQUIPMENT_TYPE_TAGS if t in tags), None)
 
-SHIP_SIZES = ("s", "m", "l", "xl")
 SHIPS_DIR = DATA / "ships"
-SIZE_MACRO_DIRS = {size: SHIPS_DIR / f"size_{size}_macros" for size in SHIP_SIZES}
-SIZE_COMPONENT_DIRS = {size: SHIPS_DIR / f"size_{size}_components" for size in SHIP_SIZES}
+
+# Interim, hand-curated mapping from a ship's own real macro/component
+# class="..." attribute (see index_ship_files()) to the short size code
+# used throughout this app (ships_base.size, the Size filter, the
+# turret_<size>/bonus_<size>_weapons dynamic columns, etc.).
+#
+# Investigated whether a real in-game localization source exists for the
+# S/M/L/XL/XS text itself (plain letters don't necessarily make sense
+# translated as-is into every language, e.g. Chinese) and confirmed one
+# does: the game's own UI code (ui/addons/ego_detailmonitorhelper/
+# helper.lua, ~line 9122) hardcodes exactly this class-to-language-ref
+# mapping (class == "ship_xl" -> ReadText(1001, 48), etc., page 1001 ids
+# 48-52). But also confirmed -- by resolving those refs in English, German,
+# AND Chinese (the game does ship a Chinese language file, t/0001-l086.xml)
+# -- that Egosoft's own translators keep these as the literal Latin letters
+# "XL"/"L"/"M"/"S"/"XS" in every one of those languages, not translated at
+# all. So wiring this through to real per-language text would produce
+# byte-identical output to this hardcoded dict today; deliberately not done
+# for that reason (no real value from the extra machinery right now), but
+# the Lua source above is exactly where to start if that ever needs
+# revisiting -- see SHIP_TYPE_NAME_REF below for what doing this properly
+# looks like once it's actually worth it for a given lookup.
+#
+# No general mechanism exists in the base game for handling an unrecognized
+# size class either, mods included -- confirmed by inspection (no XML
+# registry anywhere; class semantics live only in this same hardcoded Lua
+# and in the C++ engine itself, which mods can't touch), so a mod
+# introducing a genuinely new size class would need Egosoft's own UI code
+# patched too, not just game data. This dict's own `.get(...)` returning
+# None (see index_ship_files()'s caller) for anything unrecognized is the
+# realistic ceiling here, not a gap to eventually close.
+#
+# REVISIT when real mod support is built (see GitHub issue #5) --
+# specifically confirmed relevant to Star Wars Interworlds, which is known
+# to add XXL/XXXL-ish ships beyond this dataset's own xs/s/m/l/xl. Whatever
+# class string(s) that mod actually uses show up directly in ships_base.
+# ship_class once its data is run through this pipeline (added specifically
+# so this would be visible rather than silently guessed at) -- start there.
+SHIP_CLASS_TO_SIZE_CODE = {
+    "ship_xs": "xs",
+    "ship_s": "s",
+    "ship_m": "m",
+    "ship_l": "l",
+    "ship_xl": "xl",
+}
+
+# Hand-curated mapping from a ship's own real ships_base.ship_type value
+# (e.g. "destroyer") to its real in-game display name's language ref (e.g.
+# "Destroyer"/German "Zerstörer"). No XML registry exists for this any more
+# than SHIP_CLASS_TO_SIZE_CODE's own size classes do -- found the same way,
+# by reading the game's own UI Lua source
+# (ui/addons/ego_detailmonitor/menu_map.lua's map-legend table, ~line
+# 1560-1600), which is keyed by *icon* (ships_base.icon, e.g.
+# "ship_xl_destroyer_01"), not ship_type directly -- cross-referenced
+# against every real (ship_type, icon) pair actually present in this
+# dataset to build this table, since the two aren't quite 1:1 (a handful of
+# ships use a generic/placeholder icon that doesn't appear in that Lua
+# table at all, but every real ship_type value's *dominant* icon does).
+#
+# Confirmed -- unlike SHIP_CLASS_TO_SIZE_CODE's size letters -- these
+# genuinely differ by language (checked all 18 unique refs against German:
+# 17 of 18 produce real, different text, e.g. "Heavy Fighter" ->
+# "Schwerer Jäger"), so this one *is* worth resolving through
+# parse_localized_strings() for real per-language text -- see
+# parse_ship_types() below. Some of these refs resolve through a nested
+# indirection (e.g. {1001,9824} -> {20221,4001}) rather than directly to
+# text -- resolve_text()'s existing recursive {page,id} substitution
+# already handles that with no extra code needed.
+#
+# "envoy" (2 unique one-off ships, the Envoy and Cypher) has no entry in
+# the Lua legend that led here, but page 20221 itself turned out to be a
+# real, complete, well-structured registry once dumped in full -- id/name/
+# description triples in tight, regular blocks (xxx1 = name, xxx2 =
+# description, incrementing by 10 per category, e.g. 5091/5092 =
+# "Expeditionary Ship"/its description, 5101/5102 = "Envoy"/its
+# description) -- so "envoy" does have a real entry after all, just one the
+# Lua legend itself never surfaces (found by a direct full-page read, not
+# via any Lua/icon cross-reference). Correcting course from this dict's own
+# earlier claim that no real name existed for it anywhere.
+#
+# REVISIT when real mod support is built (see GitHub issue #5) -- a mod's
+# own new ship_type value has no guaranteed entry on this same page (it's
+# base-game content, not an extensible registry), so it'll still fall back
+# to parse_ship_types()'s title-cased-code default, gracefully but without
+# a real translated name, until this table is hand-extended for it.
+SHIP_TYPE_NAME_REF = {
+    "battleship": "{1001,9822}",
+    "builder": "{1001,9821}",
+    "carrier": "{1001,9823}",
+    "compactor": "{1001,9826}",
+    "corvette": "{1001,9828}",
+    "courier": "{1001,9832}",
+    "destroyer": "{1001,9824}",
+    "envoy": "{20221,5101}",
+    "expeditionary": "{20221,5091}",
+    "fighter": "{1001,9816}",
+    "freighter": "{1001,9819}",
+    "frigate": "{1001,9829}",
+    "gunboat": "{1001,9830}",
+    "heavyfighter": "{1001,9833}",
+    "largeminer": "{1001,9818}",
+    "miner": "{1001,9818}",
+    "resupplier": "{1001,9820}",
+    "scavenger": "{1001,9825}",
+    "scout": "{1001,9834}",
+    "transporter": "{1001,9817}",
+    "tug": "{1001,9827}",
+}
+
+
+def parse_ship_types(ships: list[dict], lang_table: dict) -> list[dict]:
+    """Every real ship_type value actually present in `ships` (derived from
+    the data itself, not a hardcoded enumeration -- so a mod's own new
+    ship_type automatically gets a row here, falling back gracefully
+    through SHIP_TYPE_NAME_REF's own missing-entry handling below), for the
+    ship_types DB table backing the Type filter's real display names
+    instead of the raw internal code shown unstyled.
+
+    Display name comes from SHIP_TYPE_NAME_REF when this type has an entry
+    there, else a title-cased version of the raw code (same fallback
+    parse_factions()/parse_purposes() already use for their own no-real-
+    name cases) -- see that dict's own docstring for where the mapped
+    entries come from.
+
+    Same "ware_id"/"name_ref" passenger keys as parse_purposes() (see that
+    function's own docstring) so this list can be handed to
+    parse_localized_strings() the same way, giving ship_type_name its own
+    non-English coverage. Safe to share the main shared localized_strings
+    keyspace (unlike races -- see that table's own docstring note): no
+    ship_type value collides with any race/faction/purpose id in the
+    current dataset.
+    """
+    ship_type_ids = sorted({s["ship_type"] for s in ships if s["ship_type"]})
+    rows = []
+    for ship_type_id in ship_type_ids:
+        name_ref = SHIP_TYPE_NAME_REF.get(ship_type_id)
+        ship_type_name = resolve_ref_attr(name_ref, lang_table) if name_ref else ship_type_id.replace("_", " ").title()
+        rows.append(
+            {
+                "ship_type_id": ship_type_id,
+                "ship_type_name": ship_type_name,
+                "ware_id": ship_type_id,
+                "name_ref": name_ref or "",
+            }
+        )
+    return rows
+
+
+def index_ship_files(suffix: str) -> dict[str, tuple[str, Path]]:
+    """{macro/component name (no .xml) -> (class_value, path)}, built by
+    scanning every SHIPS_DIR/<class>_<suffix>/ folder extract_game_data.py's
+    sort_ship_files_by_class() sorted real ship files into. Lets a caller
+    look up any ship macro or component by name alone, with no need to
+    already know (or guess from a ware_id/filename) which class/size it
+    belongs to -- that's exactly what the returned class_value answers,
+    read from the file's own <macro class="..."/>/<component class="..."/>
+    attribute at sort time, not assumed from a folder name.
+
+    Deliberately keyed by the *file's own* discovered class (e.g. "ship_l"),
+    not by the mapped short size code -- see SHIP_CLASS_TO_SIZE_CODE, a
+    separate, app-side concern this function has no opinion on.
+    """
+    index: dict[str, tuple[str, Path]] = {}
+    for class_dir in sorted(SHIPS_DIR.glob(f"*_{suffix}")):
+        class_value = class_dir.name.removesuffix(f"_{suffix}")
+        for path in class_dir.glob("*.xml"):
+            index[path.stem] = (class_value, path)
+    return index
 
 REF_RE = re.compile(r"\{(\d+),\s*(\d+)\}")
 FULL_REF_RE = re.compile(r"^\{(\d+),\s*(\d+)\}$")
@@ -731,6 +1108,26 @@ FULL_REF_RE = re.compile(r"^\{(\d+),\s*(\d+)\}$")
 # Escaped \( \) inside the comment must not be treated as the closing paren.
 LEADING_PAREN_RE = re.compile(r"^\((?:\\.|[^()])*\)\s*")
 ESCAPED_PAREN_RE = re.compile(r"\\([()])")
+# Bare trailing "(...)" dev-comment annotation, e.g. "Marines(plural)" ->
+# "Marines" -- NOT applied generically by resolve_text() (see that
+# function's own docstring/LEADING_PAREN_RE's comment for why a blanket
+# trailing-paren strip would corrupt real names using escaped "\(...\)"
+# parens, e.g. "Magnetar \(Gas\) Vanguard"). Used narrowly by
+# strip_trailing_dev_comment() below, only against small, manually-
+# verified value sets -- never arbitrary resolved game text.
+TRAILING_PAREN_RE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def strip_trailing_dev_comment(text: str) -> str:
+    """Strips one bare trailing "(...)" annotation via TRAILING_PAREN_RE --
+    see that constant's own comment for why this isn't something
+    resolve_text() does for every resolved string. Confirmed needed for
+    CREW_ROLE_NAME_REF's own two refs, whose raw language-table text is
+    "Marines(plural)"/"Service crew(plural)" (and the German
+    "Marinesoldaten(Plural)") -- a real Egosoft data-quality quirk, not
+    something this pipeline introduces.
+    """
+    return TRAILING_PAREN_RE.sub("", text)
 
 # Every real production method (a ware's own <production method="..."
 # name="{page,id}"/>) across the whole dataset, manually curated from a
@@ -778,6 +1175,128 @@ BUILD_METHODS = [
     "Recycling",
     "Xenon",
 ]
+
+
+def collect_build_method_refs(entity_lists: list[list[dict]]) -> dict[str, str]:
+    """{resolved English build method name -> its own name_ref}, built by
+    scanning every entity's own `productions` list (each production block
+    carries "method_name"/"method_name_ref" -- see the ships/economy_wares/
+    equipment_wares/missile_wares/deployable_wares/drone_wares/
+    countermeasure_wares resolution loops in main(), which this must run
+    after). First ref seen for a given name wins -- same "first definition
+    wins" convention parse_factions() already uses -- since every
+    production block sharing a method name is expected to point at the
+    same underlying {page,id} ref anyway.
+
+    This exists because BUILD_METHODS above is a hand-curated list of
+    already-resolved English text with no ref of its own preserved --
+    unlike ship_type/purpose/race/faction, a build method's *English name*
+    doubles as its real internal id everywhere in this app (ships_base.
+    production_method, summarize_production.py's own cost-calc grouping,
+    the frontend's build_method_priority payloads, persisted fleet state)
+    since the game's own internal, non-English <production method="..."/>
+    code is never captured at all -- deliberately not changing that (a much
+    bigger, riskier refactor touching calculation logic and persisted user
+    state, not just a display label -- see GitHub issue #3 discussion) --
+    this only recovers the ref needed to localize the *display* text for
+    that same stable English key, see parse_build_methods() below.
+    """
+    refs: dict[str, str] = {}
+    for entities in entity_lists:
+        for entity in entities:
+            for prod in entity.get("productions", []):
+                name = prod.get("method_name")
+                ref = prod.get("method_name_ref")
+                if name and ref and name not in refs:
+                    refs[name] = ref
+    return refs
+
+
+def parse_build_methods(method_name_refs: dict[str, str]) -> list[dict]:
+    """One row per BUILD_METHODS entry, for the build_methods DB table
+    backing real per-language display text (Build Method filter, Cost
+    Analysis's Build Method modal and fleet-tab priority button) while
+    every internal use of a build method's name (matching, filtering,
+    persisted fleet state) keeps using the plain English string unchanged
+    -- see collect_build_method_refs()'s own docstring for why.
+
+    build_method_name doubles as both the table's real primary key and the
+    base (English) display value -- unlike ship_type/purpose/race/faction,
+    there's no separate internal code to key on here, so unlike those this
+    table has no need for a second "_name" column: the base table's own
+    "name" *is* build_method_name, and COALESCE(localized_strings.text,
+    build_methods.build_method_name) at query time gives the same "fall
+    back to English" shape every other localized lookup in this app has.
+
+    A method with no ref recovered (shouldn't happen for any of the 10 real
+    BUILD_METHODS entries, all confirmed to come from real <production
+    name="{page,id}"/> attributes) still gets a row -- see "ware_id"/
+    "name_ref" below -- just with name_ref empty, which
+    parse_localized_strings() already treats as "no translation available"
+    the same way a missing ref anywhere else does.
+    """
+    return [
+        {
+            "build_method_name": name,
+            "ware_id": name,
+            "name_ref": method_name_refs.get(name, ""),
+        }
+        for name in BUILD_METHODS
+    ]
+
+
+# X4 has no separate "marine"/"service crew" *ware* -- the single real
+# "crew" ware (crew_base) covers both, and a saved loadout's own
+# <crew role="marine"/service" exact="N"/> element is how the game tracks
+# which role crew already aboard are assigned to (see this module's
+# "Countermeasures and crew" docstring section) -- "marine"/"service" here
+# are exactly those same two real internal role codes, not app-invented
+# ids. Their *display names*, however, aren't attached to any XML data
+# this pipeline already reads -- found instead by tracing the game's own
+# crew-assignment UI Lua (ui/addons/ego_detailmonitor/menu_map.lua, ~line
+# 13108-13109): `{ name = ReadText(20208, 20103), role = "service" }` /
+# `{ name = ReadText(20208, 20203), role = "marine" }` -- same "no XML
+# registry, but a real Lua-sourced ref" situation as SHIP_TYPE_NAME_REF,
+# not app-owned UI text the way it was first (wrongly) treated as (i18next
+# was tried here initially -- see the git history of src/static/i18n/
+# de.json for the two guessed strings this replaced, one of which,
+# "Marinesoldaten", happened to exactly match the real word by coincidence,
+# and one, "Wartungspersonal", didn't -- the real one is "Servicemannschaft").
+CREW_ROLE_NAME_REF = {
+    "marine": "{20208,20203}",
+    "service": "{20208,20103}",
+}
+
+
+def parse_crew_roles(lang_table: dict) -> list[dict]:
+    """One row per CREW_ROLE_NAME_REF entry, for the crew_roles DB table
+    backing real per-language display text for the ship builder's Marines/
+    Service Crew rows (see app.js's CREW_ROLES). Unlike build_methods,
+    crew_role_id ("marine") is a real internal code genuinely distinct from
+    its own display text ("Marines") -- same "id" + resolved "name" shape
+    as parse_ship_types()/parse_purposes(), not parse_build_methods()'s
+    single-column one.
+
+    Both refs' raw text carries a trailing "(plural)" dev-comment
+    resolve_text() doesn't strip (see strip_trailing_dev_comment()'s own
+    docstring) -- applied here to the base English name specifically; the
+    non-English translation in localized_strings gets the same treatment
+    separately, in main(), right after parse_localized_strings() resolves
+    it (that function is shared by every entity in this pipeline, so this
+    two known values' cleanup can't live inside it).
+    """
+    rows = []
+    for role_id, name_ref in CREW_ROLE_NAME_REF.items():
+        rows.append(
+            {
+                "crew_role_id": role_id,
+                "crew_role_name": strip_trailing_dev_comment(resolve_ref_attr(name_ref, lang_table)),
+                "ware_id": role_id,
+                "name_ref": name_ref,
+            }
+        )
+    return rows
+
 
 COMPONENT_TYPES = ("engine", "turret", "weapon", "shield")
 # Groups that always combine into a single named group rather than one row
@@ -1563,7 +2082,14 @@ def parse_equipment_component_wares(
             row = {
                 "ware_id": ware_id,
                 "macro": macro_name,
-                "owners": identification.get("makerrace") if identification is not None else None,
+                # Design race(s), raw and unsplit (e.g. "argon", or rarely
+                # "argon teladi") -- a passenger key like "name_ref"
+                # elsewhere in this pipeline, consumed by
+                # build_maker_race_rows() in main(), never written to this
+                # table's own CSV (not in TURRET/ENGINE/SHIELD/
+                # WEAPON_FIELDNAMES -- the real per-race data lives in the
+                # maker_races join table instead).
+                "makerrace": identification.get("makerrace") if identification is not None else None,
                 "mk": int(identification.get("mk")) if identification is not None and identification.get("mk") else None,
                 "hull": int(float(hull_el.get("max"))) if hull_el is not None and hull_el.get("max") else None,
                 "size": mount_size or size,
@@ -1834,54 +2360,53 @@ def analyze_drone_macro(macro_path: Path) -> dict:
     }
 
 
-def ship_size_code(ware_id: str) -> str | None:
-    """Extract the size class from a ware id, e.g. "ship_arg_l_destroyer_01_a" -> "l"."""
-    parts = ware_id.split("_")
-    if len(parts) < 3 or parts[0] != "ship" or parts[2] not in SIZE_MACRO_DIRS:
-        return None
-    return parts[2]
-
-
-# The race token embedded as the second underscore-delimited segment of a
-# ship's own ware_id (e.g. "ship_xen_m_corvette_01_a" -> "xen" -> "xenon")
-# mapped to a faction key matching this app's own FACTION_COLORS/
-# faction icon set (src/static/app.js, data/images/factions/<key>.png --
-# see generate_faction_icons.py) -- same convention app.js's own
-# RACE_PREFIX_TO_FACTION already applies client-side, ported here so the
-# manufacturer faction is a real ships_base column instead of something
-# every caller has to re-derive from the ware_id itself. "atf" (Terran
-# capital-ship/ATF-branded hulls) deliberately shares Terran's faction, same
-# as everywhere else in this app; "gen"/"pir" (generic/pirate hulls with no
-# single consistent owning race -- see ships_base.owners, a real mix of
-# minor factions for these) map to "neutral", which has no in-game faction
-# icon texture at all -- the frontend just shows no icon for those.
-SHIP_RACE_PREFIX_TO_FACTION = {
-    "arg": "argon",
-    "bor": "boron",
-    "par": "paranid",
-    "spl": "split",
-    "tel": "teladi",
-    "ter": "terran",
-    "atf": "terran",
-    "xen": "xenon",
-    "kha": "khaak",
-    "yak": "yaki",
-    "gen": "neutral",
-    "pir": "neutral",
-}
-
-
-def ship_owner_faction(ware_id: str) -> str | None:
-    """A ship's own manufacturer/design-race faction, e.g.
-    "ship_arg_l_destroyer_01_a" -> "argon" -- see
-    SHIP_RACE_PREFIX_TO_FACTION above for why this (the ware_id's own naming
-    convention) is used rather than ships_base.owners, which is a sales
-    list, not a single design race.
+def split_maker_races(raw: str | None) -> list[str]:
+    """A macro's identification/@makerrace attribute is a space-separated
+    token list, almost always one entry (e.g. "argon") but occasionally
+    more than one -- confirmed exactly one real case in the current
+    dataset, ship_gen_m_corvette_01 (the Envoy): makerrace="argon teladi".
+    Order is preserved (not sorted) so build_maker_race_rows() can record
+    which one was listed first via its own "ordinal" column.
     """
-    parts = ware_id.split("_")
-    if len(parts) < 2 or parts[0] != "ship":
-        return None
-    return SHIP_RACE_PREFIX_TO_FACTION.get(parts[1])
+    return raw.split() if raw else []
+
+
+def build_maker_race_rows(entities: list[dict], valid_race_ids: set[str]) -> list[dict]:
+    """One row per (ware_id, race_id) pair across every ship/turret/engine/
+    shield/weapon whose macro carries a real identification/@makerrace --
+    the golden-source replacement for the old ware_id-prefix guess
+    (SHIP_RACE_PREFIX_TO_FACTION/ship_owner_faction(), removed). Each
+    `entity` dict just needs "ware_id" and "makerrace" (the raw, unsplit
+    attribute string -- see split_maker_races()) -- ships carry it via
+    analyze_ship_components()'s own "makerrace" key, turrets/engines/
+    shields/weapons via parse_equipment_component_wares()'s "makerrace" key.
+
+    A token that doesn't match any real races.xml id is dropped with a
+    warning rather than trusted blindly -- this is exactly the kind of
+    input this app can't fully control once a mod is generating its own
+    makerrace values, so a garbage token degrades to "this entity has one
+    fewer recognized race" instead of polluting maker_races with a
+    dangling id nothing else in the DB recognizes.
+
+    Missiles, deployables, thrusters, and software have no
+    identification/@makerrace at all in the base game (confirmed by
+    inspection -- no <properties> block for thrusters/software to begin
+    with; missiles/deployables have <identification> but never a
+    makerrace attribute on it), so they're not passed in here and simply
+    have no maker_races rows -- same as the handful of raceless drone/
+    utility ships (see load_macro_data()'s own docstring note).
+    """
+    rows = []
+    for entity in entities:
+        for ordinal, race_id in enumerate(split_maker_races(entity.get("makerrace"))):
+            if race_id not in valid_race_ids:
+                print(
+                    f"WARNING: {entity['ware_id']}: makerrace token '{race_id}' doesn't match any "
+                    "real race id -- skipped"
+                )
+                continue
+            rows.append({"ware_id": entity["ware_id"], "race_id": race_id, "ordinal": ordinal})
+    return rows
 
 
 def _float_attrs(el, prefix: str) -> dict[str, float]:
@@ -1930,6 +2455,17 @@ def load_macro_data(macro_path: Path) -> dict:
     # PNG by generate_ship_icons.py -- see data/images/ships/symbols/.
     identification_el = properties.find("identification")
     result["icon"] = identification_el.get("icon") if identification_el is not None else None
+
+    # The ship's own real design-race attribute -- e.g. makerrace="argon",
+    # or the rare space-separated multi-value case, makerrace="argon
+    # teladi" (the Envoy, ship_gen_m_corvette_01) -- golden-source
+    # replacement for the old ware_id-prefix guess (see
+    # build_maker_race_rows() below for where this is split/validated
+    # against real races.xml ids). Raw and unsplit here; None for the
+    # handful of ships with no <identification> makerrace attribute at all
+    # (confirmed: always drones/utility ships with no real design lineage,
+    # e.g. the transdrone/transport drones -- not a parsing gap).
+    result["makerrace"] = identification_el.get("makerrace") if identification_el is not None else None
 
     hull_el = properties.find("hull")
     result["hull"] = int(float(hull_el.get("max"))) if hull_el is not None and hull_el.get("max") else None
@@ -2121,10 +2657,23 @@ def parse_component_slots(path: Path, ship_id: str) -> tuple[dict[tuple[str, str
     return slot_counts, groups
 
 
-def analyze_ship_components(ship: dict, size: str | None) -> dict:
+def analyze_ship_components(ship: dict, macro_index: dict[str, tuple[str, Path]], component_index: dict[str, tuple[str, Path]]) -> dict:
+    """Unlike the old ware_id-prefix-guessed `size` this used to take as an
+    input parameter, "size"/"ship_class" are now *outputs*: this function
+    has to locate and open the ship's own macro before it can know either
+    (the macro's own <macro class="..."/> attribute is the real source --
+    see SHIP_CLASS_TO_SIZE_CODE) -- so both start out None in `result` and
+    only get filled in once that lookup succeeds. macro_index/
+    component_index (see index_ship_files()) let that lookup happen by
+    macro/component name alone, no assumed size/folder needed to find the
+    file in the first place.
+    """
     result: dict = {
         "slot_counts": {},
         "groups": [],
+        "size": None,
+        "ship_class": None,
+        "makerrace": None,
         "missile_capacity": 0,
         "drone_capacity": 0,
         "ship_type": None,
@@ -2138,16 +2687,33 @@ def analyze_ship_components(ship: dict, size: str | None) -> dict:
         "steeringcurve": "",
     }
 
-    if size is None:
-        print(f"WARNING: couldn't determine size class for {ship['ware_id']}, skipping component analysis")
+    if not ship["macro"]:
+        print(f"WARNING: no macro ref for {ship['ware_id']}, skipping component analysis")
         return result
+
+    macro_lookup = macro_index.get(ship["macro"])
+    if macro_lookup is None:
+        print(f"WARNING: macro file not found for {ship['ware_id']} (looked for '{ship['macro']}' in {SHIPS_DIR})")
+        return result
+    ship_class, macro_path = macro_lookup
+    result["ship_class"] = ship_class
+
+    size = SHIP_CLASS_TO_SIZE_CODE.get(ship_class)
+    if size is None:
+        print(
+            f"WARNING: {ship['ware_id']}: unrecognized ship class '{ship_class}' -- "
+            "add it to SHIP_CLASS_TO_SIZE_CODE, skipping component analysis"
+        )
+        return result
+    result["size"] = size
 
     # Thrusters have no <connection> hardpoint in the component file at all
     # (see the "Thrusters" section of this module's docstring) -- every ship
     # just gets exactly one, sized to match its own hull, so it's synthesized
-    # here rather than discovered by parse_component_slots below. Added
-    # before any of the macro/component lookups below so it's still present
-    # even if those fail (it doesn't depend on them).
+    # here rather than discovered by parse_component_slots below. Added as
+    # soon as `size` itself is known (now only true once the macro lookup
+    # above has already succeeded, unlike before) rather than any earlier,
+    # since there's no size to synthesize it with otherwise.
     result["groups"].append(
         {
             "group_name": "thruster",
@@ -2159,16 +2725,8 @@ def analyze_ship_components(ship: dict, size: str | None) -> dict:
         }
     )
 
-    if not ship["macro"]:
-        print(f"WARNING: no macro ref for {ship['ware_id']}, skipping component analysis")
-        return result
-
-    macro_path = SIZE_MACRO_DIRS[size] / f"{ship['macro']}.xml"
-    if not macro_path.exists():
-        print(f"WARNING: macro file not found for {ship['ware_id']} ({macro_path})")
-        return result
-
     macro_data = load_macro_data(macro_path)
+    result["makerrace"] = macro_data.get("makerrace")
     result["missile_capacity"] = macro_data.get("missile_capacity", 0)
     result["drone_capacity"] = macro_data.get("drone_capacity", 0)
     result["ship_type"] = macro_data.get("ship_type")
@@ -2214,10 +2772,11 @@ def analyze_ship_components(ship: dict, size: str | None) -> dict:
         print(f"WARNING: no component ref in macro for {ship['ware_id']}")
         return result
 
-    component_path = SIZE_COMPONENT_DIRS[size] / f"{component_ref}.xml"
-    if not component_path.exists():
-        print(f"WARNING: component file not found for {ship['ware_id']} ({component_path})")
+    component_lookup = component_index.get(component_ref)
+    if component_lookup is None:
+        print(f"WARNING: component file not found for {ship['ware_id']} (looked for '{component_ref}' in {SHIPS_DIR})")
         return result
+    _component_class, component_path = component_lookup
 
     slot_counts, groups = parse_component_slots(component_path, ship["ware_id"])
     result["slot_counts"] = slot_counts
@@ -2276,7 +2835,17 @@ def write_sql_schema(
     flight_model_col_defs = "".join(
         f'    "{col}" REAL,\n' for col in jerk_columns + physics_columns
     )
-    sql = f"""DROP TABLE IF EXISTS factions;
+    sql = f"""DROP TABLE IF EXISTS localized_race_shortnames;
+DROP TABLE IF EXISTS localized_race_names;
+DROP TABLE IF EXISTS localized_shortnames;
+DROP TABLE IF EXISTS localized_strings;
+DROP TABLE IF EXISTS maker_races;
+DROP TABLE IF EXISTS crew_roles;
+DROP TABLE IF EXISTS build_methods;
+DROP TABLE IF EXISTS ship_types;
+DROP TABLE IF EXISTS purposes;
+DROP TABLE IF EXISTS races;
+DROP TABLE IF EXISTS factions;
 DROP TABLE IF EXISTS source_versions;
 DROP TABLE IF EXISTS flight_model;
 DROP TABLE IF EXISTS ship_component_groups;
@@ -2301,7 +2870,6 @@ CREATE TABLE ships_base (
     name TEXT PRIMARY KEY,
     ware_id TEXT NOT NULL UNIQUE,
     owners TEXT,
-    owner_faction TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER,
@@ -2317,6 +2885,11 @@ CREATE TABLE ships_base (
     missile_capacity INTEGER,
     drone_capacity INTEGER,
     size TEXT,
+    -- The raw class="..." value this ship's own macro carried (e.g.
+    -- "ship_l"), before SHIP_CLASS_TO_SIZE_CODE's mapping to `size` above
+    -- -- kept alongside it for the follow-up localization investigation
+    -- (see that dict's own docstring), not used by anything else yet.
+    ship_class TEXT,
     shields INTEGER,
     engines INTEGER,
     weapons INTEGER{bonus_weapon_col_defs},
@@ -2367,7 +2940,6 @@ CREATE TABLE equipment_ware_aliases (
 CREATE TABLE turrets_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     bullet_class TEXT,
     rotation_speed REAL,
@@ -2389,7 +2961,6 @@ CREATE TABLE turrets_base (
 CREATE TABLE engines_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     boost_duration REAL,
     boost_recharge REAL,
@@ -2413,7 +2984,6 @@ CREATE TABLE engines_base (
 CREATE TABLE shields_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     recharge_max REAL,
     recharge_rate REAL,
@@ -2428,7 +2998,6 @@ CREATE TABLE shields_base (
 CREATE TABLE weapons_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     bullet_class TEXT,
     heat_overheat REAL,
@@ -2651,13 +3220,104 @@ CREATE TABLE flight_model (
 );
 
 CREATE TABLE source_versions (
-    source_name TEXT PRIMARY KEY,
+    source_id TEXT PRIMARY KEY,
+    source_name TEXT,
     source_version TEXT
 );
 
 CREATE TABLE factions (
     faction_id TEXT PRIMARY KEY,
-    faction_name TEXT
+    faction_name TEXT,
+    faction_shortname TEXT
+);
+
+CREATE TABLE races (
+    race_id TEXT PRIMARY KEY,
+    race_name TEXT,
+    race_shortname TEXT
+);
+
+CREATE TABLE purposes (
+    purpose_id TEXT PRIMARY KEY,
+    purpose_name TEXT
+);
+
+-- Every real ship_type value actually present in ships_base, with a real
+-- display name where one is known -- see parse_ship_types()/
+-- SHIP_TYPE_NAME_REF's own docstrings (both above, in this same module).
+CREATE TABLE ship_types (
+    ship_type_id TEXT PRIMARY KEY,
+    ship_type_name TEXT
+);
+
+-- Every real production method (see BUILD_METHODS/parse_build_methods()
+-- above). build_method_name is both the primary key and the base English
+-- display value -- see parse_build_methods()'s own docstring for why this
+-- table has no separate "_name" column the way ship_types/purposes do.
+CREATE TABLE build_methods (
+    build_method_name TEXT PRIMARY KEY
+);
+
+-- The two real internal crew-role codes (see CREW_ROLE_NAME_REF/
+-- parse_crew_roles() above) with their own real display name.
+CREATE TABLE crew_roles (
+    crew_role_id TEXT PRIMARY KEY,
+    crew_role_name TEXT
+);
+
+-- A ship/turret/engine/shield/weapon's own real design race(s) -- see
+-- build_maker_race_rows() and this module's "Design race and race/faction
+-- shortcodes" docstring section. Usually one row per ware_id, occasionally
+-- more (e.g. ship_gen_m_corvette_01, the Envoy, has both an "argon" and a
+-- "teladi" row) -- ordinal preserves the order makerrace listed them in.
+CREATE TABLE maker_races (
+    ware_id TEXT,
+    race_id TEXT,
+    ordinal INTEGER,
+    PRIMARY KEY (ware_id, race_id),
+    FOREIGN KEY (race_id) REFERENCES races (race_id)
+);
+
+CREATE TABLE localized_strings (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- Same shape as localized_strings, but for faction_shortname specifically
+-- (e.g. "YAK" for Yaki) rather than a display name -- kept as a separate
+-- table since a faction needs two independently-localizable text fields
+-- and localized_strings' schema only has room for one text column per
+-- (ware_id, lang_id) pair. See this module's "Design race and race/faction
+-- shortcodes" docstring section.
+CREATE TABLE localized_shortnames (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- race_name's own non-English coverage, kept in a dedicated table rather
+-- than sharing localized_strings with factions/wares/ships -- several race
+-- ids collide with a same-named faction id (e.g. "argon" is both), and
+-- mixing the two in one shared keyspace was confirmed (via a live query)
+-- to silently return the faction's translation for the race. See this
+-- module's "Design race and race/faction shortcodes" docstring section.
+CREATE TABLE localized_race_names (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- race_shortname's own non-English coverage -- same isolation reasoning as
+-- localized_race_names above, just for the shortcode field instead.
+CREATE TABLE localized_race_shortnames (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
 );
 """
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2672,7 +3332,6 @@ def write_ships_csv(
             "name",
             "ware_id",
             "owners",
-            "owner_faction",
             "price_min",
             "price_avg",
             "price_max",
@@ -2688,6 +3347,7 @@ def write_ships_csv(
             "missile_capacity",
             "drone_capacity",
             "size",
+            "ship_class",
             "shields",
             "engines",
             "weapons",
@@ -2707,7 +3367,6 @@ def write_ships_csv(
                 "name": s["name"],
                 "ware_id": s["ware_id"],
                 "owners": ",".join(s["owners"]),
-                "owner_faction": s["owner_faction"] or "",
                 "price_min": s["price_min"] or "",
                 "price_avg": s["price_avg"] or "",
                 "price_max": s["price_max"] or "",
@@ -2723,6 +3382,7 @@ def write_ships_csv(
                 "missile_capacity": s["missile_capacity"],
                 "drone_capacity": s["drone_capacity"],
                 "size": s["size"] or "",
+                "ship_class": s["ship_class"] or "",
                 "shields": s["slots"]["shields"],
                 "engines": s["slots"]["engines"],
                 "weapons": s["slots"]["weapons"],
@@ -2975,12 +3635,12 @@ def write_equipment_component_csv(rows: list[dict], fieldnames: list[str], out_p
 
 
 TURRET_FIELDNAMES = [
-    "ware_id", "macro", "owners", "mk", "bullet_class",
+    "ware_id", "macro", "mk", "bullet_class",
     "rotation_speed", "rotation_acceleration", "hull", "size", "compatibility",
     "ammunition_tags", "ammunition_capacity",
 ]
 ENGINE_FIELDNAMES = [
-    "ware_id", "macro", "owners", "mk",
+    "ware_id", "macro", "mk",
     "boost_duration", "boost_recharge", "boost_thrust", "boost_acceleration",
     "boost_attack", "boost_release", "boost_coast",
     "travel_charge", "travel_thrust", "travel_attack", "travel_release",
@@ -2988,12 +3648,12 @@ ENGINE_FIELDNAMES = [
     "hull", "size", "compatibility",
 ]
 SHIELD_FIELDNAMES = [
-    "ware_id", "macro", "owners", "mk",
+    "ware_id", "macro", "mk",
     "recharge_max", "recharge_rate", "recharge_delay", "recharge_disruptionstability",
     "hull", "size", "compatibility",
 ]
 WEAPON_FIELDNAMES = [
-    "ware_id", "macro", "owners", "mk", "bullet_class",
+    "ware_id", "macro", "mk", "bullet_class",
     "heat_overheat", "heat_cooldelay", "heat_coolrate", "heat_reenable", "heat_overheatcooldelay",
     "rotation_speed", "rotation_acceleration", "weapon_angle",
     "hull", "size", "compatibility",
@@ -3020,8 +3680,15 @@ DRONE_FIELDNAMES = [
 COUNTERMEASURE_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
 CREW_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
 EQUIPMENT_WARE_ALIASES_FIELDNAMES = ["alias_ware_id", "target_ware_id", "equipment_type"]
-SOURCE_VERSIONS_FIELDNAMES = ["source_name", "source_version"]
-FACTIONS_FIELDNAMES = ["faction_id", "faction_name"]
+SOURCE_VERSIONS_FIELDNAMES = ["source_id", "source_name", "source_version"]
+FACTIONS_FIELDNAMES = ["faction_id", "faction_name", "faction_shortname"]
+RACES_FIELDNAMES = ["race_id", "race_name", "race_shortname"]
+PURPOSES_FIELDNAMES = ["purpose_id", "purpose_name"]
+SHIP_TYPE_FIELDNAMES = ["ship_type_id", "ship_type_name"]
+BUILD_METHOD_FIELDNAMES = ["build_method_name"]
+CREW_ROLE_FIELDNAMES = ["crew_role_id", "crew_role_name"]
+MAKER_RACES_FIELDNAMES = ["ware_id", "race_id", "ordinal"]
+LOCALIZED_STRINGS_FIELDNAMES = ["ware_id", "lang_id", "text"]
 
 
 def load_database(db_path: Path, schema_path: Path, table_csv_files: dict[str, Path]) -> None:
@@ -3134,6 +3801,32 @@ def parse_factions(paths: list[Path], lang_table: dict) -> list[dict]:
     Factions with no name attribute at all (currently just "ownerless", a
     hidden placeholder/no-owner faction with no real in-game display
     string) fall back to a title-cased version of their own id.
+
+    Each row also carries "ware_id" (the faction_id, under the name
+    parse_localized_strings() actually looks for) and "name_ref" -- not
+    real ships_base-style columns, just along for the ride so this same
+    list can be passed straight into parse_localized_strings() alongside
+    every other entity list in main(), giving factions the exact same
+    non-English name coverage (localized_strings table) ships/wares
+    already have. FACTIONS_FIELDNAMES doesn't include either key, so
+    write_equipment_component_csv() silently ignores them when writing
+    factions.csv itself -- same as how every other entity list's own
+    "name_ref" never leaks into its own CSV either.
+
+    "faction_shortname" (e.g. "YAK" for Yaki) is resolved from the
+    faction's own shortname="{page,id}" attribute the exact same way as
+    faction_name -- this row's own base-table value (English, same as
+    faction_name). "shortname_ref" is the *unresolved* {page,id} ref,
+    carried alongside "name_ref" so main() can pass this same list to
+    parse_localized_strings() a second time (with ref_key="shortname_ref")
+    to get faction_shortname's own non-English coverage into the separate
+    localized_shortnames table -- see this module's "Design race and
+    race/faction shortcodes" docstring section for why that's a second
+    table rather than a second row per entity in localized_strings. Missing
+    for the handful
+    of hidden/internal factions with no shortname attribute at all (e.g.
+    "ownerless", "civilian", "player") -- callers must treat that as
+    legitimately absent, not a parsing bug.
     """
     by_id: dict[str, ET.Element] = {}
     for path in paths:
@@ -3147,8 +3840,235 @@ def parse_factions(paths: list[Path], lang_table: dict) -> list[dict]:
     for faction_id, faction_el in sorted(by_id.items()):
         name_ref = faction_el.get("name")
         faction_name = resolve_ref_attr(name_ref, lang_table) if name_ref else faction_id.replace("_", " ").title()
-        rows.append({"faction_id": faction_id, "faction_name": faction_name})
+        shortname_ref = faction_el.get("shortname")
+        faction_shortname = resolve_ref_attr(shortname_ref, lang_table) if shortname_ref else None
+        rows.append(
+            {
+                "faction_id": faction_id,
+                "faction_name": faction_name,
+                "faction_shortname": faction_shortname,
+                "ware_id": faction_id,
+                "name_ref": name_ref or "",
+                "shortname_ref": shortname_ref or "",
+            }
+        )
     return rows
+
+
+def parse_races(path: Path, lang_table: dict) -> list[dict]:
+    """Every <race id="..." name="{page,id}" shortname="{page,id}" .../> in
+    races.xml -- for the races DB table. A race's own id (e.g. "argon") is
+    the same value every ship/turret/engine/shield/weapon's own
+    identification/@makerrace attribute uses directly (see
+    build_maker_race_rows()), so unlike the old ware_id-prefix approach
+    this table is no longer a lookup key for *finding* a ship's race --
+    only for display (race_name/race_shortname).
+
+    Not every race carries every attribute: "drone" (a hidden placeholder
+    race, tags="hidden", with no ships of its own) has no shortname at all
+    -- callers must treat a missing race_shortname as legitimately absent,
+    not a parsing bug.
+
+    Same "ware_id"/"name_ref"/"shortname_ref" passenger keys as
+    parse_factions() (see that function's own docstring), but race_name and
+    race_shortname get their own dedicated localized_race_names/
+    localized_race_shortnames tables rather than sharing factions' -- see
+    this module's "Design race and race/faction shortcodes" docstring
+    section for why (races and factions share some ids, e.g. "argon" is
+    both, and mixing them into one shared keyspace was confirmed to
+    silently return the wrong entity's translation).
+    """
+    root = ET.parse(path).getroot()
+    rows = []
+    for race_el in root.findall("race"):
+        race_id = race_el.get("id")
+        if not race_id:
+            continue
+        name_ref = race_el.get("name")
+        race_name = resolve_ref_attr(name_ref, lang_table) if name_ref else race_id.replace("_", " ").title()
+        shortname_ref = race_el.get("shortname")
+        race_shortname = resolve_ref_attr(shortname_ref, lang_table) if shortname_ref else None
+        rows.append(
+            {
+                "race_id": race_id,
+                "race_name": race_name,
+                "race_shortname": race_shortname,
+                "ware_id": race_id,
+                "name_ref": name_ref or "",
+                "shortname_ref": shortname_ref or "",
+            }
+        )
+    return rows
+
+
+def parse_purposes(path: Path, lang_table: dict) -> list[dict]:
+    """Every <purpose id="..." name="{page,id}" .../> in purposes.xml --
+    for the purposes DB table backing the ship picker's Purpose filter
+    labels with a real display name instead of the raw internal code
+    (ships_base.purpose, e.g. "dismantling") capitalized client-side with
+    no actual translation behind it.
+
+    Covers every real purpose the game defines (~22, including several
+    that only ever apply to stations, e.g. "hack"/"habitation"/"docking"),
+    not just the 8 that currently show up in ships_base.purpose -- same
+    "store the whole real vocabulary, not just today's subset" choice
+    parse_factions() already makes, so a ship whose purpose value changes
+    (or a new one a future DLC adds) doesn't need this table touched.
+
+    Same "ware_id"/"name_ref" passenger keys as parse_factions() (see that
+    function's own docstring) so this list can be handed to
+    parse_localized_strings() the same way -- a purpose isn't a ware
+    either, but slots into that shared function identically.
+    """
+    root = ET.parse(path).getroot()
+    rows = []
+    for purpose_el in root.findall("purpose"):
+        purpose_id = purpose_el.get("id")
+        if not purpose_id:
+            continue
+        name_ref = purpose_el.get("name")
+        purpose_name = resolve_ref_attr(name_ref, lang_table) if name_ref else purpose_id.replace("_", " ").title()
+        rows.append(
+            {
+                "purpose_id": purpose_id,
+                "purpose_name": purpose_name,
+                "ware_id": purpose_id,
+                "name_ref": name_ref or "",
+            }
+        )
+    return rows
+
+
+def parse_localized_strings(entity_lists: list[list[dict]], ref_key: str = "name_ref") -> list[dict]:
+    """Non-English text for everything in `entity_lists` (each a parsed
+    ships/economy_wares/equipment_wares/software_wares/missile_wares/
+    deployable_wares/drone_wares/countermeasure_wares/crew_wares/factions/
+    races/purposes list -- anything with its own "ware_id" and `ref_key`
+    keys) -- one row per (ware_id, lang_id) pair that actually has a real
+    translation, for the localized_strings DB table backing this app's
+    game-data localization (separate from the website's own UI text, see
+    src/static/i18n.js). parse_factions()/parse_races()/parse_purposes() are
+    the callers whose own real primary key isn't actually named "ware_id"
+    ("faction_id"/"race_id"/"purpose_id") -- their rows carry a "ware_id"
+    key too purely so they slot into this shared function the same way
+    every other entity list already does, not because a faction/race/
+    purpose is a ware.
+
+    `ref_key` defaults to "name_ref" (every entity's display-name ref) --
+    main() also calls this with ref_key="shortname_ref" (against just
+    [factions], writing to localized_shortnames) and again against just
+    [races] for both name_ref and shortname_ref (writing to
+    localized_race_names/localized_race_shortnames) -- same function, same
+    resolution logic each time, just a different ref/entity_lists/output
+    table. See this module's "Design race and race/faction shortcodes"
+    docstring section for why races needed full isolation from factions'
+    tables rather than just another ref_key against a shared list.
+
+    "ware_id" values are assumed unique across every list passed in
+    together -- true by construction for wares (a real, guaranteed-unique
+    ware_id namespace) and, separately, for faction ids (their own
+    distinct namespace, checked against no ware_id ever colliding with a
+    faction_id in practice), but never verified against each other here.
+
+    Companion-table pattern, but shared across every translatable table
+    instead of one companion per table (ships_translations,
+    equipment_wares_translations, ...) -- keyed by ware_id rather than by
+    the game's own (page_id, entry_id) pair, which was the other option
+    considered: ware_id is already the real primary key on every table
+    this reads from, so this needs zero schema changes anywhere else to
+    join against, at the cost of a little redundancy if two wares somehow
+    shared the exact same name string (not a real concern for names, which
+    are effectively always unique per ware, unlike e.g. generic UI text
+    where the same string commonly repeats across many places).
+
+    English is deliberately excluded -- LANGUAGE_FILES lists it, but it's
+    already baked directly into every base table's own "name" column (see
+    each parse_*() function's own w["name"] = resolve_ref_attr(...) line),
+    so duplicating it here would just be redundant storage. A ware with no
+    real translation available in a given language (missing from that
+    language's own file entirely -- confirmed here by checking the raw
+    (page_id, entry_id) key directly, not by the fragile-in-general
+    "did resolve_ref_attr() actually change anything" heuristic) simply
+    gets no row for that (ware_id, lang_id) pair at all -- api.py's own
+    query is expected to COALESCE a missing row back to the base table's
+    English "name" column, exactly the "fall back to English" behavior
+    requested. This is also the correct behavior for a future third-party
+    mod that ships incomplete or no localization of its own: same missing-
+    row-falls-back-to-English path, no special-casing needed, *provided*
+    the mod's own text actually lives in the same base-game-relative
+    t/0001-l<id>.xml files this reads (confirmed true for every official
+    DLC -- see language_jobs() in extract_game_data.py -- but an
+    unofficial mod could in principle ship its own separate language file
+    instead, which this function has no knowledge of at all; revisit once
+    real mod support -- a deferred post-1.0 item -- is actually built and
+    it's clear how mods really do this).
+    """
+    lang_tables: dict[str, dict] = {}
+    for lang_id, filename in LANGUAGE_FILES.items():
+        if lang_id == "en":
+            continue
+        path = DATA / "names" / filename
+        if path.exists():
+            lang_tables[lang_id] = load_language_table(path)
+
+    rows = []
+    seen: set[tuple[str, str]] = set()
+    for entities in entity_lists:
+        for entity in entities:
+            ware_id = entity.get("ware_id")
+            name_ref = (entity.get(ref_key) or "").strip()
+            match = FULL_REF_RE.match(name_ref)
+            if not ware_id or not match:
+                continue
+            page_id, entry_id = match.group(1), match.group(2)
+            for lang_id, table in lang_tables.items():
+                key = (ware_id, lang_id)
+                if key in seen:
+                    continue
+                raw = table.get((page_id, entry_id))
+                if raw is None:
+                    continue  # no translation for this entry in this language
+                text = resolve_text(raw, table)
+                if text:
+                    rows.append({"ware_id": ware_id, "lang_id": lang_id, "text": text})
+                    seen.add(key)
+    return rows
+
+
+# Extension content id -> {page,id} ref for that DLC's own real display
+# name, cross-referenced from data/names/0001-l044.xml page 1021 -- X4's
+# own "New Game"/gamestart expansion-selection screen registry. Found by
+# grepping the English language file for each DLC's literal content.xml
+# "name" attribute value ("Split Vendetta", "Kingdom End", ...): every one
+# of them turned out to also have its own real entry on this same page,
+# alongside "Requires expansion: <name>" strings one id higher (80-87) that
+# aren't used here. Confirmed against German (0001-l049.xml) that real
+# translations exist for every entry below (some carry a trailing
+# translator-note parenthetical in German only -- e.g. "Wiege der
+# Menschheit(Cradle of Humanity)" -- stripped the same way as
+# CREW_ROLE_NAME_REF's "(plural)" artifact, see strip_trailing_dev_comment()
+# and this function's own caller in main()).
+#
+# The base game's own row deliberately has no ref here and keeps its
+# literal "X4: Foundations" name -- this page's own base-game entry (id 65)
+# is just "Foundations" with no "X4:" prefix (this screen's own context
+# already establishes that), and the German translator's note on it
+# ("Foundations(oder hier: Grundlagen?)") reads as genuinely undecided
+# rather than a settled translation, unlike every DLC entry below.
+#
+# REVISIT when real mod support is built (see GitHub issue #5) -- same
+# caveat as SHIP_TYPE_NAME_REF/CREW_ROLE_NAME_REF: a third-party
+# extension's content id has no entry here and correctly falls back to its
+# own content.xml "name" attribute, unlocalized.
+SOURCE_VERSION_NAME_REF = {
+    "ego_dlc_split": "{1021,61}",  # Split Vendetta
+    "ego_dlc_terran": "{1021,62}",  # Cradle of Humanity
+    "ego_dlc_pirate": "{1021,63}",  # Tides of Avarice
+    "ego_dlc_boron": "{1021,66}",  # Kingdom End
+    "ego_dlc_timelines": "{1021,67}",  # Timelines
+    "ego_dlc_mini_01": "{1021,71}",  # Hyperion Pack
+    "ego_dlc_mini_02": "{1021,72}",  # Envoy Pack
+}
 
 
 def parse_source_versions() -> list[dict]:
@@ -3173,9 +4093,18 @@ def parse_source_versions() -> list[dict]:
     date, anything), so its own author's value is displayed completely
     unformatted -- reformatting it under the same "divide by 100" assumption
     would silently misrepresent it.
+
+    Each row also carries "ware_id" (== source_id) and "name_ref" (see
+    SOURCE_VERSION_NAME_REF above) purely so this list can slot into
+    parse_localized_strings() the same way every other entity list does --
+    same convention as parse_factions()/parse_purposes()' own "ware_id"
+    field, not written to the CSV (see SOURCE_VERSIONS_FIELDNAMES).
     """
     rows = [
         {
+            "source_id": "base_game",
+            "ware_id": "base_game",
+            "name_ref": None,
             "source_name": "X4: Foundations",
             "source_version": format_egosoft_build_version(VERSION_DAT_FILE.read_text(encoding="utf-8").strip()),
         }
@@ -3187,10 +4116,14 @@ def parse_source_versions() -> list[dict]:
             if not content_xml.exists():
                 continue
             content_el = ET.parse(content_xml).getroot()
+            source_id = content_el.get("id") or ext_dir.name
             raw_version = content_el.get("version") or ""
             is_egosoft = content_el.get("author") == "Egosoft GmbH"
             rows.append(
                 {
+                    "source_id": source_id,
+                    "ware_id": source_id,
+                    "name_ref": SOURCE_VERSION_NAME_REF.get(source_id),
                     "source_name": content_el.get("name") or ext_dir.name,
                     "source_version": format_egosoft_build_version(raw_version) if is_egosoft else raw_version,
                 }
@@ -3201,6 +4134,11 @@ def parse_source_versions() -> list[dict]:
 
 def main() -> None:
     lang_table = load_language_table(LANG_FILE)
+    # Built once, up front -- see index_ship_files()'s own docstring. Feeds
+    # both the ship loop below (analyze_ship_components()) and the drone
+    # macro lookup further down.
+    ship_macro_index = index_ship_files("macros")
+    ship_component_index = index_ship_files("components")
     ships = parse_ship_wares(wares_files())
     economy_wares = parse_economy_wares(wares_files())
     equipment_wares = parse_equipment_wares(wares_files())
@@ -3262,12 +4200,14 @@ def main() -> None:
         w["name"] = resolve_ref_attr(w["name_ref"], lang_table)
         for prod in w["productions"]:
             prod["method_name"] = resolve_ref_attr(prod["method_name_ref"], lang_table)
-        # Drone macros only ever live under size_s_macros in this dataset
-        # (see the "Drones" docstring section) -- 8 of the 11 wares simply
-        # have no macro file there (or anywhere) at all, which is expected,
-        # not a gap.
-        macro_path = SIZE_MACRO_DIRS["s"] / f"{w['macro']}.xml" if w["macro"] else None
-        if macro_path is not None and macro_path.exists():
+        # Drone macros only ever turn up under class ship_s in this dataset
+        # (see the "Drones" docstring section), but looked up here by name
+        # via ship_macro_index rather than assumed -- 8 of the 11 wares
+        # simply have no macro file there (or anywhere) at all, which is
+        # expected, not a gap.
+        macro_lookup = ship_macro_index.get(w["macro"]) if w["macro"] else None
+        if macro_lookup is not None:
+            _drone_class, macro_path = macro_lookup
             w.update(analyze_drone_macro(macro_path))
         else:
             w.update({key: None for key in DRONE_STAT_KEYS})
@@ -3357,10 +4297,10 @@ def main() -> None:
     physics_columns: set[str] = set()
     software_ware_ids_referenced: set[str] = set()
     for s in ships:
-        size = ship_size_code(s["ware_id"])
-        s["size"] = size
-        s["owner_faction"] = ship_owner_faction(s["ware_id"])
-        analysis = analyze_ship_components(s, size)
+        analysis = analyze_ship_components(s, ship_macro_index, ship_component_index)
+        s["size"] = analysis["size"]
+        s["ship_class"] = analysis["ship_class"]
+        s["makerrace"] = analysis["makerrace"]
         s["component_groups"] = analysis["groups"]
         s["missile_capacity"] = analysis["missile_capacity"]
         s["drone_capacity"] = analysis["drone_capacity"]
@@ -3373,7 +4313,7 @@ def main() -> None:
         s["jerk_fields"] = analysis["jerk_fields"]
         s["physics_fields"] = analysis["physics_fields"]
         s["steeringcurve"] = analysis["steeringcurve"]
-        s["slots"] = summarize_slots(s["ware_id"], size, analysis["slot_counts"])
+        s["slots"] = summarize_slots(s["ware_id"], s["size"], analysis["slot_counts"])
         turret_sizes.update(s["slots"]["turrets"].keys())
         bonus_weapon_sizes.update(s["slots"]["weapons_bonus"].keys())
         jerk_columns.update(s["jerk_fields"].keys())
@@ -3458,6 +4398,109 @@ def main() -> None:
     )
     factions = parse_factions(factions_files(), lang_table)
     factions_row_count = write_equipment_component_csv(factions, FACTIONS_FIELDNAMES, FACTIONS_CSV_OUT)
+    races = parse_races(RACES_FILE, lang_table)
+    races_row_count = write_equipment_component_csv(races, RACES_FIELDNAMES, RACES_CSV_OUT)
+    purposes = parse_purposes(PURPOSES_FILE, lang_table)
+    purposes_row_count = write_equipment_component_csv(purposes, PURPOSES_FIELDNAMES, PURPOSES_CSV_OUT)
+    ship_types = parse_ship_types(ships, lang_table)
+    ship_types_row_count = write_equipment_component_csv(ship_types, SHIP_TYPE_FIELDNAMES, SHIP_TYPES_CSV_OUT)
+    # Every production-resolution loop above (ships/economy_wares/
+    # equipment_wares/missile_wares/deployable_wares/drone_wares/
+    # countermeasure_wares) has already run by this point, so every real
+    # method_name/method_name_ref pair is available to collect from.
+    build_method_refs = collect_build_method_refs(
+        [ships, economy_wares, equipment_wares, missile_wares, deployable_wares, drone_wares, countermeasure_wares]
+    )
+    build_methods = parse_build_methods(build_method_refs)
+    build_methods_row_count = write_equipment_component_csv(build_methods, BUILD_METHOD_FIELDNAMES, BUILD_METHODS_CSV_OUT)
+    crew_roles = parse_crew_roles(lang_table)
+    crew_roles_row_count = write_equipment_component_csv(crew_roles, CREW_ROLE_FIELDNAMES, CREW_ROLES_CSV_OUT)
+
+    # The golden-source design-race data (see build_maker_race_rows()'s own
+    # docstring): every ship plus every turret/engine/shield/weapon carries
+    # its own identification/@makerrace, already captured onto each row's
+    # "makerrace" key by analyze_ship_components()/
+    # parse_equipment_component_wares() respectively. valid_race_ids comes
+    # from races (just parsed above), so this has to run after that.
+    valid_race_ids = {r["race_id"] for r in races}
+    maker_races = build_maker_race_rows(
+        ships + turrets + engines + shields + weapons, valid_race_ids
+    )
+    maker_races_row_count = write_equipment_component_csv(maker_races, MAKER_RACES_FIELDNAMES, MAKER_RACES_CSV_OUT)
+
+    # `races` is deliberately NOT in this list -- see the races/factions
+    # split below for why.
+    localized_strings = parse_localized_strings(
+        [
+            ships,
+            economy_wares,
+            equipment_wares,
+            software_wares,
+            missile_wares,
+            deployable_wares,
+            drone_wares,
+            countermeasure_wares,
+            crew_wares,
+            factions,
+            purposes,
+            ship_types,
+            build_methods,
+            crew_roles,
+            source_versions,
+        ]
+    )
+    # See strip_trailing_dev_comment()'s own docstring -- both
+    # CREW_ROLE_NAME_REF refs' raw text carries the same trailing
+    # "(plural)" dev comment in every language, not just English, so their
+    # own localized_strings row(s) need the identical cleanup
+    # parse_crew_roles() already applied to the base English name.
+    #
+    # SOURCE_VERSION_NAME_REF's German entries carry the same class of
+    # artifact -- translator notes rather than a dev comment (e.g. "Wiege
+    # der Menschheit(Cradle of Humanity)" echoing the English original,
+    # "Kingdom End(falls Extension-Name; falls Ort: Königstal)" flagging an
+    # unresolved naming question) -- but the fix is identical: strip the
+    # trailing parenthetical, keep the real translated text before it.
+    for row in localized_strings:
+        if row["ware_id"] in CREW_ROLE_NAME_REF or row["ware_id"] in SOURCE_VERSION_NAME_REF:
+            row["text"] = strip_trailing_dev_comment(row["text"])
+    localized_strings_row_count = write_equipment_component_csv(
+        localized_strings, LOCALIZED_STRINGS_FIELDNAMES, LOCALIZED_STRINGS_CSV_OUT
+    )
+    # Same shared function, but resolving faction_shortname's own
+    # "shortname_ref" instead of "name_ref" -- a faction's short in-game
+    # callsign (e.g. "YAK" for Yaki) gets its own non-English coverage
+    # here, completely separate from its display name's. See
+    # parse_factions() for where shortname_ref comes from, and this
+    # module's "Design race and race/faction shortcodes" docstring section
+    # for why a second table (not a second row in localized_strings) was
+    # the cleanest way to give one entity two independently-localizable
+    # text fields.
+    localized_shortnames = parse_localized_strings([factions], ref_key="shortname_ref")
+    localized_shortnames_row_count = write_equipment_component_csv(
+        localized_shortnames, LOCALIZED_STRINGS_FIELDNAMES, LOCALIZED_SHORTNAMES_CSV_OUT
+    )
+
+    # races gets its own pair of tables, entirely separate from
+    # localized_strings/localized_shortnames above, rather than sharing
+    # factions' -- discovered the hard way (a live GET /api/races?lang=de
+    # test) that several race ids collide with a same-named faction id
+    # (e.g. "argon" is both), and parse_localized_strings()'s own `seen`
+    # dedup silently keeps whichever list happens to be processed first on
+    # a collision -- so mixing races into factions' shared keyspace was
+    # quietly returning the *faction's* German name/shortcode for a race
+    # (e.g. "Argonische Föderation" instead of the race's own "Argonen").
+    # Isolating races into their own tables sidesteps the collision
+    # entirely instead of relying on list ordering + "the values happen to
+    # match today" to paper over it.
+    localized_race_names = parse_localized_strings([races])
+    localized_race_names_row_count = write_equipment_component_csv(
+        localized_race_names, LOCALIZED_STRINGS_FIELDNAMES, LOCALIZED_RACE_NAMES_CSV_OUT
+    )
+    localized_race_shortnames = parse_localized_strings([races], ref_key="shortname_ref")
+    localized_race_shortnames_row_count = write_equipment_component_csv(
+        localized_race_shortnames, LOCALIZED_STRINGS_FIELDNAMES, LOCALIZED_RACE_SHORTNAMES_CSV_OUT
+    )
     write_sql_schema(turret_sizes_sorted, bonus_weapon_sizes_sorted, jerk_columns_sorted, physics_columns_sorted, SQL_OUT)
 
     print(
@@ -3477,7 +4520,17 @@ def main() -> None:
         f"{countermeasure_row_count} countermeasures_base rows, "
         f"{crew_row_count} crew_base rows, "
         f"{source_versions_row_count} source_versions rows, "
-        f"{factions_row_count} factions rows"
+        f"{factions_row_count} factions rows, "
+        f"{races_row_count} races rows, "
+        f"{purposes_row_count} purposes rows, "
+        f"{ship_types_row_count} ship_types rows, "
+        f"{build_methods_row_count} build_methods rows, "
+        f"{crew_roles_row_count} crew_roles rows, "
+        f"{maker_races_row_count} maker_races rows, "
+        f"{localized_strings_row_count} localized_strings rows, "
+        f"{localized_shortnames_row_count} localized_shortnames rows, "
+        f"{localized_race_names_row_count} localized_race_names rows, "
+        f"{localized_race_shortnames_row_count} localized_race_shortnames rows"
     )
     print(f"  -> {SQL_OUT.relative_to(ROOT)}")
     print(f"  -> {SHIPS_CSV_OUT.relative_to(ROOT)}")
@@ -3500,6 +4553,16 @@ def main() -> None:
     print(f"  -> {CREW_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {SOURCE_VERSIONS_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {FACTIONS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {RACES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {PURPOSES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {SHIP_TYPES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {BUILD_METHODS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {CREW_ROLES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {MAKER_RACES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {LOCALIZED_STRINGS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {LOCALIZED_SHORTNAMES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {LOCALIZED_RACE_NAMES_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {LOCALIZED_RACE_SHORTNAMES_CSV_OUT.relative_to(ROOT)}")
 
     load_database(DB_OUT, SQL_OUT, TABLE_CSV_FILES)
     print(f"  -> {DB_OUT.relative_to(ROOT)} (rebuilt)")

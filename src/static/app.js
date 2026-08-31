@@ -101,23 +101,23 @@ let countermeasureAmounts = {};
 // default by ship size instead.
 const COUNTERMEASURE_CAPACITY_BY_SIZE = { s: 4, m: 8, l: 20, xl: 40 };
 
-// X4 has no separate "marine"/"service crew" ware -- GET /api/crew always
+// X4 has no separate "marine"/"service crew" *ware* -- GET /api/crew always
 // returns exactly one real ware (confirmed against the game's own
 // wares.xml and every ship's <people capacity="..."/>, which never
-// subdivides capacity by role). "Marine"/"Service Crew" are purely an AI
-// role assigned to crew already aboard, the same way the game's own saved
-// ship loadouts track them (<crew role="marine"/service" exact="N"/>, no
-// ware_id at all). The UI still tracks/shows them as two independent rows
-// -- allCrew ends up with two *synthetic* entries built from that one real
+// subdivides capacity by role). "marine"/"service" are real internal role
+// codes though, not app-invented -- the same ones the game's own saved
+// ship loadouts use (<crew role="marine"/service" exact="N"/>) -- just
+// with no ware_id of their own to hang a display name off, which is why
+// they get their own dedicated GET /api/crew_roles lookup (crewRoleNames,
+// see loadCrewRoleNames()) instead of riding along with GET /api/crew's
+// own name. The UI still tracks/shows them as two independent rows --
+// allCrew ends up with two *synthetic* entries built from that one real
 // ware (see loadCrew()), each keyed by a role id ("marine"/"service")
 // instead of a real ware_id; crewWareId separately remembers the one real
 // ware_id every row actually shares, needed wherever a row's amount gets
 // converted into an actual wares_list contribution (see addToCartBtn's
 // handler) since summarize_production.py only knows about the real ware.
-const CREW_ROLES = [
-  { role: "marine", label: "Marines" },
-  { role: "service", label: "Service Crew" },
-];
+const CREW_ROLES = ["marine", "service"];
 // Maps a cart wares_list item's category override (see addToCartBtn's
 // handler) back to the role id it came from -- the only way to tell two
 // crew wares_list entries apart on reload, since both share the one real
@@ -152,15 +152,36 @@ let crewAmounts = {};
 const PRODUCTION_WARES_SEARCH_DEPTH = 1;
 const RAW_MATERIALS_SEARCH_DEPTH = 100;
 
-// Faction colors, extracted from the game's own libraries/colors.xml
+// Race colors, extracted from the game's own libraries/colors.xml
 // (<mapping id="faction_<id>" ref="<color-id>"/> resolved against the
-// matching <color id="..." r="" g="" b=""/> entry). Used to tint 3-letter
-// race abbreviations wherever they appear (equipment names, ship owners,
-// build method labels) so the UI echoes the same faction-color language
-// the game itself uses on its map and diplomacy screens. Only factions
-// that actually appear as a ship/equipment race prefix or a BUILD_METHODS
-// entry are included.
-const FACTION_COLORS = {
+// matching <color id="..." r="" g="" b=""/> entry -- yes, sourced from a
+// mapping literally named "faction_<id>" in the game's own file, but only
+// the 8 entries that are also real races are used here). Used to tint
+// 3-letter race abbreviations wherever they appear (equipment names, ship
+// race badges, build method labels) so the UI echoes the same color
+// language the game itself uses on its map and diplomacy screens. Keyed
+// by race_id -- the same, language-invariant value every ship's own
+// maker_races entry and an equipment name's leading shortcode both
+// resolve to (see raceIdForName() below and buildShipOptionRow()) -- so
+// switching the site's display language only changes what shortcode TEXT
+// is shown (via raceInfo, see loadRaceNames()), never which color a given
+// race renders in. Deliberately race-only, not faction-only: races and
+// factions are two separate concepts in this app (see
+// generate_ships_table.py's "Design race and race/faction shortcodes"
+// docstring section) with their own separate coloring -- a real faction's
+// own color (majors and minors alike, e.g. "buccaneers") is baked directly
+// into its icon PNG by generate_faction_icons.py/
+// generate_minor_faction_icons.py instead, and never goes through this
+// object at all (see factionIconUrl()/buildFactionIconImg() below, which
+// don't reference RACE_COLORS). "yaki" was removed from here once ship
+// race badges switched from a ware_id-prefix guess to maker_races (the
+// real game data): every Yaki-hulled ship's real makerrace is "paranid",
+// not its own pseudo-race, so a "yaki" design-race color was never
+// accurate to begin with. Yaki *is* still a real faction (ships are
+// commonly sold through it, see ships_base.owners/buildFactionIconImg()),
+// just not a race -- its own icon/tooltip still works fine via
+// factionNames, which is a completely separate lookup from this one.
+const RACE_COLORS = {
   argon: "#0069b3",
   boron: "#4db5ff",
   paranid: "#b300b3",
@@ -169,48 +190,30 @@ const FACTION_COLORS = {
   terran: "#99d5ff",
   xenon: "#b30000",
   khaak: "#ff00ff",
-  yaki: "#ff4d4d",
-  // Not a real in-game faction/color -- "gen"/"pir" ship hulls have no
-  // single consistent owning race (see RACE_PREFIX_TO_FACTION below), so
-  // there's no libraries/colors.xml entry to draw from. A plain neutral
-  // grey exists purely so every ship in the picker still gets a race
-  // label with a backing panel (see FACTION_BG_CLASS), not because it
-  // represents an actual faction.
-  neutral: "#c8c8c8",
 };
 
 // Maps the 3-letter race token that prefixes an equipment ware's display
-// name (e.g. "PAR" in "PAR M Blast Mortar Turret Mk1") or a ship's own
-// ware_id (e.g. "par" in "ship_par_s_heavyfighter_01_a") to a
-// FACTION_COLORS key. "atf" (Terran capital-ship/ATF-branded hulls)
-// shares Terran's color; "gen"/"pir" (generic/pirate hulls with no
-// single consistent owning race -- see ships_base.owners, which for
-// these is a mix of minor factions like ownerless/scaleplate/loanshark/
-// scavenger rather than one clean race) map to the "neutral" pseudo-
-// faction instead of a real one, so every ship still gets a colored,
-// paneled race label in the picker -- this key is never matched against
-// an equipment ware's own name (no real ware name starts with "GEN "/
-// "PIR "), so it only ever takes effect there.
-const RACE_PREFIX_TO_FACTION = {
+// name (e.g. "PAR" in "PAR M Blast Mortar Turret Mk1") to its race_id, the
+// RACE_COLORS key. Equipment names only ever carry a real race's own
+// shortcode (never "ATF "/"GEN "/"PIR "/"YAK " -- those were only ever a
+// ship ware_id concept, not an equipment-name one), so this only needs the
+// 8 real races RACE_COLORS itself has.
+const RACE_PREFIX_TO_RACE_ID = {
   arg: "argon",
   bor: "boron",
   par: "paranid",
   spl: "split",
   tel: "teladi",
   ter: "terran",
-  atf: "terran",
   xen: "xenon",
   kha: "khaak",
-  yak: "yaki",
-  gen: "neutral",
-  pir: "neutral",
 };
 
 // Maps a full build-method name (see generate_ships_table.py's
-// BUILD_METHODS) to a FACTION_COLORS key -- "Universal"/"Closed Loop"/
+// BUILD_METHODS) to a RACE_COLORS key -- "Universal"/"Closed Loop"/
 // "Recycling" have no associated race and are deliberately absent, so
 // they render with no color.
-const BUILD_METHOD_TO_FACTION = {
+const BUILD_METHOD_TO_RACE = {
   Argon: "argon",
   Boron: "boron",
   Paranid: "paranid",
@@ -220,65 +223,63 @@ const BUILD_METHOD_TO_FACTION = {
   Xenon: "xenon",
 };
 
-// Every FACTION_COLORS entry gets a solid backing panel instead of plain
+// Every RACE_COLORS entry gets a solid backing panel instead of plain
 // colored text wherever it's rendered as real DOM text, since none of
 // these colors were picked for contrast against this app's own dark
 // background (they're lifted straight from the game's own UI, meant for
-// its own map/HUD rendering) -- see .faction-bg-silver/.faction-bg-slate
-// in style.css: a light "silver" panel behind the darker colors (Argon/
+// its own map/HUD rendering) -- see .race-bg-silver/.race-bg-slate in
+// style.css: a light "silver" panel behind the darker colors (Argon/
 // Paranid/Split/Xenon), a lighter steel-grey "slate" panel behind every
-// light color (Boron/Teladi/Terran/Kha'ak/Yaki) -- a light panel there
-// would fight with the text color the same way plain dark text does on
-// the page background. Not applied to <select><option> coloring (used by
+// light color (Boron/Teladi/Terran/Kha'ak) -- a light panel there would
+// fight with the text color the same way plain dark text does on the page
+// background. Not applied to <select><option> coloring (used by
 // buildGroupRow() alone) since <option> background styling doesn't
 // reliably render in native dropdowns anyway.
-const FACTION_BG_CLASS = {
-  argon: "faction-bg-silver",
-  paranid: "faction-bg-silver",
-  split: "faction-bg-silver",
-  xenon: "faction-bg-silver",
-  boron: "faction-bg-slate",
-  teladi: "faction-bg-slate",
-  terran: "faction-bg-slate",
-  khaak: "faction-bg-slate",
-  yaki: "faction-bg-slate",
-  neutral: "faction-bg-slate",
+const RACE_BG_CLASS = {
+  argon: "race-bg-silver",
+  paranid: "race-bg-silver",
+  split: "race-bg-silver",
+  xenon: "race-bg-silver",
+  boron: "race-bg-slate",
+  teladi: "race-bg-slate",
+  terran: "race-bg-slate",
+  khaak: "race-bg-slate",
 };
 
-function factionColor(factionKey) {
-  return factionKey ? (FACTION_COLORS[factionKey] ?? null) : null;
+function raceColor(raceId) {
+  return raceId ? (RACE_COLORS[raceId] ?? null) : null;
 }
 
-// Sets `el`'s text color to `factionKey`'s color (a no-op if `factionKey`
-// is null/unmapped) and, for FACTION_BG_CLASS entries, adds the matching
-// backing-panel class so the harder-to-read faction colors stay legible.
-function applyFactionTextColor(el, factionKey) {
-  const color = factionColor(factionKey);
+// Sets `el`'s text color to `raceId`'s color (a no-op if `raceId` is
+// null/unmapped) and, for RACE_BG_CLASS entries, adds the matching
+// backing-panel class so the harder-to-read race colors stay legible.
+function applyRaceTextColor(el, raceId) {
+  const color = raceColor(raceId);
   if (!color) return;
   el.style.color = color;
-  const bgClass = FACTION_BG_CLASS[factionKey];
+  const bgClass = RACE_BG_CLASS[raceId];
   if (bgClass) el.classList.add(bgClass);
 }
 
-// Like applyFactionTextColor(), but for a build method name specifically
-// (see BUILD_METHOD_TO_FACTION): a race-mapped method (Argon/Boron/.../
-// Xenon) gets that faction's usual colored pill, while a race-less one
-// (Universal/Closed Loop/Recycling -- deliberately absent from
-// BUILD_METHOD_TO_FACTION) still gets a pill, just a plain dark one with
-// white text, so every build method reads as a distinct button/row instead
-// of the race-less ones rendering as unstyled plain text.
+// Like applyRaceTextColor(), but for a build method name specifically (see
+// BUILD_METHOD_TO_RACE): a race-mapped method (Argon/Boron/.../Xenon) gets
+// that race's usual colored pill, while a race-less one (Universal/Closed
+// Loop/Recycling -- deliberately absent from BUILD_METHOD_TO_RACE) still
+// gets a pill, just a plain dark one with white text, so every build
+// method reads as a distinct button/row instead of the race-less ones
+// rendering as unstyled plain text.
 function applyBuildMethodColor(el, methodName) {
-  const factionKey = BUILD_METHOD_TO_FACTION[methodName];
-  if (factionKey) {
-    applyFactionTextColor(el, factionKey);
+  const raceId = BUILD_METHOD_TO_RACE[methodName];
+  if (raceId) {
+    applyRaceTextColor(el, raceId);
     return;
   }
   // White "as if it were a race color" -- reuses the exact same slate
-  // backing panel every light race color (Boron/Teladi/Terran/Kha'ak/Yaki)
+  // backing panel every light race color (Boron/Teladi/Terran/Kha'ak)
   // already sits on, rather than a bespoke background, so a race-less
   // method looks identical in style to a real one.
   el.style.color = "#ffffff";
-  el.classList.add("faction-bg-slate");
+  el.classList.add("race-bg-slate");
 }
 
 // Matches a leading race token in an equipment display name, e.g. "PAR"
@@ -286,16 +287,16 @@ function applyBuildMethodColor(el, methodName) {
 // convention (missiles/drones/deployables/countermeasures/crew never do).
 // Unrecognized 2-4 letter prefixes (e.g. the "XL" in a generic "XL
 // All-round Thrusters Mk1") harmlessly fall through to no color, since
-// RACE_PREFIX_TO_FACTION simply has no entry for them.
+// RACE_PREFIX_TO_RACE_ID simply has no entry for them.
 const NAME_RACE_PREFIX_RE = /^([A-Z]{2,4})(\s)/;
 
-function raceFactionForName(name) {
+function raceIdForName(name) {
   const match = name.match(NAME_RACE_PREFIX_RE);
-  return match ? (RACE_PREFIX_TO_FACTION[match[1].toLowerCase()] ?? null) : null;
+  return match ? (RACE_PREFIX_TO_RACE_ID[match[1].toLowerCase()] ?? null) : null;
 }
 
 function raceColorForName(name) {
-  return factionColor(raceFactionForName(name));
+  return raceColor(raceIdForName(name));
 }
 
 // Splits `name`'s leading race token (if any) into its own colored
@@ -305,16 +306,16 @@ function raceColorForName(name) {
 // <select><option> can't render partial-colored text (no nested markup
 // support) -- equipment pickers instead tint the *entire* option in its
 // race's color via raceColorForName() directly (see buildGroupRow()).
-function appendNameWithFactionColor(parent, name) {
+function appendNameWithRaceColor(parent, name) {
   const match = name.match(NAME_RACE_PREFIX_RE);
-  const factionKey = match ? raceFactionForName(name) : null;
-  if (!factionKey || !FACTION_COLORS[factionKey]) {
+  const raceId = match ? raceIdForName(name) : null;
+  if (!raceId || !RACE_COLORS[raceId]) {
     parent.appendChild(document.createTextNode(name));
     return;
   }
   const span = document.createElement("span");
-  span.className = "faction-color";
-  applyFactionTextColor(span, factionKey);
+  span.className = "race-color";
+  applyRaceTextColor(span, raceId);
   span.textContent = match[1];
   parent.appendChild(span);
   parent.appendChild(document.createTextNode(name.slice(match[1].length)));
@@ -325,6 +326,7 @@ const purposeFilterOptions = document.getElementById("purpose-filter-options");
 const typeFilterOptions = document.getElementById("type-filter-options");
 const vendorFilterOptions = document.getElementById("vendor-filter-options");
 const raceFilterOptions = document.getElementById("race-filter-options");
+const buildMethodFilterOptions = document.getElementById("build-method-filter-options");
 const shipOptionsList = document.getElementById("ship-options-list");
 const loadShipBtn = document.getElementById("load-ship-btn");
 const clearShipBtnTop = document.getElementById("clear-ship-btn-top");
@@ -440,8 +442,24 @@ const selectGameLoadoutCancelBtn = document.getElementById("select-game-loadout-
 // Every real build method, fetched once from GET /api/build_methods (see
 // BUILD_METHODS in generate_ships_table.py for how it's curated/ordered) --
 // both the options the modal's priority list offers and the starting point
-// for any column whose own buildMethodPriority is still null.
+// for any column whose own buildMethodPriority is still null. These are
+// the real internal keys (matching, filtering, persisted fleet state all
+// use these exact plain-English strings, see api.py's own
+// GET /api/build_method_names docstring for why) -- never localized, only
+// their displayed text is (see buildMethodNames below).
 let allBuildMethods = [];
+
+// build_method_name -> real display name (e.g. "Terran" -> "Terraner"),
+// fetched once from GET /api/build_method_names (see
+// generate_ships_table.py's parse_build_methods()) -- used everywhere a
+// build method's name is actually shown to a user (the Build Method
+// filter, the Cost Analysis modal, the fleet-tab priority button) instead
+// of the raw English string. A build_method_name key with no entry yet
+// falls back to that same raw string, same spirit as factionNames'/
+// purposeNames' own fallbacks. Display-only: allBuildMethods above (and
+// everything keyed off it -- filter values, buildMethodPriority arrays,
+// persisted state) keeps using the plain English name unchanged.
+const buildMethodNames = {};
 
 // faction_id -> real display name (e.g. "buccaneers" -> "Duke's
 // Buccaneers"), fetched once from GET /api/factions (see
@@ -451,6 +469,49 @@ let allBuildMethods = [];
 // still in flight, or a genuinely unmapped id) just falls back to showing
 // that raw id -- see buildFactionIconImg()'s own `?? factionKey`.
 const factionNames = {};
+
+// purpose_id -> real display name (e.g. "dismantling" -> "Dismantling"),
+// fetched once from GET /api/purposes (see generate_ships_table.py's
+// parse_purposes()) -- used for the Purpose filter's own checkbox labels
+// (see populateFilterOptions()) instead of just capitalizing the raw
+// internal code client-side with no real translation behind it. A purpose
+// key with no entry yet falls back to that same client-side
+// capitalization, same spirit as factionNames' own `?? factionKey`.
+const purposeNames = {};
+
+// race_id -> {name, shortname} (e.g. "argon" -> {name: "Argon", shortname:
+// "ARG"}), fetched once from GET /api/races (see generate_ships_table.py's
+// parse_races()) -- shortname is what's actually shown on each ship's
+// race badge(s) (see buildShipOptionRow()) and the Race filter's own
+// checkbox labels (see buildRaceFilterEntries()), name is used as the
+// badge's title/tooltip. A race key with no entry yet falls back to the
+// raw race_id, same spirit as factionNames'/purposeNames' own fallbacks.
+const raceInfo = {};
+
+// ship_type_id -> real display name (e.g. "destroyer" -> "Destroyer"),
+// fetched once from GET /api/ship_types (see generate_ships_table.py's
+// parse_ship_types()/SHIP_TYPE_NAME_REF) -- used for the Type filter's own
+// checkbox labels (see buildTypeFilterEntries()) instead of showing the
+// raw internal code unstyled. A ship_type key with no entry yet falls back
+// to that same raw code, same spirit as factionNames'/purposeNames' own
+// fallbacks.
+const shipTypeNames = {};
+
+// crew_role_id -> real display name (e.g. "marine" -> "Marines"), fetched
+// once from GET /api/crew_roles (see generate_ships_table.py's
+// parse_crew_roles()/CREW_ROLE_NAME_REF) -- used by loadCrew() to name the
+// ship builder's two synthetic crew rows (see CREW_ROLES) instead of the
+// raw role id. A role key with no entry yet falls back to that same raw
+// id, same spirit as shipTypeNames' own fallback.
+const crewRoleNames = {};
+
+// ware_id -> real display name for every ware in the database, fetched
+// once from GET /api/wares (see loadWareNames()) -- used by the Cost
+// Analysis Ware Cost List (appendWarePartRows()) to show a real name
+// instead of the raw internal ware_id. A ware_id key with no entry yet
+// falls back to that same raw id, same spirit as shipTypeNames'/
+// crewRoleNames' own fallbacks.
+const wareNames = {};
 
 // Which column the Build Method modal is currently open for -- one of the
 // objects wareCostListColumns() builds ({fleetIndex, buildMethodPriority,
@@ -474,16 +535,14 @@ function shipIconUrl(icon) {
   return icon ? `/images/ships/symbols/${icon}.png` : null;
 }
 
-// A faction key (major -- e.g. "argon", ships_base.owner_faction/
-// FACTION_COLORS -- or minor -- e.g. "buccaneers", one entry of
-// ships_base.owners) -> the tinted badge PNG generate_faction_icons.py
-// (majors) or generate_minor_faction_icons.py (minors) writes -- both sets
-// share the same data/images/factions/<key>.png output directory/naming,
-// so this one URL builder covers either. Null for "neutral" (the pseudo-
-// faction a gen_/pir_ ware_id's owner_faction resolves to), since there's
-// no in-game texture for that to have converted in the first place.
+// A faction key (major -- e.g. "argon", a real race id -- or minor -- e.g.
+// "buccaneers", one entry of ships_base.owners) -> the tinted badge PNG
+// generate_faction_icons.py (majors) or generate_minor_faction_icons.py
+// (minors) writes -- both sets share the same data/images/factions/
+// <key>.png output directory/naming, so this one URL builder covers
+// either.
 function factionIconUrl(factionKey) {
-  return factionKey && factionKey !== "neutral" ? `/images/factions/${factionKey}.png` : null;
+  return factionKey ? `/images/factions/${factionKey}.png` : null;
 }
 
 function buildFactionIconImg(factionKey, className) {
@@ -597,11 +656,12 @@ function buildTypeFilterEntries() {
   const entries = [];
   for (const [type, sizesSet] of Object.entries(sizesByType)) {
     const sizes = [...sizesSet];
+    const typeLabel = shipTypeNames[type] ?? type;
     if (sizes.length === 1) {
-      entries.push({ value: type, label: type, ship_type: type, size: sizes[0] });
+      entries.push({ value: type, label: typeLabel, ship_type: type, size: sizes[0] });
     } else {
       for (const size of sizes) {
-        entries.push({ value: `${type}:${size}`, label: `${type} (${size.toUpperCase()})`, ship_type: type, size });
+        entries.push({ value: `${type}:${size}`, label: `${typeLabel} (${size.toUpperCase()})`, ship_type: type, size });
       }
     }
   }
@@ -638,38 +698,57 @@ function shipMatchesTypeValue(ship, value) {
   return ship.ship_type === value.slice(0, sep) && ship.size === value.slice(sep + 1);
 }
 
+// ?lang=<i18next.language> returns each ship's own name in that language
+// where a real translation exists (game-data localization -- see
+// api.py's own /api/ships docstring -- entirely separate from this app's
+// UI text, which i18next/i18n.js already handles independently of this
+// fetch). bootstrap() awaits i18nReady before this runs, so i18next.language
+// always already reflects the persisted/resolved language by the time
+// this fires.
 async function loadShips() {
-  const response = await fetch("/api/ships");
+  const response = await fetch(`/api/ships?lang=${i18next.language}`);
   allShips = (await response.json()).sort(compareShips);
   populateFilterOptions();
   renderShipOptions();
 }
 
 async function loadMissiles() {
-  const response = await fetch("/api/missiles");
+  const response = await fetch(`/api/missiles?lang=${i18next.language}`);
   allMissiles = await response.json();
 }
 
 async function loadDrones() {
-  const response = await fetch("/api/drones");
+  const response = await fetch(`/api/drones?lang=${i18next.language}`);
   allDrones = await response.json();
 }
 
 async function loadDeployables() {
-  const response = await fetch("/api/deployables");
+  const response = await fetch(`/api/deployables?lang=${i18next.language}`);
   allDeployables = await response.json();
 }
 
 async function loadCountermeasures() {
-  const response = await fetch("/api/countermeasures");
+  const response = await fetch(`/api/countermeasures?lang=${i18next.language}`);
   allCountermeasures = await response.json();
 }
 
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/crew_roles docstring.
+async function loadCrewRoleNames() {
+  const response = await fetch(`/api/crew_roles?lang=${i18next.language}`);
+  const crewRoles = await response.json();
+  for (const { crew_role_id, crew_role_name } of crewRoles) crewRoleNames[crew_role_id] = crew_role_name;
+}
+
+// crewWare's own real name is immediately discarded below: the two
+// synthetic role rows get their own real, separately-localized names
+// instead (crewRoleNames, see loadCrewRoleNames()/CREW_ROLES) -- "marine"/
+// "service" have no ware_id of their own for crewWare.name to describe.
 async function loadCrew() {
-  const response = await fetch("/api/crew");
+  const response = await fetch(`/api/crew?lang=${i18next.language}`);
   const [crewWare] = await response.json();
   crewWareId = crewWare?.ware_id ?? null;
-  allCrew = CREW_ROLES.map(({ role, label }) => ({ ...crewWare, ware_id: role, name: label }));
+  allCrew = CREW_ROLES.map((role) => ({ ...crewWare, ware_id: role, name: crewRoleNames[role] ?? role }));
 }
 
 async function loadBuildMethods() {
@@ -677,10 +756,60 @@ async function loadBuildMethods() {
   allBuildMethods = await response.json();
 }
 
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/build_method_names docstring.
+async function loadBuildMethodNames() {
+  const response = await fetch(`/api/build_method_names?lang=${i18next.language}`);
+  const buildMethods = await response.json();
+  for (const { build_method_name, build_method_display_name } of buildMethods) {
+    buildMethodNames[build_method_name] = build_method_display_name;
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadShips() -- see api.py's
+// /api/factions docstring. bootstrap() awaits i18nReady before this runs,
+// so i18next.language always already reflects the persisted/resolved
+// language by the time this fires.
 async function loadFactionNames() {
-  const response = await fetch("/api/factions");
+  const response = await fetch(`/api/factions?lang=${i18next.language}`);
   const factions = await response.json();
   for (const { faction_id, faction_name } of factions) factionNames[faction_id] = faction_name;
+}
+
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/purposes docstring.
+async function loadPurposeNames() {
+  const response = await fetch(`/api/purposes?lang=${i18next.language}`);
+  const purposes = await response.json();
+  for (const { purpose_id, purpose_name } of purposes) purposeNames[purpose_id] = purpose_name;
+}
+
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/races docstring.
+async function loadRaceNames() {
+  const response = await fetch(`/api/races?lang=${i18next.language}`);
+  const races = await response.json();
+  for (const { race_id, race_name, race_shortname } of races) {
+    raceInfo[race_id] = { name: race_name, shortname: race_shortname ?? race_name };
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/ship_types docstring.
+async function loadShipTypeNames() {
+  const response = await fetch(`/api/ship_types?lang=${i18next.language}`);
+  const shipTypes = await response.json();
+  for (const { ship_type_id, ship_type_name } of shipTypes) shipTypeNames[ship_type_id] = ship_type_name;
+}
+
+// ?lang=<i18next.language>, same convention as loadFactionNames() -- see
+// api.py's /api/wares docstring. Also seeds allWaresCache (see
+// openPriceOverrideModal()) so opening the price-override picker never
+// needs a second fetch of the exact same data.
+async function loadWareNames() {
+  const response = await fetch(`/api/wares?lang=${i18next.language}`);
+  allWaresCache = await response.json();
+  for (const { ware_id, name } of allWaresCache) wareNames[ware_id] = name;
 }
 
 // Fills the size/type filter fieldsets with one checkbox per distinct value
@@ -699,40 +828,85 @@ function populateFilterOptions() {
   // ship.purpose is a flat, single-valued AI role classification (e.g.
   // "fight"/"trade"/"mine") -- unlike Type, no ship has more than one, so
   // this needs none of buildTypeFilterEntries()'s multi-size splitting.
+  // Label is purposeNames' own real, localized display name (see
+  // loadPurposeNames()/api.py's GET /api/purposes) -- falling back to the
+  // same plain client-side capitalization this used before that existed,
+  // for any purpose id purposeNames doesn't have an entry for (shouldn't
+  // happen for a real purpose value, but cheap insurance). Sorted by that
+  // resolved label, not the raw code, so a non-English list is actually
+  // alphabetized in that language too -- same reasoning as Vendor's own
+  // buildVendorFilterEntries().
   const purposeEntries = [...new Set(allShips.map((ship) => ship.purpose))]
     .filter((purpose) => purpose != null)
-    .sort((a, b) => a.localeCompare(b))
-    .map((purpose) => ({ value: purpose, label: purpose.charAt(0).toUpperCase() + purpose.slice(1) }));
+    .map((purpose) => ({
+      value: purpose,
+      label: purposeNames[purpose] ?? purpose.charAt(0).toUpperCase() + purpose.slice(1),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   buildCheckboxGroup(sizeFilterOptions, "size-filter", sizeEntries);
   buildCheckboxGroup(purposeFilterOptions, "purpose-filter", purposeEntries);
   buildCheckboxGroup(typeFilterOptions, "type-filter", buildTypeFilterEntries());
   buildCheckboxGroup(vendorFilterOptions, "vendor-filter", buildVendorFilterEntries());
   buildCheckboxGroup(raceFilterOptions, "race-filter", buildRaceFilterEntries());
+  buildCheckboxGroup(buildMethodFilterOptions, "build-method-filter", buildBuildMethodFilterEntries());
 }
 
-// One checkbox per distinct 3-letter race-abbreviation prefix actually
-// present among allShips' own ware_ids (shipRaceAbbreviation() -- the raw
-// prefix, e.g. "ATF" kept distinct from "TER" even though both share
-// Terran's color, same as the picker's own per-ship label). The label
-// itself *is* that abbreviation, styled exactly like the picker's own
-// .ship-option-race plate (applyFactionTextColor() -- colored text, plus a
+// One checkbox per distinct real race_id appearing in any ship's own
+// maker_races (see GET /api/ships' own docstring and
+// generate_ships_table.py's "Design race and race/faction shortcodes"
+// section) -- the ship's actual design race(s), not a ware_id guess.
+// Checkbox `value` is the race_id itself (matching shipPassesCurrentFilters'
+// own comparison); the label shown is that race's localized shortname
+// (raceInfo, see loadRaceNames()), styled exactly like the picker's own
+// .ship-option-race plate (applyRaceTextColor() -- colored text, plus a
 // silver/slate backing panel for the harder-to-read colors) via a
 // dedicated labelEl span rather than plain text, since color/background
-// can't be expressed on a plain text node.
+// can't be expressed on a plain text node. Sorted by the displayed
+// shortname, not the raw id, so the checkbox order matches what's shown.
 function buildRaceFilterEntries() {
-  const races = new Set();
+  const raceIds = new Set();
   for (const ship of allShips) {
-    const race = shipRaceAbbreviation(ship.ware_id);
-    if (race) races.add(race);
+    for (const raceId of ship.maker_races ?? []) raceIds.add(raceId);
   }
-  return [...races].sort().map((race) => {
-    const labelEl = document.createElement("span");
-    labelEl.className = "filter-option-race-label";
-    applyFactionTextColor(labelEl, RACE_PREFIX_TO_FACTION[race.toLowerCase()]);
-    labelEl.textContent = race;
-    return { value: race, label: race, labelEl };
-  });
+  return [...raceIds]
+    .sort((a, b) => (raceInfo[a]?.shortname ?? a).localeCompare(raceInfo[b]?.shortname ?? b))
+    .map((raceId) => {
+      const labelEl = document.createElement("span");
+      labelEl.className = "filter-option-race-label";
+      applyRaceTextColor(labelEl, raceId);
+      labelEl.textContent = raceInfo[raceId]?.shortname ?? raceId;
+      return { value: raceId, label: raceInfo[raceId]?.shortname ?? raceId, labelEl };
+    });
+}
+
+// One checkbox per real build-method name actually present among
+// allShips' own ship.production_method (ships with no production block at
+// all -- a handful of Khaak hulls and drop/terraforming drones -- simply
+// contribute nothing, same "never offer a choice with zero matches" rule
+// every other filter here follows, e.g. buildRaceFilterEntries()). Filters
+// allBuildMethods (see loadBuildMethods()/GET /api/build_methods) down to
+// just those, rather than re-deriving the list from allShips directly, so
+// the checkbox order matches BUILD_METHODS' own curated order (Universal
+// first, Terran second, ...) -- the same order the Cost Analysis Build
+// Method modal's own priority list uses -- instead of a plain alphabetical
+// sort. Label is colored via applyBuildMethodColor() (see
+// BUILD_METHOD_TO_RACE), same "Argon"/"Boron"/etc. race-colored pill
+// treatment build method names already get in the Build Method modal and
+// the Loadout summary. `value` stays the raw English method name (the real
+// matching key -- see shipPassesCurrentFilters()); only the label text is
+// resolved through buildMethodNames (see loadBuildMethodNames()).
+function buildBuildMethodFilterEntries() {
+  const methodsPresent = new Set(allShips.map((ship) => ship.production_method).filter((method) => method != null));
+  return allBuildMethods
+    .filter((method) => methodsPresent.has(method))
+    .map((method) => {
+      const labelEl = document.createElement("span");
+      labelEl.className = "filter-option-race-label";
+      applyBuildMethodColor(labelEl, method);
+      labelEl.textContent = buildMethodNames[method] ?? method;
+      return { value: method, label: buildMethodNames[method] ?? method, labelEl };
+    });
 }
 
 // One checkbox per real faction id appearing in any ship's own
@@ -831,13 +1005,16 @@ function shipPassesCurrentFilters(ship) {
   const typeValues = checkedValues("type-filter");
   const vendorValues = checkedValues("vendor-filter");
   const raceValues = checkedValues("race-filter");
+  const buildMethodValues = checkedValues("build-method-filter");
   const shipOwners = ship.owners ? ship.owners.split(",") : [];
+  const shipMakerRaces = ship.maker_races ?? [];
   return (
     (sizeValues.length === 0 || sizeValues.includes(ship.size)) &&
     (purposeValues.length === 0 || purposeValues.includes(ship.purpose)) &&
     (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value))) &&
     (vendorValues.length === 0 || vendorValues.some((value) => shipOwners.includes(value))) &&
-    (raceValues.length === 0 || raceValues.includes(shipRaceAbbreviation(ship.ware_id)))
+    (raceValues.length === 0 || raceValues.some((value) => shipMakerRaces.includes(value))) &&
+    (buildMethodValues.length === 0 || buildMethodValues.includes(ship.production_method))
   );
 }
 
@@ -849,7 +1026,7 @@ function renderShipOptions() {
   if (filtered.length === 0) {
     const empty = document.createElement("div");
     empty.className = "ship-options-empty";
-    empty.textContent = "No ships match the current filters.";
+    empty.textContent = t("ship_builder.no_ships_match");
     shipOptionsList.appendChild(empty);
   }
 
@@ -860,29 +1037,25 @@ function renderShipOptions() {
   selectedShipWareId = "";
   loadShipBtn.disabled = true;
   editingIndex = null;
-  setAddToCartBtnLabel("Add To Fleet List");
+  setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
   saveState();
 }
 
 // One clickable row in the ship picker listbox: its class symbol (see
-// shipIconUrl()) plus "Name (size, type)", matching what the old <select>'s
-// <option> text used to say. Clicking always starts a fresh "add" -- same
+// shipIconUrl()) plus its own resolved name alone -- size/type used to be
+// appended as raw, unlocalized codes (e.g. "(l, destroyer)"); dropped
+// because at the time neither had a real localization source, so showing
+// them in one language while the name itself was properly localized in
+// another was worse than not showing them at all. ship_type now does
+// (shipTypeNames, see loadShipTypeNames()/the Type filter's own use of it
+// in buildTypeFilterEntries()) but this row was never reverted to add it
+// back -- the race badge(s) and Race/Size/Type filters already convey this
+// info without cluttering the name line, and that's held up fine since.
+// Clicking always starts a fresh "add" -- same
 // as the native <select>'s own "change" event used to (see
 // applyShipSelection() for the shared part also used by editCartEntry(),
 // which must NOT reset editingIndex/addToCartBtn's label -- that's why
 // that part is factored out separately rather than done here).
-// A ship's ware_id always starts with its design race (e.g.
-// "ship_par_s_heavyfighter_01_a" -> "PAR") -- unlike ships_base.owners
-// (the full, often multi-faction sales list -- a Paranid-designed ship
-// is commonly sold through Buccaneers/Holy Order/Trinity too, without
-// "paranid" itself necessarily appearing there), this is a single,
-// unambiguous per-ship value, so it's used as the picker's "owner
-// faction" abbreviation instead of owners.
-function shipRaceAbbreviation(wareId) {
-  const match = wareId.match(/^ship_([a-z]+)_/);
-  return match ? match[1].toUpperCase() : null;
-}
-
 function buildShipOptionRow(ship) {
   const row = document.createElement("div");
   row.className = "ship-option-row";
@@ -896,16 +1069,28 @@ function buildShipOptionRow(ship) {
 
   const text = document.createElement("span");
   text.className = "ship-option-name";
-  text.textContent = `${ship.name} (${ship.size}, ${ship.ship_type})`;
+  text.textContent = ship.name;
   textCol.appendChild(text);
 
-  const race = shipRaceAbbreviation(ship.ware_id);
-  if (race) {
-    const raceLabel = document.createElement("span");
-    raceLabel.className = "ship-option-race";
-    applyFactionTextColor(raceLabel, RACE_PREFIX_TO_FACTION[race.toLowerCase()]);
-    raceLabel.textContent = race;
-    textCol.appendChild(raceLabel);
+  // One colored abbreviation per real design race in ship.maker_races (see
+  // GET /api/ships' own docstring) -- usually one, occasionally more (e.g.
+  // the Envoy shows both "ARG" and "TEL"), each independently colored via
+  // RACE_COLORS/raceInfo. A raceIds container rather than a single span
+  // since there can now be more than one (see .ship-option-races in
+  // style.css for the wrapping/gap).
+  const raceIds = ship.maker_races ?? [];
+  if (raceIds.length > 0) {
+    const racesGroup = document.createElement("span");
+    racesGroup.className = "ship-option-races";
+    for (const raceId of raceIds) {
+      const raceLabel = document.createElement("span");
+      raceLabel.className = "ship-option-race";
+      applyRaceTextColor(raceLabel, raceId);
+      raceLabel.textContent = raceInfo[raceId]?.shortname ?? raceId;
+      raceLabel.title = raceInfo[raceId]?.name ?? raceId;
+      racesGroup.appendChild(raceLabel);
+    }
+    textCol.appendChild(racesGroup);
   }
 
   row.appendChild(textCol);
@@ -917,9 +1102,9 @@ function buildShipOptionRow(ship) {
   // -- e.g. "argon,buccaneers,hatikvah,scaleplate" -- see
   // generate_minor_faction_icons.py for the minors' own real in-game
   // colors). No separate manufacturer/design-race badge here any more --
-  // that's already shown as the colored race-abbreviation text under the
-  // ship's name (shipRaceAbbreviation()/.ship-option-race above), so
-  // showing it a second time as an icon would be redundant.
+  // that's already shown as the colored race abbreviation(s) under the
+  // ship's name (.ship-option-races above), so showing it a second time
+  // as an icon would be redundant.
   const factionIconsGroup = document.createElement("span");
   factionIconsGroup.className = "ship-option-faction-icons";
 
@@ -933,7 +1118,7 @@ function buildShipOptionRow(ship) {
   row.addEventListener("click", () => {
     applyShipSelection(ship.ware_id);
     editingIndex = null;
-    setAddToCartBtnLabel("Add To Fleet List");
+    setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
   });
 
   return row;
@@ -955,10 +1140,10 @@ function applyShipSelection(wareId) {
 loadShipBtn.addEventListener("click", async () => {
   const identifier = selectedShipWareId;
   if (!identifier) return;
-  const response = await fetch(`/api/ships/${encodeURIComponent(identifier)}/groups`);
+  const response = await fetch(`/api/ships/${encodeURIComponent(identifier)}/groups?lang=${i18next.language}`);
   const data = await response.json();
   if (data.error) {
-    alert(`Could not load ship: ${data.error}`);
+    alert(t("ship_builder.could_not_load_ship", { error: data.error }));
     return;
   }
   currentShip = data;
@@ -971,34 +1156,26 @@ loadShipBtn.addEventListener("click", async () => {
   renderShipDetail(data);
 });
 
-const COMPONENT_TYPE_LABELS = {
-  engine: "Engines",
-  weapon: "Weapons",
-  missile_launcher: "Missile Launchers",
-  shield: "Shields",
-  turret: "Turrets",
-  thruster: "Thrusters",
-  software: "Software",
-};
+// This app's own invented UI category labels (not game data -- see
+// i18n.js) -- functions rather than plain lookup objects so every call
+// site always reflects the current language via t(), same reasoning as
+// cartDisplayLabel()/wareCostListCategoryLabel() below.
+function componentTypeLabel(componentType) {
+  return t(`component_type.${componentType}`);
+}
 const COMPONENT_TYPE_ORDER = ["engine", "thruster", "weapon", "missile_launcher", "shield", "turret", "software"];
 
-// Singular form of COMPONENT_TYPE_LABELS, for the equipment picker
+// Singular form of componentTypeLabel(), for the equipment picker
 // button/modal title ("Select Weapon", not "Select Weapons") -- a
-// separate map rather than stripping a trailing "s" since "Software" has
-// none to strip.
-const COMPONENT_TYPE_SINGULAR_LABELS = {
-  engine: "Engine",
-  weapon: "Weapon",
-  missile_launcher: "Missile Launcher",
-  shield: "Shield",
-  turret: "Turret",
-  thruster: "Thruster",
-  software: "Software",
-};
+// separate key set rather than stripping a trailing "s" since "Software"
+// has none to strip.
+function componentTypeSingularLabel(componentType) {
+  return t(`component_type_singular.${componentType}`, { defaultValue: t("equipment_picker_modal.fallback_equipment") });
+}
 
 // Grouping for the Fleet List's own "Loadout" display (see
-// renderCart()) -- a superset of COMPONENT_TYPE_LABELS/_ORDER above (which
-// only covers ship_component_groups' component_type values) plus "chassis"
+// renderCart()) -- a superset of componentTypeLabel()/COMPONENT_TYPE_ORDER
+// above (which only covers ship_component_groups' component_type values) plus "chassis"
 // (the ship hull itself) and the three shared-pool categories that never
 // go through a group at all (missile/drone/deployable). "main_shield"/
 // "surface_element_shield" split out of the generic "shield"
@@ -1006,26 +1183,21 @@ const COMPONENT_TYPE_SINGULAR_LABELS = {
 // summarize_production.py's group_by_component_type option already splits
 // them for the Ware Cost List, rather than lumping every shield together.
 // Anything tagged with a category not listed here (shouldn't normally
-// happen) falls back to CART_DISPLAY_FALLBACK_CATEGORY, mirroring the Ware
-// Cost List's own "production_wares" catch-all.
-const CART_DISPLAY_LABELS = {
-  chassis: "Chassis",
-  crew_marine: "Marines",
-  crew_service: "Service Crew",
-  engine: "Engines",
-  thruster: "Thrusters",
-  weapon: "Weapons",
-  missile_launcher: "Missile Launchers",
-  main_shield: "Main Shields",
-  surface_element_shield: "Surface Element Shields",
-  turret: "Turrets",
-  software: "Software",
-  missile: "Ammunition",
-  countermeasure: "Countermeasures",
-  drone: "Drones",
-  deployable: "Deployables",
-  production_wares: "Other",
-};
+// happen) falls back to the raw category code itself (see cart_display.*'s
+// defaultValue below), mirroring the Ware Cost List's own "production_wares"
+// catch-all.
+//
+// crew_marine/crew_service are deliberately NOT part of the cart_display.*
+// i18next keys below -- unlike every other entry here (this app's own
+// invented UI category labels), "Marines"/"Service crew" are real game
+// text (see crewRoleNames/loadCrewRoleNames(), CREW_ROLE_NAME_REF in
+// generate_ships_table.py) with their own already-localized source; a
+// second, separately-authored translation here would drift from it.
+function cartDisplayLabel(category) {
+  if (category === "crew_marine") return crewRoleNames.marine ?? category;
+  if (category === "crew_service") return crewRoleNames.service ?? category;
+  return t(`cart_display.${category}`, { defaultValue: category });
+}
 // Matches the ship builder's own on-screen section order exactly (see
 // renderShipDetail()/COMPONENT_TYPE_ORDER for the equipment groups, then
 // renderAmmunitionSection/renderDroneSection/renderDeployableSection/
@@ -1056,7 +1228,7 @@ const CART_DISPLAY_ORDER = [
 const CART_DISPLAY_FALLBACK_CATEGORY = "production_wares";
 
 // Splits the generic "shield" component_type into "main_shield" vs
-// "surface_element_shield" for CART_DISPLAY_LABELS/_ORDER -- any other
+// "surface_element_shield" for cartDisplayLabel()/CART_DISPLAY_ORDER -- any other
 // component_type passes through unchanged. Shared by addToCartBtn's
 // handler (which knows a row is a bonus shield from its own
 // "bonus-shield-row" class) and reconstructCartEntry() (which instead
@@ -1087,16 +1259,11 @@ function groupKey(group) {
 // (their group_name is always exactly that literal string anyway); software
 // slots are matched by group_name, since component_type "software" alone
 // doesn't distinguish which category.
-const REQUIRED_SOFTWARE_LABELS = {
-  software_scannerlongrange: "Long Range Scanner Software",
-  software_scannerobject: "Object Scanner Software",
-  software_flightassist: "Flight Assist Software",
-};
-
 function requiredGroupLabel(group) {
-  if (group.component_type === "engine") return "Engine";
-  if (group.component_type === "thruster") return "Thruster";
-  return REQUIRED_SOFTWARE_LABELS[group.group_name] ?? null;
+  if (group.component_type === "engine") return t("component_type_singular.engine");
+  if (group.component_type === "thruster") return t("component_type_singular.thruster");
+  const key = `required_software.${group.group_name}`;
+  return i18next.exists(key) ? t(key) : null;
 }
 
 // Which of a ship's recommended groups (per requiredGroupLabel() above)
@@ -1145,7 +1312,7 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
 
   const label = document.createElement("label");
   label.textContent = isLinkedShield
-    ? `Bonus M Shield (x${group.slot_count})`
+    ? t("ship_builder.bonus_m_shield_label", { count: group.slot_count })
     : `${group.group_name} (${group.component_type}, ${group.size}, x${group.slot_count})`;
 
   const requiredLabel = requiredGroupLabel(group);
@@ -1154,7 +1321,7 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
     const marker = document.createElement("span");
     marker.className = "required-marker";
     marker.textContent = " *";
-    marker.title = "Recommended -- leaving this unselected will show a warning in the fleet list";
+    marker.title = t("ship_builder.recommended_tooltip");
     label.appendChild(marker);
   }
   row.appendChild(label);
@@ -1163,7 +1330,7 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
   select.className = "group-select";
   const noneOption = document.createElement("option");
   noneOption.value = "";
-  noneOption.textContent = "-- none --";
+  noneOption.textContent = t("equipment_picker_modal.clear_option_row");
   select.appendChild(noneOption);
   for (const option of group.options) {
     const opt = document.createElement("option");
@@ -1191,7 +1358,7 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
   }
   if (group.options.length === 0) {
     select.disabled = true;
-    noneOption.textContent = "-- no compatible equipment found --";
+    noneOption.textContent = t("equipment_picker_modal.no_compatible_equipment");
   }
   // The <select> stays in the DOM (just hidden) rather than being removed
   // -- every existing piece of cart-building/edit-restore/ammo-capacity
@@ -1232,7 +1399,7 @@ function syncGroupSelectButtonLabel(row) {
   btn.classList.remove("group-select-btn-empty");
   const selectedOption = select.options[select.selectedIndex];
   btn.textContent = "";
-  appendNameWithFactionColor(btn, selectedOption.textContent);
+  appendNameWithRaceColor(btn, selectedOption.textContent);
 }
 
 // The .group-row/group data currently open in the equipment picker modal,
@@ -1290,10 +1457,12 @@ async function openEquipmentPickerModal(row, group) {
   equipmentPickerModalRow = row;
   equipmentPickerModalGroup = group;
   equipmentPickerApplyAllCheckbox.checked = false;
-  equipmentPickerModalTitle.textContent = `Select ${COMPONENT_TYPE_SINGULAR_LABELS[group.component_type] ?? "Equipment"}`;
+  equipmentPickerModalTitle.textContent = t("equipment_picker_modal.select_type_title", {
+    type: componentTypeSingularLabel(group.component_type),
+  });
   equipmentPickerThead.innerHTML = "";
   equipmentPickerTbody.innerHTML = "";
-  equipmentPickerModalStatus.textContent = "Loading level 1 wares…";
+  equipmentPickerModalStatus.textContent = t("equipment_picker_modal.loading_level1_wares");
   equipmentPickerModalStatus.classList.remove("hidden");
   equipmentPickerModalOverlay.classList.remove("hidden");
 
@@ -1306,7 +1475,7 @@ async function openEquipmentPickerModal(row, group) {
     const response = await fetch("/api/level1_parts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ware_ids: group.options.map((option) => option.ware_id) }),
+      body: JSON.stringify({ ware_ids: group.options.map((option) => option.ware_id), lang: i18next.language }),
     });
     if (response.ok) partsData = await response.json();
   } catch {
@@ -1339,7 +1508,13 @@ function renderEquipmentPickerTable(row, group, partsData) {
 
   equipmentPickerThead.innerHTML = "";
   const headRow = document.createElement("tr");
-  for (const label of ["Name", "Min Price", "Avg Price", "Max Price", ...sortedPartIds.map((id) => partNames[id] ?? id)]) {
+  const fixedHeaders = [
+    t("equipment_picker_modal.table_name_header"),
+    t("equipment_picker_modal.table_min_header"),
+    t("equipment_picker_modal.table_avg_header"),
+    t("equipment_picker_modal.table_max_header"),
+  ];
+  for (const label of [...fixedHeaders, ...sortedPartIds.map((id) => partNames[id] ?? id)]) {
     const th = document.createElement("th");
     th.textContent = label;
     headRow.appendChild(th);
@@ -1351,7 +1526,7 @@ function renderEquipmentPickerTable(row, group, partsData) {
   const clearRow = document.createElement("tr");
   clearRow.className = "equipment-picker-row equipment-picker-clear-row";
   const clearTd = document.createElement("td");
-  clearTd.textContent = "-- none --";
+  clearTd.textContent = t("equipment_picker_modal.clear_option_row");
   clearTd.colSpan = 4 + sortedPartIds.length;
   clearRow.appendChild(clearTd);
   clearRow.addEventListener("click", () => selectEquipmentPickerOption(""));
@@ -1363,7 +1538,7 @@ function renderEquipmentPickerTable(row, group, partsData) {
     if (select.value === option.ware_id) tr.classList.add("selected");
 
     const nameTd = document.createElement("td");
-    appendNameWithFactionColor(nameTd, option.name);
+    appendNameWithRaceColor(nameTd, option.name);
     tr.appendChild(nameTd);
 
     for (const priceField of ["price_min", "price_avg", "price_max"]) {
@@ -1461,13 +1636,12 @@ async function openPriceOverrideModal() {
     return;
   }
 
-  priceOverrideModalStatus.textContent = "Loading wares…";
+  priceOverrideModalStatus.textContent = t("price_override_modal.loading_wares");
   priceOverrideModalStatus.classList.remove("hidden");
   try {
-    const response = await fetch("/api/wares");
-    allWaresCache = await response.json();
+    await loadWareNames(); // seeds allWaresCache too -- see its own docstring
   } catch {
-    priceOverrideModalStatus.textContent = "Failed to load wares -- try again.";
+    priceOverrideModalStatus.textContent = t("price_override_modal.failed_to_load_wares");
     return;
   }
   priceOverrideModalStatus.classList.add("hidden");
@@ -1610,7 +1784,7 @@ function renderPriceOverrideSummary() {
   if (entries.length === 0) {
     const empty = document.createElement("span");
     empty.className = "price-override-summary-empty";
-    empty.textContent = "None configured.";
+    empty.textContent = t("ware_cost_list.overrides_none");
     priceOverrideSummaryList.appendChild(empty);
     return;
   }
@@ -1634,7 +1808,7 @@ function renderPriceOverrideSummary() {
     removeBtn.type = "button";
     removeBtn.className = "price-override-summary-remove-btn";
     removeBtn.textContent = "×";
-    removeBtn.title = `Remove override for ${wareDisplayName(wareId)}`;
+    removeBtn.title = t("price_override_modal.remove_override_tooltip", { name: wareDisplayName(wareId) });
     // Deletes straight from priceOverrides -- doesn't need to touch the
     // modal's own table (it re-derives each input's value fresh from
     // priceOverrides every time it's opened, see renderPriceOverrideTable()),
@@ -1722,7 +1896,7 @@ function renderShipDetail(data) {
   if (data.icon) shipNameEl.appendChild(buildIconImg(data.icon, "ship-icon ship-name-icon"));
   shipNameEl.appendChild(document.createTextNode(data.name));
   updatePlayerLocationMarker(data.icon);
-  selectChassisLoadoutBtn.textContent = `Select ${data.name} Loadout`;
+  selectChassisLoadoutBtn.textContent = t("ship_builder.select_named_loadout", { name: data.name });
   updateSelectChassisLoadoutBtnState();
   addToSavedLoadoutsStatus.classList.add("hidden");
   renderShipSummary(data);
@@ -1765,22 +1939,22 @@ function renderShipDetail(data) {
     headingRow.className = "picker-section-heading-row";
     const heading = document.createElement("h4");
     heading.className = "picker-section-title";
-    heading.textContent = COMPONENT_TYPE_LABELS[sectionType];
+    heading.textContent = componentTypeLabel(sectionType);
     headingRow.appendChild(heading);
 
     const highBtn = document.createElement("button");
     highBtn.type = "button";
     highBtn.className = "section-preset-btn";
-    highBtn.textContent = "High Preset";
-    highBtn.title = "Select the highest average-price item available in every slot in this section";
+    highBtn.textContent = t("ship_builder.high_preset");
+    highBtn.title = t("ship_builder.high_preset_tooltip");
     highBtn.addEventListener("click", () => applyHighPreset(sectionType));
     headingRow.appendChild(highBtn);
 
     const minBtn = document.createElement("button");
     minBtn.type = "button";
     minBtn.className = "section-preset-btn";
-    minBtn.textContent = "Minimum Preset";
-    minBtn.title = "Select the lowest average-price item in this section's required slots (marked *), and clear everything else";
+    minBtn.textContent = t("ship_builder.minimum_preset");
+    minBtn.title = t("ship_builder.minimum_preset_tooltip");
     minBtn.addEventListener("click", () => applyMinimumPreset(sectionType));
     headingRow.appendChild(minBtn);
 
@@ -1848,7 +2022,7 @@ function totalMissileCapacity() {
 // whatever's actually selected.
 function updateSelectedAmmoCapacity() {
   const line = document.getElementById("selected-ammo-capacity-line");
-  if (line) line.textContent = `Total Missile Capacity: ${totalMissileCapacity()}`;
+  if (line) line.textContent = t("ship_builder.total_missile_capacity", { count: totalMissileCapacity() });
 }
 
 function totalSelectedMissiles() {
@@ -1967,7 +2141,7 @@ function renderAmmoInfoBox() {
   icon.textContent = "i";
   box.appendChild(icon);
   const text = document.createElement("span");
-  text.textContent = "Ctrl-click to move counters by 10, Shift-click to move counters by max.";
+  text.textContent = t("ship_builder.counter_hint");
   box.appendChild(text);
 
   ammoInfoBoxContainer.appendChild(box);
@@ -1998,7 +2172,7 @@ function renderAmmunitionSection() {
 
   const heading = document.createElement("h4");
   heading.className = "picker-section-title";
-  heading.textContent = "Ammunition";
+  heading.textContent = t("ship_builder.ammunition_section_title");
   section.appendChild(heading);
 
   const card = document.createElement("div");
@@ -2023,7 +2197,7 @@ function updateAmmoSummary() {
 
   const total = totalSelectedMissiles();
   const capacity = totalMissileCapacity();
-  line.textContent = `Total Missiles: ${total} / ${capacity}`;
+  line.textContent = t("ship_builder.total_missiles", { total, capacity });
   line.classList.toggle("over-capacity", total > capacity);
 }
 
@@ -2124,7 +2298,7 @@ function renderDroneSection() {
 
   const heading = document.createElement("h4");
   heading.className = "picker-section-title";
-  heading.textContent = "Drones";
+  heading.textContent = t("ship_builder.drones_section_title");
   section.appendChild(heading);
 
   const card = document.createElement("div");
@@ -2149,7 +2323,7 @@ function updateDroneSummary() {
 
   const total = totalSelectedDrones();
   const capacity = totalDroneCapacity();
-  line.textContent = `Total Drones: ${total} / ${capacity}`;
+  line.textContent = t("ship_builder.total_drones", { total, capacity });
   line.classList.toggle("over-capacity", total > capacity);
 }
 
@@ -2248,7 +2422,7 @@ function renderDeployableSection() {
 
   const heading = document.createElement("h4");
   heading.className = "picker-section-title";
-  heading.textContent = "Deployables";
+  heading.textContent = t("ship_builder.deployables_section_title");
   section.appendChild(heading);
 
   const card = document.createElement("div");
@@ -2273,7 +2447,7 @@ function updateDeployableSummary() {
 
   const total = totalSelectedDeployables();
   const capacity = totalDeployableCapacity();
-  line.textContent = `Total Deployables: ${total} / ${capacity}`;
+  line.textContent = t("ship_builder.total_deployables", { total, capacity });
   line.classList.toggle("over-capacity", total > capacity);
 }
 
@@ -2370,7 +2544,7 @@ function renderCountermeasureSection() {
 
   const heading = document.createElement("h4");
   heading.className = "picker-section-title";
-  heading.textContent = "Countermeasures";
+  heading.textContent = t("ship_builder.countermeasures_section_title");
   section.appendChild(heading);
 
   const card = document.createElement("div");
@@ -2395,7 +2569,7 @@ function updateCountermeasureSummary() {
 
   const total = totalSelectedCountermeasures();
   const capacity = totalCountermeasureCapacity();
-  line.textContent = `Total Countermeasures: ${total} / ${capacity}`;
+  line.textContent = t("ship_builder.total_countermeasures", { total, capacity });
   line.classList.toggle("over-capacity", total > capacity);
 }
 
@@ -2491,7 +2665,7 @@ function renderCrewSection() {
 
   const heading = document.createElement("h4");
   heading.className = "picker-section-title";
-  heading.textContent = "Crew";
+  heading.textContent = t("ship_builder.crew_section_title");
   section.appendChild(heading);
 
   const card = document.createElement("div");
@@ -2516,7 +2690,7 @@ function updateCrewSummary() {
 
   const total = totalSelectedCrew();
   const capacity = totalCrewCapacity();
-  line.textContent = `Total Crew: ${total} / ${capacity}`;
+  line.textContent = t("ship_builder.total_crew", { total, capacity });
   line.classList.toggle("over-capacity", total > capacity);
 }
 
@@ -2536,15 +2710,22 @@ function renderShipSummary(data) {
 
   const sizeLabel = data.summary.size ? data.summary.size.toUpperCase() : "-";
   const mainShieldsLine = document.createElement("div");
-  mainShieldsLine.textContent = `Main Shields (${sizeLabel}): ${data.summary.shields ?? "-"}`;
+  mainShieldsLine.textContent = t("ship_builder.main_shields_summary", {
+    size: sizeLabel,
+    value: data.summary.shields ?? "-",
+  });
   shipSummaryEl.appendChild(mainShieldsLine);
 
   const bonusShieldsLine = document.createElement("div");
-  bonusShieldsLine.textContent = `Surface Element Shields (M): ${data.summary.shields_bonus_m ?? "-"}`;
+  bonusShieldsLine.textContent = t("ship_builder.surface_element_shields_summary", {
+    value: data.summary.shields_bonus_m ?? "-",
+  });
   shipSummaryEl.appendChild(bonusShieldsLine);
 
   const missileCapacityLine = document.createElement("div");
-  missileCapacityLine.textContent = `Missile Capacity: ${data.summary.missile_capacity ?? "-"}`;
+  missileCapacityLine.textContent = t("ship_builder.missile_capacity_summary", {
+    value: data.summary.missile_capacity ?? "-",
+  });
   shipSummaryEl.appendChild(missileCapacityLine);
 
   // Kept up to date by updateSelectedAmmoCapacity() (called on every
@@ -2565,7 +2746,7 @@ function renderShipSummary(data) {
 
   const slotsHeader = document.createElement("div");
   slotsHeader.className = "summary-subheader";
-  slotsHeader.textContent = "Total equipment slots:";
+  slotsHeader.textContent = t("ship_builder.total_equipment_slots");
   shipSummaryEl.appendChild(slotsHeader);
 
   const slotsList = document.createElement("ul");
@@ -2573,7 +2754,7 @@ function renderShipSummary(data) {
   for (const componentType of COMPONENT_TYPE_ORDER) {
     if (!(componentType in slotTotals)) continue;
     const li = document.createElement("li");
-    li.textContent = `${COMPONENT_TYPE_LABELS[componentType]}: ${slotTotals[componentType]}`;
+    li.textContent = `${componentTypeLabel(componentType)}: ${slotTotals[componentType]}`;
     slotsList.appendChild(li);
   }
   shipSummaryEl.appendChild(slotsList);
@@ -2682,7 +2863,7 @@ function resetShipPicker() {
   deployableContainer.innerHTML = "";
   crewContainer.innerHTML = "";
   shipNoteInput.value = "";
-  setAddToCartBtnLabel("Add To Fleet List");
+  setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
   importedLoadoutWarningsEl.classList.add("hidden");
   addToSavedLoadoutsStatus.classList.add("hidden");
 }
@@ -3048,7 +3229,7 @@ function renderLoadoutCell(loadoutTd, entry) {
 
     const headerLabel = document.createElement("span");
     headerLabel.className = "cart-loadout-category";
-    headerLabel.textContent = CART_DISPLAY_LABELS[category] ?? category;
+    headerLabel.textContent = cartDisplayLabel(category);
     headerRow.appendChild(headerLabel);
 
     if (category === "chassis") {
@@ -3072,7 +3253,7 @@ function renderLoadoutCell(loadoutTd, entry) {
       // Two non-breaking spaces, not plain ones: browsers strip plain
       // leading whitespace at the start of a block box entirely.
       itemDiv.appendChild(document.createTextNode(`  ${item.amount}x `));
-      appendNameWithFactionColor(itemDiv, item.label);
+      appendNameWithRaceColor(itemDiv, item.label);
       loadoutTd.appendChild(itemDiv);
     }
   }
@@ -3178,14 +3359,14 @@ function renderCart() {
     // Edit/Remove share this same line as the qty control -- see
     // .cart-qty-row's own CSS for the flex layout that puts them there.
     const editBtn = document.createElement("button");
-    editBtn.textContent = "edit";
+    editBtn.textContent = t("ship_builder.edit_btn");
     editBtn.className = "edit-btn";
     editBtn.addEventListener("click", () => editCartEntry(index));
     qtyRow.appendChild(editBtn);
 
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "x";
-    removeBtn.title = "Remove";
+    removeBtn.title = t("ship_builder.remove_tooltip");
     removeBtn.className = "remove-btn";
     removeBtn.addEventListener("click", () => {
       activeFleet().cart.splice(index, 1);
@@ -3209,10 +3390,10 @@ function renderCart() {
 
 async function editCartEntry(index) {
   const entry = activeFleet().cart[index];
-  const response = await fetch(`/api/ships/${encodeURIComponent(entry.shipWareId)}/groups`);
+  const response = await fetch(`/api/ships/${encodeURIComponent(entry.shipWareId)}/groups?lang=${i18next.language}`);
   const data = await response.json();
   if (data.error) {
-    alert(`Could not load ship: ${data.error}`);
+    alert(t("ship_builder.could_not_load_ship", { error: data.error }));
     return;
   }
 
@@ -3250,7 +3431,7 @@ async function editCartEntry(index) {
   crewAmounts = { ...(entry.crewAmounts ?? {}) };
   renderCrewSection();
   shipNoteInput.value = entry.note ?? "";
-  setAddToCartBtnLabel("Update Fleet List");
+  setAddToCartBtnLabel(t("ship_builder.update_fleet_list"));
   importedLoadoutWarningsEl.classList.add("hidden");
   shipDetail.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -3312,12 +3493,12 @@ async function runImportLoadouts() {
   const path = importLoadoutsPathInput.value.trim();
   const file = importLoadoutsFileInput.files[0];
   if (!path && !file) {
-    showImportLoadoutsStatus(["Enter a path or choose a file first."], true);
+    showImportLoadoutsStatus([t("import_loadouts_modal.enter_path_or_file")], true);
     return;
   }
 
   importLoadoutsRunBtn.disabled = true;
-  showImportLoadoutsStatus(["Importing…"], false);
+  showImportLoadoutsStatus([t("import_loadouts_modal.importing")], false);
   try {
     const body = path ? { path } : { xml_text: await readFileAsText(file) };
     const response = await fetch("/api/import_loadouts", {
@@ -3337,14 +3518,18 @@ async function runImportLoadouts() {
     // cumulative importedLoadoutsResult) -- see mergeImportedLoadoutsResult().
     const warningCount = result.ships.reduce((sum, s) => sum + s.warnings.length, 0);
     const lines = [
-      `Imported ${result.ships.length} ship loadout(s).`,
-      `${result.skipped_station_loadouts} station module loadout(s) skipped.`,
+      t("import_loadouts_modal.imported_ships", { count: result.ships.length }),
+      t("import_loadouts_modal.skipped_station_loadouts", { count: result.skipped_station_loadouts }),
     ];
-    if (result.failed.length > 0) lines.push(`${result.failed.length} loadout(s) failed to parse.`);
-    if (warningCount > 0) lines.push(`${warningCount} warning(s) across imported ships -- see "Select Filter Loadout".`);
+    if (result.failed.length > 0) {
+      lines.push(t("import_loadouts_modal.failed_to_parse", { count: result.failed.length }));
+    }
+    if (warningCount > 0) {
+      lines.push(t("import_loadouts_modal.warnings_see_select_loadout", { count: warningCount }));
+    }
     showImportLoadoutsStatus(lines, false);
   } catch (err) {
-    showImportLoadoutsStatus([`Import failed: ${err.message}`], true);
+    showImportLoadoutsStatus([t("import_loadouts_modal.import_failed", { error: err.message })], true);
   } finally {
     importLoadoutsRunBtn.disabled = false;
   }
@@ -3411,7 +3596,7 @@ function updateLoadoutManagerBtnStates() {
 // importedLoadoutsResult -- there's no way to clear just one source).
 // Confirmed first since this can't be undone short of re-importing.
 function clearImportedLoadouts() {
-  if (!confirm("Are you sure you want to clear all saved loadouts?")) return;
+  if (!confirm(t("loadout_manager.clear_confirm"))) return;
   importedLoadoutsResult = null;
   updateLoadoutManagerBtnStates();
 }
@@ -3425,11 +3610,7 @@ function clearImportedLoadouts() {
 function exportLoadouts() {
   if (!importedLoadoutsResult || importedLoadoutsResult.ships.length === 0) return;
 
-  const confirmed = confirm(
-    "WARNING: Be careful when overwriting your loadouts file with the downloaded one here. I can not guarantee it " +
-      "won't break the game loadouts. Make sure to back up your loadouts file somewhere before you try it, and/or " +
-      "copy-paste in any new XML loadouts you want to import in to your game.",
-  );
+  const confirmed = confirm(t("loadout_manager.export_warning_confirm"));
   if (!confirmed) return;
 
   const body = importedLoadoutsResult.ships.map((s) => s.rawXml).join("\n  ");
@@ -3450,12 +3631,12 @@ clearLoadoutsBtn.addEventListener("click", clearImportedLoadouts);
 async function runImportRawXmlLoadout() {
   const xmlText = importRawXmlLoadoutTextarea.value.trim();
   if (!xmlText) {
-    showImportRawXmlLoadoutStatus(["Paste a <loadout> or <loadouts> XML snippet first."], true);
+    showImportRawXmlLoadoutStatus([t("import_raw_xml_modal.paste_first")], true);
     return;
   }
 
   importRawXmlLoadoutConfirmBtn.disabled = true;
-  showImportRawXmlLoadoutStatus(["Importing…"], false);
+  showImportRawXmlLoadoutStatus([t("import_raw_xml_modal.importing")], false);
   try {
     const response = await fetch("/api/import_loadouts", {
       method: "POST",
@@ -3471,13 +3652,19 @@ async function runImportRawXmlLoadout() {
     mergeImportedLoadoutsResult(result);
 
     const warningCount = result.ships.reduce((sum, s) => sum + s.warnings.length, 0);
-    const lines = [`Added ${result.ships.length} ship loadout(s).`];
-    if (result.skipped_station_loadouts > 0) lines.push(`${result.skipped_station_loadouts} station module loadout(s) skipped.`);
-    if (result.failed.length > 0) lines.push(`${result.failed.length} loadout(s) failed to parse.`);
-    if (warningCount > 0) lines.push(`${warningCount} warning(s) -- see "Select Filter Loadout".`);
+    const lines = [t("import_raw_xml_modal.added_ships", { count: result.ships.length })];
+    if (result.skipped_station_loadouts > 0) {
+      lines.push(t("import_raw_xml_modal.skipped_station_loadouts", { count: result.skipped_station_loadouts }));
+    }
+    if (result.failed.length > 0) {
+      lines.push(t("import_raw_xml_modal.failed_to_parse", { count: result.failed.length }));
+    }
+    if (warningCount > 0) {
+      lines.push(t("import_raw_xml_modal.warnings_see_select_loadout", { count: warningCount }));
+    }
     showImportRawXmlLoadoutStatus(lines, false);
   } catch (err) {
-    showImportRawXmlLoadoutStatus([`Import failed: ${err.message}`], true);
+    showImportRawXmlLoadoutStatus([t("import_raw_xml_modal.import_failed", { error: err.message })], true);
   } finally {
     importRawXmlLoadoutConfirmBtn.disabled = false;
   }
@@ -3525,7 +3712,9 @@ function openSelectGameLoadoutModal(chassisWareId) {
       });
   }
 
-  selectGameLoadoutModalTitle.textContent = chassisWareId ? `Select ${currentShip.name} Loadout` : "Select Filter Loadout";
+  selectGameLoadoutModalTitle.textContent = chassisWareId
+    ? t("ship_builder.select_named_loadout", { name: currentShip.name })
+    : t("select_game_loadout_modal.title");
   selectGameLoadoutList.innerHTML = "";
 
   if (entries.length === 0) {
@@ -3591,10 +3780,10 @@ selectGameLoadoutCancelBtn.addEventListener("click", closeSelectGameLoadoutModal
 // a new one) and the loadout's own name seeds the note field instead of a
 // saved entry's note.
 async function loadImportedGameLoadout(entry) {
-  const response = await fetch(`/api/ships/${encodeURIComponent(entry.shipWareId)}/groups`);
+  const response = await fetch(`/api/ships/${encodeURIComponent(entry.shipWareId)}/groups?lang=${i18next.language}`);
   const data = await response.json();
   if (data.error) {
-    alert(`Could not load ship: ${data.error}`);
+    alert(t("ship_builder.could_not_load_ship", { error: data.error }));
     return;
   }
 
@@ -3617,7 +3806,7 @@ async function loadImportedGameLoadout(entry) {
   crewAmounts = { ...entry.crewAmounts };
   renderCrewSection();
   shipNoteInput.value = entry.name ?? "";
-  setAddToCartBtnLabel("Add To Fleet List");
+  setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
 
   importedLoadoutWarningsEl.innerHTML = "";
   if (entry.warnings.length > 0) {
@@ -3848,7 +4037,7 @@ function renderBuildMethodModalPriorityList() {
     label.appendChild(checkbox);
     const nameSpan = document.createElement("span");
     applyBuildMethodColor(nameSpan, entry.name);
-    nameSpan.textContent = entry.name;
+    nameSpan.textContent = buildMethodNames[entry.name] ?? entry.name;
     label.appendChild(nameSpan);
     row.appendChild(label);
 
@@ -3917,29 +4106,19 @@ for (const btn of document.querySelectorAll("[data-ware-cost-list-tab]")) {
 
 // Display labels for group_by_component_type's category keys (see
 // summarize_production.py's module docstring) -- a different, ware-cost-
-// list-specific vocabulary from COMPONENT_TYPE_LABELS above (which
+// list-specific vocabulary from componentTypeLabel() above (which
 // describes picker *groups*, not summarize() output categories). Covers
 // every category fetch_ware_categories() can actually produce (same set
 // CART_DISPLAY_ORDER enumerates) -- falls back to the raw, lowercase
 // category string for anything not listed here, which should never
-// normally happen.
-const WARE_COST_LIST_CATEGORY_LABELS = {
-  chassis: "Chassis",
-  engine: "Engines",
-  main_shield: "Main Shield",
-  surface_element_shield: "Surface Element Shield",
-  thruster: "Thrusters",
-  turret: "Turrets",
-  weapon: "Weapons",
-  software: "Software",
-  missile: "Missiles",
-  drone: "Drones",
-  deployable: "Deployables",
-  countermeasure: "Countermeasures",
-  crew_marine: "Marines",
-  crew_service: "Service Crew",
-  production_wares: "Production Wares",
-};
+// normally happen. crew_marine/crew_service special-cased to the real,
+// already-localized crewRoleNames lookup -- same reasoning as
+// cartDisplayLabel() above, not duplicated here.
+function wareCostListCategoryLabel(category) {
+  if (category === "crew_marine") return crewRoleNames.marine ?? category;
+  if (category === "crew_service") return crewRoleNames.service ?? category;
+  return t(`ware_cost_list_category.${category}`, { defaultValue: category });
+}
 
 // Sorts category keys to match the ship builder's own section order
 // (CART_DISPLAY_ORDER) instead of alphabetically -- shared by every
@@ -4017,24 +4196,30 @@ function appendComparisonCell(tr, value, baselineValue, showDiff, formatValue) {
   tr.appendChild(td);
 }
 
-// Appends one <tr> per ware across the union of all columns' ware_ids
-// (sorted) -- `partsByColumn` is one flat ware_id -> amount map per
-// column, in the same order as wareCostListColumns()'s current result,
-// with `null` marking a column that doesn't have this tier/method/category
-// at all. A column simply missing a given ware (whether its whole parts
-// map is null, or it just doesn't happen to need that particular ware)
-// displays and diffs as 0 -- see appendComparisonCell() for both that and
-// the diff annotation every non-baseline column also gets.
+// Appends one <tr> per ware across the union of all columns' ware_ids,
+// sorted by each ware's own resolved display name (see wareNames/
+// loadWareNames()) -- same convention as the Purpose filter, which sorts
+// by resolved label rather than raw internal code. `partsByColumn` is one
+// flat ware_id -> amount map per column, in the same order as
+// wareCostListColumns()'s current result, with `null` marking a column
+// that doesn't have this tier/method/category at all. A column simply
+// missing a given ware (whether its whole parts map is null, or it just
+// doesn't happen to need that particular ware) displays and diffs as 0 --
+// see appendComparisonCell() for both that and the diff annotation every
+// non-baseline column also gets.
 function appendWarePartRows(partsByColumn) {
   const wareIds = new Set();
   for (const parts of partsByColumn) {
     if (parts) for (const wareId of Object.keys(parts)) wareIds.add(wareId);
   }
 
-  for (const wareId of [...wareIds].sort()) {
+  const sortedWareIds = [...wareIds].sort((a, b) =>
+    (wareNames[a] ?? a).localeCompare(wareNames[b] ?? b),
+  );
+  for (const wareId of sortedWareIds) {
     const tr = document.createElement("tr");
     const wareTd = document.createElement("td");
-    wareTd.textContent = wareId;
+    wareTd.textContent = wareNames[wareId] ?? wareId;
     tr.appendChild(wareTd);
 
     const baselineValue = wareCostListHasBaseline ? partsByColumn[0]?.[wareId] : undefined;
@@ -4146,7 +4331,7 @@ function appendWareCostListTier(tierKey, heading, columns) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = totalColumns;
-    td.textContent = "No wares required.";
+    td.textContent = t("ware_cost_list.no_wares_required");
     tr.appendChild(td);
     wareCostListBody.appendChild(tr);
     return;
@@ -4168,7 +4353,7 @@ function appendWareCostListTier(tierKey, heading, columns) {
       const categoryKey = `${tierKey}|${category}`;
       const categoryCollapsed = appendCollapsibleHeader(
         categoryKey,
-        WARE_COST_LIST_CATEGORY_LABELS[category] ?? category,
+        wareCostListCategoryLabel(category),
         "ware-cost-list-category-row",
         totalColumns,
       );
@@ -4204,7 +4389,7 @@ function renderWareCostListHead(columns) {
   const nameRow = document.createElement("tr");
   nameRow.className = "ware-cost-list-name-row";
   const nameLabelTh = document.createElement("th");
-  nameLabelTh.textContent = "List Name";
+  nameLabelTh.textContent = t("ware_cost_list.list_name_header");
   nameRow.appendChild(nameLabelTh);
   for (const column of columns) {
     const th = document.createElement("th");
@@ -4215,11 +4400,11 @@ function renderWareCostListHead(columns) {
 
   const columnHeaderRow = document.createElement("tr");
   const wareTh = document.createElement("th");
-  wareTh.textContent = "Ware";
+  wareTh.textContent = t("ware_cost_list.ware_header");
   columnHeaderRow.appendChild(wareTh);
   for (const column of columns) {
     const th = document.createElement("th");
-    th.textContent = "Amount";
+    th.textContent = t("ware_cost_list.amount_header");
     columnHeaderRow.appendChild(th);
   }
   wareCostListThead.appendChild(columnHeaderRow);
@@ -4239,9 +4424,9 @@ function renderWareCostListHead(columns) {
 // column missing price data entirely displays and diffs as 0, same
 // convention as a missing ware amount.
 const PRICE_COMPARISON_ROWS = [
-  { label: "Min Price", key: "total_min" },
-  { label: "Average Price", key: "total_avg" },
-  { label: "Max Price", key: "total_max" },
+  { labelKey: "ware_cost_list.min_price_row", key: "total_min" },
+  { labelKey: "ware_cost_list.average_price_row", key: "total_avg" },
+  { labelKey: "ware_cost_list.max_price_row", key: "total_max" },
 ];
 
 function formatPriceValue(value) {
@@ -4249,10 +4434,10 @@ function formatPriceValue(value) {
 }
 
 function appendPriceRows(priceDataByColumn) {
-  for (const { label, key } of PRICE_COMPARISON_ROWS) {
+  for (const { labelKey, key } of PRICE_COMPARISON_ROWS) {
     const tr = document.createElement("tr");
     const labelTd = document.createElement("td");
-    labelTd.textContent = label;
+    labelTd.textContent = t(labelKey);
     tr.appendChild(labelTd);
 
     const baselineValue = wareCostListHasBaseline ? priceDataByColumn[0]?.[key] : undefined;
@@ -4274,7 +4459,7 @@ function appendPriceRows(priceDataByColumn) {
     const tr = document.createElement("tr");
     const labelTd = document.createElement("td");
     labelTd.className = "ware-cost-list-price-missing-label";
-    labelTd.textContent = "Missing price data";
+    labelTd.textContent = t("ware_cost_list.missing_price_data");
     tr.appendChild(labelTd);
 
     for (const priceData of priceDataByColumn) {
@@ -4307,7 +4492,12 @@ function appendMoneyTopLevelEntry(columns) {
   if (topLevelByColumn.every((data) => data == null)) return;
 
   const key = "money|top_level";
-  const collapsed = appendCollapsibleHeader(key, "Market Purchase Price", "ware-cost-list-method-row", totalColumns);
+  const collapsed = appendCollapsibleHeader(
+    key,
+    t("ware_cost_list.market_purchase_price_title"),
+    "ware-cost-list-method-row",
+    totalColumns,
+  );
   if (collapsed) return;
 
   // Same flat-vs-grouped distinction as everywhere else in this table:
@@ -4324,7 +4514,7 @@ function appendMoneyTopLevelEntry(columns) {
       const categoryKey = `${key}|${category}`;
       const categoryCollapsed = appendCollapsibleHeader(
         categoryKey,
-        WARE_COST_LIST_CATEGORY_LABELS[category] ?? category,
+        wareCostListCategoryLabel(category),
         "ware-cost-list-category-row",
         totalColumns,
       );
@@ -4368,7 +4558,7 @@ function appendPriceTypeSection(key, label, dataByColumn, grouped, totalColumns)
     const categoryKey = `${key}|${category}`;
     const categoryCollapsed = appendCollapsibleHeader(
       categoryKey,
-      WARE_COST_LIST_CATEGORY_LABELS[category] ?? category,
+      wareCostListCategoryLabel(category),
       "ware-cost-list-category-row",
       totalColumns,
     );
@@ -4393,7 +4583,12 @@ function appendPriceTypeSection(key, label, dataByColumn, grouped, totalColumns)
 // Materials.
 function appendMoneyTier(columns) {
   const totalColumns = columns.length + 1;
-  const tierCollapsed = appendCollapsibleHeader("money", "Credit Cost", "ware-cost-list-tier-title", totalColumns);
+  const tierCollapsed = appendCollapsibleHeader(
+    "money",
+    t("ware_cost_list.credit_cost_title"),
+    "ware-cost-list-tier-title",
+    totalColumns,
+  );
   if (tierCollapsed) return;
 
   appendMoneyTopLevelEntry(columns);
@@ -4405,15 +4600,27 @@ function appendMoneyTier(columns) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = totalColumns;
-    td.textContent = "No wares required.";
+    td.textContent = t("ware_cost_list.no_wares_required");
     tr.appendChild(td);
     wareCostListBody.appendChild(tr);
     return;
   }
 
   const grouped = activeWareCostListTab === "component_type";
-  appendPriceTypeSection("money|production", "Production Wares Price", productionDataByColumn, grouped, totalColumns);
-  appendPriceTypeSection("money|raw", "Raw Materials Price", rawDataByColumn, grouped, totalColumns);
+  appendPriceTypeSection(
+    "money|production",
+    t("ware_cost_list.production_wares_price_title"),
+    productionDataByColumn,
+    grouped,
+    totalColumns,
+  );
+  appendPriceTypeSection(
+    "money|raw",
+    t("ware_cost_list.raw_materials_price_title"),
+    rawDataByColumn,
+    grouped,
+    totalColumns,
+  );
 }
 
 // Money at the top, then the two fixed, always-shown ware depths (see
@@ -4436,29 +4643,30 @@ function renderWareCostList() {
   wareCostListBody.innerHTML = "";
 
   appendMoneyTier(columns);
-  appendWareCostListTier(
-    "production_wares",
-    "Production Wares (buy what the shipyard directly consumes)",
-    columns,
-  );
-  appendWareCostListTier("raw_materials", "Raw Materials (build everything from scratch)", columns);
+  appendWareCostListTier("production_wares", t("ware_cost_list.production_wares_tier_title"), columns);
+  appendWareCostListTier("raw_materials", t("ware_cost_list.raw_materials_tier_title"), columns);
   saveState();
 }
 
 // --- Fleet lists / tab bar --------------------------------------------
 // Display-only fallback for a fleet's tab/column label when its name is
-// blank -- never persisted as a real name, just labels the UI.
-const DEFAULT_NEW_FLEET_LABEL = "New Fleet";
+// blank -- never persisted as a real name, just labels the UI. A function
+// (not a plain const) so it always reflects the current language, same
+// reasoning as componentTypeLabel() etc. above.
+function defaultNewFleetLabel() {
+  return t("fleet_lists.default_new_fleet_name");
+}
 
 // Picks "New Fleet", "New Fleet 2", "New Fleet 3", ... -- the first label
 // not already used by an existing fleet, so two fleets created back-to-back
 // via "+" are always visually distinguishable in the tab bar.
 function nextNewFleetName() {
+  const label = defaultNewFleetLabel();
   const existingNames = new Set(fleets.map((fleet) => fleet.name.trim()));
-  if (!existingNames.has(DEFAULT_NEW_FLEET_LABEL)) return DEFAULT_NEW_FLEET_LABEL;
+  if (!existingNames.has(label)) return label;
   let n = 2;
-  while (existingNames.has(`${DEFAULT_NEW_FLEET_LABEL} ${n}`)) n += 1;
-  return `${DEFAULT_NEW_FLEET_LABEL} ${n}`;
+  while (existingNames.has(`${label} ${n}`)) n += 1;
+  return `${label} ${n}`;
 }
 
 // Switches which fleet is active -- no confirmation, no copying, since
@@ -4480,7 +4688,7 @@ function setActiveFleet(fleetIndex) {
 function deleteFleet(fleetIndex) {
   if (fleets.length <= 1) return;
   const fleet = fleets[fleetIndex];
-  if (!confirm(`Delete fleet list "${fleet.name.trim() || DEFAULT_NEW_FLEET_LABEL}"? This cannot be undone.`)) return;
+  if (!confirm(t("fleet_lists.delete_fleet_confirm", { name: fleet.name.trim() || defaultNewFleetLabel() }))) return;
 
   fleets.splice(fleetIndex, 1);
   if (fleetIndex === activeFleetIndex) {
@@ -4568,7 +4776,7 @@ function buildFleetTabButton(fleet, fleetIndex, { showBuildPriority = false } = 
 
   const nameStack = document.createElement("span");
   nameStack.className = "fleet-list-tab-name-stack";
-  nameStack.appendChild(document.createTextNode(fleet.name.trim() || DEFAULT_NEW_FLEET_LABEL));
+  nameStack.appendChild(document.createTextNode(fleet.name.trim() || defaultNewFleetLabel()));
 
   if (showBuildPriority) {
     // fleet.buildMethodPriority null means "use the server's own default"
@@ -4579,12 +4787,12 @@ function buildFleetTabButton(fleet, fleetIndex, { showBuildPriority = false } = 
     const priorityBtn = document.createElement("button");
     priorityBtn.type = "button";
     priorityBtn.className = "ware-cost-list-build-focus-btn";
-    priorityBtn.appendChild(document.createTextNode("Priority: "));
+    priorityBtn.appendChild(document.createTextNode(t("fleet_lists.priority_prefix")));
     const priorityNameSpan = document.createElement("span");
     applyBuildMethodColor(priorityNameSpan, topPriority);
-    priorityNameSpan.textContent = topPriority ?? "default";
+    priorityNameSpan.textContent = buildMethodNames[topPriority] ?? topPriority ?? "default";
     priorityBtn.appendChild(priorityNameSpan);
-    priorityBtn.title = "Set this list's build method priority";
+    priorityBtn.title = t("fleet_lists.priority_tooltip");
     priorityBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       openBuildMethodModal({ fleetIndex, buildMethodPriority: fleet.buildMethodPriority });
@@ -4598,7 +4806,7 @@ function buildFleetTabButton(fleet, fleetIndex, { showBuildPriority = false } = 
     removeBtn.type = "button";
     removeBtn.className = "fleet-list-tab-remove-btn";
     removeBtn.textContent = "×";
-    removeBtn.title = "Delete this fleet list";
+    removeBtn.title = t("fleet_lists.delete_fleet_tooltip");
     removeBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteFleet(fleetIndex);
@@ -4624,7 +4832,7 @@ function renderFleetListTabs() {
   addBtn.type = "button";
   addBtn.className = "fleet-list-tab-add-btn";
   addBtn.textContent = "+";
-  addBtn.title = "New fleet list";
+  addBtn.title = t("fleet_lists.add_fleet_tooltip");
   addBtn.addEventListener("click", () => {
     fleets.push(makeFleet(nextNewFleetName()));
     activeFleetIndex = fleets.length - 1;
@@ -4679,7 +4887,7 @@ function applyAnalysisPayload(data) {
 
   if (
     fleets.some((fleet) => fleet.cart.length > 0) &&
-    !confirm("Loading will replace all of your current fleet lists. Continue?")
+    !confirm(t("fleet_lists.replace_all_confirm"))
   ) {
     return false;
   }
@@ -4701,7 +4909,7 @@ function applyAnalysisPayload(data) {
 
 downloadAnalysisBtn.addEventListener("click", () => {
   if (fleets.every((fleet) => fleet.cart.length === 0)) {
-    alert("Nothing to download -- every fleet list is empty.");
+    alert(t("fleet_lists.nothing_to_download"));
     return;
   }
 
@@ -4730,7 +4938,7 @@ uploadAnalysisInput.addEventListener("change", async (event) => {
   try {
     data = JSON.parse(await file.text());
   } catch (err) {
-    alert(`Could not parse file: ${err.message}`);
+    alert(t("fleet_lists.could_not_parse_file", { error: err.message }));
     event.target.value = "";
     return;
   }
@@ -4747,10 +4955,15 @@ uploadAnalysisInput.addEventListener("change", async (event) => {
 // included section) applyShareLinksFromUrl() below reads back. `checkbox`
 // is looked up once here since every one of these already exists in the
 // DOM from page load (unlike the fleet tabs, this isn't rebuilt per render).
+// `label` deliberately omitted -- every section's own display name already
+// exists as a static, translated data-i18n label right next to its
+// checkbox in index.html (share_modal.option_<section>); the 3 dynamic
+// error messages below that need this section's name in running text
+// (see shareSectionLabel()) resolve the exact same key at call time
+// instead of duplicating the string here untranslated.
 const SHARE_SECTIONS = [
   {
     section: "fleets",
-    label: "Fleet Lists",
     checkbox: document.getElementById("share-option-fleets"),
     hasContent: () => fleets.some((fleet) => fleet.cart.length > 0),
     buildPayload: buildAnalysisPayload,
@@ -4758,7 +4971,6 @@ const SHARE_SECTIONS = [
   },
   {
     section: "price_overrides",
-    label: "Ware Price Overrides",
     checkbox: document.getElementById("share-option-price_overrides"),
     hasContent: () => Object.keys(priceOverrides).length > 0,
     buildPayload: () => ({ ...priceOverrides }),
@@ -4766,7 +4978,7 @@ const SHARE_SECTIONS = [
       if (!data || typeof data !== "object") return false;
       if (
         Object.keys(priceOverrides).length > 0 &&
-        !confirm("Loading will replace your current ware price overrides. Continue?")
+        !confirm(t("price_override_modal.replace_overrides_confirm"))
       ) {
         return false;
       }
@@ -4779,7 +4991,6 @@ const SHARE_SECTIONS = [
   },
   {
     section: "loadouts",
-    label: "Ship Loadouts",
     checkbox: document.getElementById("share-option-loadouts"),
     hasContent: () => !!importedLoadoutsResult && importedLoadoutsResult.ships.length > 0,
     // The saved/imported-loadouts working set is already an additive,
@@ -4796,6 +5007,11 @@ const SHARE_SECTIONS = [
     },
   },
 ];
+
+// See SHARE_SECTIONS' own comment on why `label` isn't a field there.
+function shareSectionLabel(entry) {
+  return t(`share_modal.option_${entry.section}`);
+}
 
 // {section: {hash, uuid}} of the most recently generated share per section
 // -- see generateShareLink() below. Persisted (see saveState()) so
@@ -4854,7 +5070,7 @@ async function generateShareLink() {
         });
         const result = await response.json();
         if (result.error) {
-          showShareModalStatus([`Could not share ${entry.label}: ${result.error}`], true);
+          showShareModalStatus([t("share_modal.could_not_share", { label: shareSectionLabel(entry), error: result.error })], true);
           return;
         }
         uuid = result.uuid;
@@ -4911,12 +5127,12 @@ async function applyShareLinksFromUrl() {
       const response = await fetch(`/api/share/${entry.section}/${shareUuid}`);
       const result = await response.json();
       if (result.error) {
-        alert(`Could not load shared ${entry.label}: ${result.error}`);
+        alert(t("share_modal.could_not_load_shared", { label: shareSectionLabel(entry), error: result.error }));
         continue;
       }
       if (entry.applyPayload(result.data)) anyApplied = true;
     } catch (err) {
-      alert(`Could not load shared ${entry.label}: ${err.message}`);
+      alert(t("share_modal.could_not_load_shared", { label: shareSectionLabel(entry), error: err.message }));
     }
   }
 
@@ -4940,7 +5156,7 @@ async function applyShareLinksFromUrl() {
 
 saveCartBtn.addEventListener("click", () => {
   if (activeFleet().cart.length === 0) {
-    alert("Fleet list is empty -- nothing to download.");
+    alert(t("fleet_lists.empty_nothing_to_download"));
     return;
   }
 
@@ -4997,7 +5213,7 @@ async function reconstructCartEntry(config) {
   let shipData = null;
 
   for (const item of waresList) {
-    const response = await fetch(`/api/ships/${encodeURIComponent(item.ware_id)}/groups`);
+    const response = await fetch(`/api/ships/${encodeURIComponent(item.ware_id)}/groups?lang=${i18next.language}`);
     const data = await response.json();
     if (!data.error) {
       shipItem = item;
@@ -5140,21 +5356,21 @@ loadCartInput.addEventListener("change", async (event) => {
   try {
     data = JSON.parse(await file.text());
   } catch (err) {
-    alert(`Could not parse file: ${err.message}`);
+    alert(t("fleet_lists.could_not_parse_file", { error: err.message }));
     event.target.value = "";
     return;
   }
 
   if (!Array.isArray(data.wares)) {
-    alert("This doesn't look like a valid fleet list file (missing a \"wares\" array).");
+    alert(t("fleet_lists.invalid_file"));
     event.target.value = "";
     return;
   }
 
-  const activeName = activeFleet().name.trim() || DEFAULT_NEW_FLEET_LABEL;
+  const activeName = activeFleet().name.trim() || defaultNewFleetLabel();
   if (
     activeFleet().cart.length > 0 &&
-    !confirm(`Loading will replace the active fleet's list ("${activeName}"). Continue?`)
+    !confirm(t("fleet_lists.replace_active_confirm", { name: activeName }))
   ) {
     event.target.value = "";
     return;
@@ -5208,11 +5424,20 @@ async function applyRemoteModeUI() {
 // self-contained, independently-readable "fetch X, render X" unit. A
 // fetch failure just leaves the table empty -- there's no fallback content
 // worth showing for version info that failed to load.
+//
+// Deliberately NOT called from inside bootstrap() -- this table has no
+// dependency on ships/factions/etc., so it doesn't need to sit on that
+// sequential chain -- but its own /api/source_versions fetch does depend
+// on i18next.language for each DLC's own localized name (see api.py's
+// docstring), so its call site below still awaits i18nReady first, same
+// requirement as every other ?lang= fetch in this file (see loadShips()'s
+// own comment) -- calling this unguarded raced i18next.init() and always
+// sent "?lang=undefined", silently falling back to English every time.
 async function renderSourceVersionsTable() {
   try {
     const [configResponse, sourcesResponse] = await Promise.all([
       fetch("/api/config"),
-      fetch("/api/source_versions"),
+      fetch(`/api/source_versions?lang=${i18next.language}`),
     ]);
     const config = await configResponse.json();
     const sources = await sourcesResponse.json();
@@ -5405,22 +5630,33 @@ function restorePersistedState(state) {
 }
 
 async function bootstrap() {
+  // See i18n.js -- static markup translation runs independently and isn't
+  // otherwise on this file's critical path yet (nothing here calls t()
+  // itself yet, that's a separate follow-up), but awaiting it first keeps
+  // bootstrap() from racing ahead of a still-in-flight translation load
+  // once it does.
+  await i18nReady;
+
   // Awaited before loadShips() specifically (not folded into the
-  // Promise.all below) so factionNames is already populated by the time
-  // loadShips() triggers its own first renderShipOptions() call --
-  // otherwise the very first paint's owner-faction icon tooltips would
-  // show raw ids until some later, unrelated re-render happened to pick up
-  // the (by-then-loaded) names.
+  // Promise.all below) so factionNames/purposeNames/raceInfo/
+  // allBuildMethods/buildMethodNames/shipTypeNames are already populated by
+  // the time loadShips() triggers its own first populateFilterOptions()/
+  // renderShipOptions() calls -- otherwise the very first paint's owner-
+  // faction icon tooltips, Purpose/Type filter labels, ship race badges,
+  // and Build Method filter checkboxes would show raw ids (or, for the
+  // Build Method filter specifically, nothing at all --
+  // buildBuildMethodFilterEntries() filters against allBuildMethods, so an
+  // empty allBuildMethods means zero checkboxes) until some later,
+  // unrelated re-render happened to pick up the (by-then-loaded) data.
   await loadFactionNames();
+  await loadPurposeNames();
+  await loadRaceNames();
+  await loadShipTypeNames();
+  await loadBuildMethods();
+  await loadBuildMethodNames();
+  await loadCrewRoleNames(); // must finish before loadCrew() (in the Promise.all below) runs
   await loadShips(); // filter checkboxes (restorePersistedState needs them) live here
-  await Promise.all([
-    loadMissiles(),
-    loadDrones(),
-    loadDeployables(),
-    loadCountermeasures(),
-    loadCrew(),
-    loadBuildMethods(),
-  ]);
+  await Promise.all([loadMissiles(), loadDrones(), loadDeployables(), loadCountermeasures(), loadCrew(), loadWareNames()]);
   stateReady = true;
   restorePersistedState(loadPersistedState());
   // Judged against the just-restored real state above, not empty defaults
@@ -5441,4 +5677,4 @@ async function bootstrap() {
 
 bootstrap();
 applyRemoteModeUI();
-renderSourceVersionsTable();
+i18nReady.then(renderSourceVersionsTable);

@@ -18,14 +18,31 @@ into a temporary staging folder first, then the matched files are copied up
 into the flat destination and the staging folder is discarded.
 
 Ship macro/component files live in-catalog under a per-size subfolder
-(assets/units/size_X/...), so each size class is its own job with a plain
-path-segment include pattern. Equipment (engine/shield/weapon/turret) files
-have no such subfolder -- all sizes sit flat together under a per-type
-folder (assets/props/Engines/, assets/props/SurfaceElements/, or, for
-weapons/turrets which share the same per-damage-class subfolders, assets/
-props/WeaponSystems/<class>/) -- so their jobs instead match the size token
-embedded in the filename itself (e.g. "engine_arg_s_..."). See
-EQUIPMENT_TYPE_PATH_PREFIXES.
+(assets/units/size_X/...), but which size-folder *names* actually exist
+isn't assumed (a generic assets/units/[^/]+/... pattern matches whatever's
+really there) -- each job is a single flat pull into a *_raw/ staging
+folder, then sort_ship_files_by_class() (called from main(), after the
+matching job runs) re-sorts every file into <class>_macros/<class>_
+components/ based on what each file's own <macro class="..."/>/<component
+class="..."/> attribute actually says, not which folder it happened to be
+found in. See ship_macro_jobs()/ship_component_jobs()/
+sort_ship_files_by_class() for the full reasoning.
+
+Equipment (engine/shield/weapon/turret) files have no per-size subfolder at
+all -- all sizes sit flat together under a per-type folder (assets/props/
+Engines/, assets/props/SurfaceElements/, or, for weapons/turrets which
+share the same per-damage-class subfolders, assets/props/WeaponSystems/
+<class>/) -- so their jobs instead match the size token embedded in the
+filename itself (e.g. "engine_arg_s_..."). See EQUIPMENT_TYPE_PATH_PREFIXES.
+This is a real, separate fragility from ships' own (a mod whose equipment
+filenames don't follow the type_race_size_variant_mk convention would be
+silently skipped at the extraction step, not just mis-sorted afterward) --
+not addressed by this round of changes, since equipment's own *size* comes
+from a completely different source (each component's own mount-tag, e.g.
+tags="small"/"medium", not a macro-level class attribute the way ship size
+does -- confirmed: an equipment macro's own class is its component *type*,
+e.g. class="turret"/"engine"/"shieldgenerator"/"weapon", not a size at
+all) -- revisit separately if this becomes a real problem.
 
 To add a new extraction (e.g. language files, ware macros), append an
 ExtractionJob to EXTRACTION_JOBS under a suitable group name.
@@ -44,6 +61,7 @@ import argparse
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -137,36 +155,106 @@ def game_input_paths() -> list[str]:
 
 
 def ship_macro_jobs() -> list[ExtractionJob]:
-    """Ship hull, cockpit, and per-ship storage/cargo macros, one job per size class."""
+    """Ship hull, cockpit, and per-ship storage/cargo macros -- one flat job,
+    not one per assumed size-folder name. assets/units/ is a real, stable
+    catalog convention (confirmed: a generic assets/units/[^/]+/macros/
+    scan matches exactly the 5 folders the base game actually ships --
+    size_xs/size_s/size_m/size_l/size_xl -- nothing else sweeps in), but
+    which *names* exist under it is not: enumerating SHIP_SIZES here would
+    silently miss "size_xs" (a real folder this pipeline never pulled
+    before -- see sort_ship_files_by_class()'s own docstring for why that
+    turned out to be harmless, and would silently miss whatever a mod
+    calls its own new size folder, if it ever adds one.
+
+    Extracted flat into macros_raw/ (no size-named subfolder at all,
+    since none can be assumed at this stage) -- sort_ship_files_by_class(),
+    called from main() right after this job runs, re-sorts every file from
+    there into <class>_macros/ based on each macro's own real <macro
+    class="..."/> attribute, which is what generate_ships_table.py actually
+    treats as authoritative (see that module's "Ship stats and flight
+    model" docstring section) -- not a guess from a folder name a mod has
+    no obligation to follow.
+    """
     return [
         ExtractionJob(
-            name=f"ship_macros_size_{size}",
+            name="ship_macros",
             group="ships",
-            include_pattern=rf"assets/units/size_{size}/macros/.*\.xml",
-            out_dir=SHIPS_DIR / f"size_{size}_macros",
+            include_pattern=r"assets/units/[^/]+/macros/.*\.xml$",
+            out_dir=SHIPS_DIR / "macros_raw",
         )
-        for size in SHIP_SIZES
     ]
 
 
 def ship_component_jobs() -> list[ExtractionJob]:
-    """Ship component/model definition files, one job per size class.
+    """Ship component/model definition files -- one flat job, same reasoning
+    as ship_macro_jobs() above.
 
     These are what a ship macro's own <component ref="..."/> points to (e.g.
     ship_bor_l_destroyer_01_a_macro -> ship_bor_l_destroyer_01), and define
     the actual hardpoints (engine/shield/weapon/turret connections). They
-    live directly under assets/units/size_X/ -- NOT the macros/ subfolder --
-    so the include pattern excludes any further path segments.
+    live directly under assets/units/<folder>/ -- NOT the macros/ subfolder
+    -- so the include pattern excludes any further path segments. Sorted
+    into <class>_components/ by sort_ship_files_by_class() the same way,
+    reading each file's own <component class="..."/> attribute (confirmed
+    present and equal to its macro's own class for every real tracked ship,
+    but read independently here rather than assumed/inherited, in case a
+    mod's component and macro ever disagree).
     """
     return [
         ExtractionJob(
-            name=f"ship_components_size_{size}",
+            name="ship_components",
             group="ship_components",
-            include_pattern=rf"assets/units/size_{size}/[^/]+\.xml$",
-            out_dir=SHIPS_DIR / f"size_{size}_components",
+            include_pattern=r"assets/units/[^/]+/[^/]+\.xml$",
+            out_dir=SHIPS_DIR / "components_raw",
         )
-        for size in SHIP_SIZES
     ]
+
+
+def sort_ship_files_by_class(raw_dir: Path, child_tag: str, suffix: str) -> None:
+    """Sorts every XML file in `raw_dir` into SHIPS_DIR/<class>_<suffix>/,
+    based on that file's own <macro class="..."/> or <component
+    class="..."/> attribute (child_tag picks which) -- e.g. a macro with
+    <macro class="ship_l"> lands in SHIPS_DIR/ship_l_macros/. This is the
+    step that replaces "assume the class from which catalog folder the
+    file came from" with "read the class the file itself actually
+    declares" -- see ship_macro_jobs()/ship_component_jobs() above.
+
+    Harmless by construction for the one real behavior change this causes:
+    "size_xs" ships (spacesuits, escape pods, distress beacons, drop/repair
+    drones, and a handful of NPC-only "pv"/police craft, none of them
+    previously extracted at all) now get sorted into their own ship_xs_*
+    folders alongside everything else -- confirmed via a direct wares.xml
+    grep that no real <ware tags="ship"> references any of them, so this
+    can't silently add new ships_base rows; it just means a real XS-class
+    ship (base game or mod) would no longer need a pipeline code change to
+    become visible, only a SHIP_CLASS_TO_SIZE_CODE entry in
+    generate_ships_table.py.
+
+    A file with no recognizable class (shouldn't happen for anything a
+    real ExtractionJob's include_pattern already matched, but XML content
+    isn't guaranteed by a path-based regex the way a path itself is) is
+    left where it landed and warned about, rather than silently dropped.
+    """
+    if not raw_dir.exists():
+        return
+    counts: dict[str, int] = {}
+    unclassified = 0
+    for path in sorted(raw_dir.glob("*.xml")):
+        root = ET.parse(path).getroot()
+        child = root.find(child_tag)
+        class_value = child.get("class") if child is not None else None
+        if not class_value:
+            print(f"  WARNING: {path.name} has no <{child_tag} class=\"...\"/> -- left unsorted in {raw_dir.name}")
+            unclassified += 1
+            continue
+        dest_dir = SHIPS_DIR / f"{class_value}_{suffix}"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest_dir / path.name)
+        counts[class_value] = counts.get(class_value, 0) + 1
+    summary = ", ".join(f"{cls}_{suffix} ({n})" for cls, n in sorted(counts.items()))
+    print(f"  Sorted {sum(counts.values())} file(s) from {raw_dir.name}/ by class: {summary}")
+    if unclassified:
+        print(f"  ({unclassified} file(s) left unsorted -- see warnings above)")
 
 
 # In-catalog folder each equipment type's macro/component files live under.
@@ -330,8 +418,8 @@ def ship_icon_jobs() -> list[ExtractionJob]:
 
 def faction_icon_jobs() -> list[ExtractionJob]:
     """Per-faction badge textures (assets/textures/ui/factions/
-    faction_<name>_diffhq.gz), for the ship picker's manufacturer-faction
-    icon (see generate_ships_table.py's ship_owner_faction() and
+    faction_<name>_diffhq.gz), for the ship picker's manufacturer-race
+    icon (see generate_ships_table.py's build_maker_race_rows() and
     generate_faction_icons.py).
 
     The game ships 38 of these (every minor/story faction included, e.g.
@@ -412,6 +500,94 @@ def colors_xml_job() -> list[ExtractionJob]:
             include_pattern=r"libraries/colors\.xml$",
             out_dir=DATA_DIR / "libraries",
         )
+    ]
+
+
+def races_xml_job() -> list[ExtractionJob]:
+    """libraries/races.xml -- the game's own race definitions: id plus
+    name/shortname="{page,id}" language refs, one <race> per real race the
+    game itself recognizes (argon/boron/split/paranid/teladi/terran/xenon/
+    khaak/drone). Used by generate_ships_table.py's parse_races() for each
+    race's own display name and short in-game callsign (e.g. "ARG" for
+    Argon) -- see that module's "Design race and race/faction shortcodes"
+    docstring section. A ship/turret/engine/shield/weapon's own design
+    race itself is read directly off its macro's own makerrace attribute
+    (build_maker_race_rows()), not derived from this table at all.
+
+    Base-game-only, single file -- confirmed the same way colors.xml/
+    purposes.xml/the language files were: extracting each installed
+    extension's own catalogs individually finds none of them ship a
+    races.xml of their own.
+    """
+    return [
+        ExtractionJob(
+            name="races_xml",
+            group="races_xml",
+            include_pattern=r"libraries/races\.xml$",
+            out_dir=DATA_DIR / "libraries",
+        )
+    ]
+
+
+def purposes_xml_job() -> list[ExtractionJob]:
+    """libraries/purposes.xml -- the game's own ship/station purpose
+    category definitions (id + name="{page,id}" display-name ref -- see
+    generate_ships_table.py's parse_purposes()), for real localized Purpose
+    filter labels instead of the raw internal code (ships_base.purpose,
+    e.g. "dismantling") capitalized client-side with no actual translation
+    behind it.
+
+    Base-game-only, single file -- confirmed by extracting each installed
+    extension's own catalogs individually and finding none of them ship a
+    purposes.xml of their own at all, same situation as colors.xml/the
+    language files -- so this is one plain job, not one per extension.
+    """
+    return [
+        ExtractionJob(
+            name="purposes_xml",
+            group="purposes_xml",
+            include_pattern=r"libraries/purposes\.xml$",
+            out_dir=DATA_DIR / "libraries",
+        )
+    ]
+
+
+# X4's language ids are international phone country codes, zero-padded to
+# 3 digits in the actual in-catalog filename (t/0001-l<id>.xml) -- e.g. 44
+# (UK) = English, 49 (Germany) = German. See generate_ships_table.py's
+# LANGUAGE_FILES for the language-code -> filename mapping this must stay
+# in sync with (that's the one other place a new language needs adding).
+LANGUAGE_IDS = ["044", "049", "034", "033", "039", "055", "042", "048", "007", "380", "086", "082", "081", "359", "090"]
+
+
+def language_jobs() -> list[ExtractionJob]:
+    """The game's own text/language files (t/0001-l<id>.xml) -- id/page-keyed
+    strings, resolved via load_language_table()/resolve_ref_attr() in
+    generate_ships_table.py for every ship/ware/equipment name (and, for a
+    non-English language, into the localized_strings DB table -- see
+    parse_localized_strings() there).
+
+    Base-game-only, unlike wares.xml/factions.xml/colors.xml -- confirmed
+    by extracting each installed extension's own catalogs individually and
+    finding that none of them ship a t/0001-l*.xml of their own at all;
+    the base game's single copy of each language file already contains
+    every installed DLC's own strings too (Egosoft manages localization
+    centrally across the whole product line, not per-DLC -- unlike
+    wares.xml, where each DLC genuinely does patch in its own new
+    content). This is also why data/names/0001-l044.xml already worked
+    correctly for every DLC ship's name even before this job existed --
+    it was pulled once by hand from the base game only, which turns out to
+    have always been sufficient.
+    """
+    return [
+        ExtractionJob(
+            name=f"language_l{lang_id}",
+            group="languages",
+            include_pattern=rf"t/0001-l{lang_id}\.xml$",
+            out_dir=DATA_DIR / "names",
+            in_paths=catalog_files(GAME_ROOT),
+        )
+        for lang_id in LANGUAGE_IDS
     ]
 
 
@@ -566,6 +742,9 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *faction_icon_jobs(),
     *minor_faction_icon_jobs(),
     *colors_xml_job(),
+    *purposes_xml_job(),
+    *races_xml_job(),
+    *language_jobs(),
 ]
 
 
@@ -662,6 +841,19 @@ def main() -> None:
 
     for job in jobs:
         run_job(job, in_paths)
+
+    # Post-processing, not another ExtractionJob: XRCatTool only matches on
+    # catalog path, it can't sort by a file's own XML content -- see
+    # sort_ship_files_by_class()'s own docstring. Gated on which groups
+    # actually ran this invocation so `--only <unrelated-group>` doesn't
+    # re-sort stale macros_raw/components_raw leftovers from a previous run.
+    ran_groups = {job.group for job in jobs}
+    if "ships" in ran_groups:
+        print("[sort_ship_macros_by_class]")
+        sort_ship_files_by_class(SHIPS_DIR / "macros_raw", "macro", "macros")
+    if "ship_components" in ran_groups:
+        print("[sort_ship_components_by_class]")
+        sort_ship_files_by_class(SHIPS_DIR / "components_raw", "component", "components")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,13 @@
+DROP TABLE IF EXISTS localized_race_shortnames;
+DROP TABLE IF EXISTS localized_race_names;
+DROP TABLE IF EXISTS localized_shortnames;
+DROP TABLE IF EXISTS localized_strings;
+DROP TABLE IF EXISTS maker_races;
+DROP TABLE IF EXISTS crew_roles;
+DROP TABLE IF EXISTS build_methods;
+DROP TABLE IF EXISTS ship_types;
+DROP TABLE IF EXISTS purposes;
+DROP TABLE IF EXISTS races;
 DROP TABLE IF EXISTS factions;
 DROP TABLE IF EXISTS source_versions;
 DROP TABLE IF EXISTS flight_model;
@@ -23,7 +33,6 @@ CREATE TABLE ships_base (
     name TEXT PRIMARY KEY,
     ware_id TEXT NOT NULL UNIQUE,
     owners TEXT,
-    owner_faction TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER,
@@ -39,6 +48,11 @@ CREATE TABLE ships_base (
     missile_capacity INTEGER,
     drone_capacity INTEGER,
     size TEXT,
+    -- The raw class="..." value this ship's own macro carried (e.g.
+    -- "ship_l"), before SHIP_CLASS_TO_SIZE_CODE's mapping to `size` above
+    -- -- kept alongside it for the follow-up localization investigation
+    -- (see that dict's own docstring), not used by anything else yet.
+    ship_class TEXT,
     shields INTEGER,
     engines INTEGER,
     weapons INTEGER,
@@ -91,7 +105,6 @@ CREATE TABLE equipment_ware_aliases (
 CREATE TABLE turrets_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     bullet_class TEXT,
     rotation_speed REAL,
@@ -113,7 +126,6 @@ CREATE TABLE turrets_base (
 CREATE TABLE engines_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     boost_duration REAL,
     boost_recharge REAL,
@@ -137,7 +149,6 @@ CREATE TABLE engines_base (
 CREATE TABLE shields_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     recharge_max REAL,
     recharge_rate REAL,
@@ -152,7 +163,6 @@ CREATE TABLE shields_base (
 CREATE TABLE weapons_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
-    owners TEXT,
     mk INTEGER,
     bullet_class TEXT,
     heat_overheat REAL,
@@ -400,11 +410,102 @@ CREATE TABLE flight_model (
 );
 
 CREATE TABLE source_versions (
-    source_name TEXT PRIMARY KEY,
+    source_id TEXT PRIMARY KEY,
+    source_name TEXT,
     source_version TEXT
 );
 
 CREATE TABLE factions (
     faction_id TEXT PRIMARY KEY,
-    faction_name TEXT
+    faction_name TEXT,
+    faction_shortname TEXT
+);
+
+CREATE TABLE races (
+    race_id TEXT PRIMARY KEY,
+    race_name TEXT,
+    race_shortname TEXT
+);
+
+CREATE TABLE purposes (
+    purpose_id TEXT PRIMARY KEY,
+    purpose_name TEXT
+);
+
+-- Every real ship_type value actually present in ships_base, with a real
+-- display name where one is known -- see parse_ship_types()/
+-- SHIP_TYPE_NAME_REF's own docstrings (both above, in this same module).
+CREATE TABLE ship_types (
+    ship_type_id TEXT PRIMARY KEY,
+    ship_type_name TEXT
+);
+
+-- Every real production method (see BUILD_METHODS/parse_build_methods()
+-- above). build_method_name is both the primary key and the base English
+-- display value -- see parse_build_methods()'s own docstring for why this
+-- table has no separate "_name" column the way ship_types/purposes do.
+CREATE TABLE build_methods (
+    build_method_name TEXT PRIMARY KEY
+);
+
+-- The two real internal crew-role codes (see CREW_ROLE_NAME_REF/
+-- parse_crew_roles() above) with their own real display name.
+CREATE TABLE crew_roles (
+    crew_role_id TEXT PRIMARY KEY,
+    crew_role_name TEXT
+);
+
+-- A ship/turret/engine/shield/weapon's own real design race(s) -- see
+-- build_maker_race_rows() and this module's "Design race and race/faction
+-- shortcodes" docstring section. Usually one row per ware_id, occasionally
+-- more (e.g. ship_gen_m_corvette_01, the Envoy, has both an "argon" and a
+-- "teladi" row) -- ordinal preserves the order makerrace listed them in.
+CREATE TABLE maker_races (
+    ware_id TEXT,
+    race_id TEXT,
+    ordinal INTEGER,
+    PRIMARY KEY (ware_id, race_id),
+    FOREIGN KEY (race_id) REFERENCES races (race_id)
+);
+
+CREATE TABLE localized_strings (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- Same shape as localized_strings, but for faction_shortname specifically
+-- (e.g. "YAK" for Yaki) rather than a display name -- kept as a separate
+-- table since a faction needs two independently-localizable text fields
+-- and localized_strings' schema only has room for one text column per
+-- (ware_id, lang_id) pair. See this module's "Design race and race/faction
+-- shortcodes" docstring section.
+CREATE TABLE localized_shortnames (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- race_name's own non-English coverage, kept in a dedicated table rather
+-- than sharing localized_strings with factions/wares/ships -- several race
+-- ids collide with a same-named faction id (e.g. "argon" is both), and
+-- mixing the two in one shared keyspace was confirmed (via a live query)
+-- to silently return the faction's translation for the race. See this
+-- module's "Design race and race/faction shortcodes" docstring section.
+CREATE TABLE localized_race_names (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
+);
+
+-- race_shortname's own non-English coverage -- same isolation reasoning as
+-- localized_race_names above, just for the shortcode field instead.
+CREATE TABLE localized_race_shortnames (
+    ware_id TEXT,
+    lang_id TEXT,
+    text TEXT,
+    PRIMARY KEY (ware_id, lang_id)
 );

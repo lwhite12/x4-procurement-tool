@@ -15,7 +15,40 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.4.0] - 2026-08-28 - Production
+## [0.5.0] - 2026-08-31 - Production
+
+### Added
+
+- Full localization of this app's own UI text (buttons, labels, tooltips, confirmation
+  dialogs, every modal, the About page) into German, Spanish, French, Italian, Portuguese
+  (Brazilian), Czech, Polish, Russian, Ukrainian, Chinese (Simplified), Korean, Japanese,
+  Bulgarian, and Turkish -- a language picker in the header switches instantly.
+- Game-data localization (ship/ware/equipment names, ship types, build methods, crew roles,
+  factions, races, purposes, and each installed DLC's own display name), sourced directly
+  from the game's own language files with an automatic fallback to English wherever a
+  translation is missing.
+- New structured lookup tables (ship types, build methods, crew roles, purposes, races,
+  and each ship/equipment's real design race) replacing several places that previously
+  guessed at this data from ware-id string prefixes or hardcoded English text.
+
+### Changed
+
+- Ship picker: a ship with more than one real design race now shows one badge per race,
+  not just one.
+- Equipment picker, Ware Cost List, and Ware Price Override tool now show real localized
+  ware/equipment names instead of raw internal ware IDs or English-only names.
+- Loadout Manager buttons (Import/Export/Clear) now lay out side by side instead of stacked.
+
+### Fixed
+
+- Hostile-only equipment (Kha'ak/Xenon turrets, shields, etc.) is now excluded from other
+  factions' equipment lists using the game's own real per-ware design-race data, instead of
+  guessing from the ware_id string -- fixes at least one alias-macro case the guess got wrong.
+- About page's "Built From" version table was always showing in English regardless of the
+  selected language (a timing bug -- it fetched before the language picker had finished
+  initializing).
+
+## [0.4.0] - 2026-08-28
 
 ### Added
 

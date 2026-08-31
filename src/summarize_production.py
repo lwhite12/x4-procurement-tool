@@ -412,18 +412,37 @@ def fetch_ware_prices(conn: sqlite3.Connection) -> dict[str, dict[str, float]]:
     return prices
 
 
-def fetch_all_wares(conn: sqlite3.Connection) -> list[dict]:
+def fetch_all_wares(conn: sqlite3.Connection, lang: str = "en") -> list[dict]:
     """Every ware across PRICE_WARE_TABLES with its own name/price_min/
     price_avg/price_max, as a flat list -- the "browse everything" view
-    used by api.py's GET /api/wares (the price-override picker), as
-    opposed to fetch_ware_prices()'s ware_id-keyed lookup shape. A ware_id
-    appearing in more than one table (shouldn't normally happen) yields
-    one row per table rather than being deduplicated, since each table's
-    row is independently that table's own idea of this ware's price.
+    used by api.py's GET /api/wares (the price-override picker, and the
+    Ware Cost List's ware_id -> name lookup), as opposed to
+    fetch_ware_prices()'s ware_id-keyed lookup shape. A ware_id appearing
+    in more than one table (shouldn't normally happen) yields one row per
+    table rather than being deduplicated, since each table's row is
+    independently that table's own idea of this ware's price.
+
+    "name" is resolved against localized_strings the same way as every
+    other endpoint this session (COALESCE, falling back to the table's own
+    base English name when lang has no row for this ware_id).
     """
     wares: list[dict] = []
     for table in PRICE_WARE_TABLES:
-        for row in conn.execute(f"SELECT ware_id, name, price_min, price_avg, price_max FROM {table}"):
+        rows = conn.execute(
+            f"""
+            SELECT {table}.ware_id AS ware_id,
+                   COALESCE(localized_strings.text, {table}.name) AS name,
+                   {table}.price_min AS price_min,
+                   {table}.price_avg AS price_avg,
+                   {table}.price_max AS price_max
+            FROM {table}
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = {table}.ware_id
+                AND localized_strings.lang_id = ?
+            """,
+            (lang,),
+        )
+        for row in rows:
             wares.append(
                 {
                     "ware_id": row["ware_id"],
