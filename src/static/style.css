@@ -467,6 +467,20 @@ body {
   font-weight: 700;
 }
 
+/* A slot needing something beyond the two ordinary equipment tiers (e.g.
+   "Mining", "High-Energy", a race lock) -- see buildGroupRow()'s own
+   comment. Informational, not a warning, so a distinct accent color
+   rather than .required-marker's own warning one. */
+.group-row-compatibility-badge {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  background: var(--bg-panel-hover);
+  color: var(--accent-blue-bright);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .cart-ship-warning {
   margin-top: 0.25rem;
   font-size: 0.8rem;
@@ -751,6 +765,12 @@ input[type="number"].qty-input::-webkit-inner-spin-button {
   color: var(--text-muted);
 }
 
+.cart-ship-capacity {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 #cart-toolbar {
   display: flex;
   align-items: center;
@@ -876,7 +896,13 @@ label {
   width: auto;
 }
 
-#ship-filters {
+/* .filter-panel-grid is the Component Analyzer's own copy of this same
+   layout (see buildChassisFilterPanel() in app.js) -- a second, independent
+   instance of the Size/Purpose/Type/Race/Vendor/Build Method filter groups,
+   built dynamically inside the "Select Components" modal rather than living
+   in static markup like #ship-filters does. */
+#ship-filters,
+.filter-panel-grid {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -1049,7 +1075,8 @@ label {
   gap: 0.4rem;
 }
 
-.filter-actions button {
+.filter-actions button,
+.component-set-picker-select-header button {
   padding: 0.15rem 0.5rem;
   font-size: 0.8rem;
 }
@@ -1121,6 +1148,27 @@ label {
   margin: 0;
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+/* Wraps .filter-hint alongside a "View in Component Analyzer" button
+   (index.html, #ship-filters) on one row -- flex-basis: 100% takes the
+   same "own full row within #ship-filters' own flex-wrap" role
+   .filter-hint used to carry alone; the hint text absorbs the leftover
+   space (flex: 1) so the button sits right-aligned against it. */
+.filter-hint-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.filter-hint-row .filter-hint {
+  flex: 1;
+}
+
+.view-in-analyzer-btn {
+  flex-shrink: 0;
 }
 
 /* Ship-class symbol icons (data/images/ships/symbols/, served under
@@ -1632,11 +1680,21 @@ input[type="checkbox"] {
   font-style: italic;
 }
 
+/* Wraps .equipment-picker-apply-all-label alongside a "View in Component
+   Analyzer" button on one row -- same right-align-a-button-next-to-an-
+   existing-row trick as .filter-hint-row. */
+.equipment-picker-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
 .equipment-picker-apply-all-label {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.5rem;
   font-size: 0.9rem;
   font-weight: normal;
   color: var(--text-muted);
@@ -1703,7 +1761,8 @@ input[type="checkbox"] {
 }
 
 #equipment-picker-table,
-#price-override-table {
+#price-override-table,
+#component-set-picker-table {
   /* Same reasoning as #ware-cost-list-table: grow past the wrapper's
      width instead of squeezing columns to fit, and border-collapse:
      separate since collapsed borders break `position: sticky` on
@@ -1715,11 +1774,51 @@ input[type="checkbox"] {
 }
 
 #equipment-picker-thead th,
-#price-override-table thead th {
+#price-override-table thead th,
+#component-set-picker-thead th {
   position: sticky;
   top: 0;
   background: var(--bg-tier);
   z-index: 1;
+}
+
+.component-set-picker-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.component-set-picker-search-input {
+  width: 16rem;
+  max-width: 40vw;
+  margin-bottom: 0;
+}
+
+#component-set-picker-filters-panel {
+  margin-bottom: 0.5rem;
+}
+
+/* Lives on an inner <span> (index.html), not the <th> itself -- display:
+   flex directly on a <th> knocks it out of table-cell layout and breaks
+   #component-set-picker-thead th's own position: sticky (confirmed: the
+   header stopped freezing on scroll while this was on the cell). */
+.component-set-picker-select-header {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+/* Same inner layout as .ship-option-row itself (flex row, vertically
+   centered, name+race column on the left, .ship-option-faction-icons'
+   own margin-left: auto pushing owner badges to the right) -- just living
+   inside a table cell (see renderComponentSetPickerRows() in app.js)
+   instead of that row's own clickable <div>. */
+.component-picker-row-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .price-override-input {
@@ -1775,4 +1874,431 @@ input[type="checkbox"] {
 .equipment-picker-clear-row td {
   font-style: italic;
   color: var(--text-muted);
+}
+
+/* Component Analyzer -- "+ Add Table" button, fixed above the stack of
+   comparison tables so it stays reachable as tables are added (each new
+   one is unshifted to the top of #component-analyzer-tables, pushing
+   existing ones down -- see app.js's componentAnalyzerTables). */
+.component-analyzer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Pushes the Export button (and, following it in normal flow, the Import
+   label right after it) to the far end of the toolbar, away from
+   "+ Add Table" -- same margin-left: auto trick used throughout this app
+   to right-align one item in an otherwise-left-aligned flex row. */
+.component-analyzer-toolbar-right {
+  margin-left: auto;
+}
+
+/* ---- Component Analyzer "Export" modal ---- */
+.component-analyzer-export-format-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.component-analyzer-export-tables-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.component-analyzer-export-tables-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.component-analyzer-table {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.component-analyzer-table-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.component-analyzer-table-title-field {
+  flex: 1;
+  min-width: 10rem;
+  font-weight: 600;
+}
+
+/* Shared by the table title field above and the stat set name field below
+   -- plain text with a pencil edit button to its left (see
+   buildEditableNameField() in app.js); click swaps .editable-name-text for
+   .editable-name-input in place. */
+.editable-name-field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.editable-name-edit-btn {
+  flex-shrink: 0;
+  padding: 0 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.editable-name-edit-btn:hover {
+  color: var(--accent-blue-bright);
+}
+
+.editable-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editable-name-input {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.component-analyzer-table-minimize-btn {
+  flex-shrink: 0;
+}
+
+.component-analyzer-table-remove-btn {
+  margin-left: auto;
+}
+
+/* The active stat set's own rename field, directly below its tab strip --
+   same placement relative to .fleet-list-tabs as #cart-name-input has
+   relative to #fleet-list-tabs in the Fleet Lists section. */
+/* Wraps the active stat set's rename field + "Select Stats" button side by
+   side -- same row-below-the-tab-strip placement .component-analyzer-
+   stat-set-name-input always had, just no longer alone in that row. */
+.component-analyzer-stat-set-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.component-analyzer-stat-set-name-field {
+  flex: 1;
+}
+
+/* Horizontal-only scroll for the stat table itself -- a table with many
+   selected stat columns grows past the card's own width rather than
+   squeezing every column to fit (same reasoning as #ware-cost-list-table/
+   #equipment-picker-table), so this wrapper is what actually scrolls. */
+.component-analyzer-table-wrapper {
+  overflow-x: auto;
+}
+
+#component-analyzer-tables table {
+  width: max-content;
+  min-width: 100%;
+  /* separate, not collapse -- collapsed borders break position: sticky on
+     <th>/<td> in Chromium (same fix as #equipment-picker-table/
+     #component-set-picker-table; needed here for the frozen Name column
+     below). */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#component-analyzer-tables th,
+#component-analyzer-tables td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border-blue-soft);
+  white-space: nowrap;
+}
+
+/* Freezes the Name column (always the first cell in every row -- see
+   buildNameColumnHeader()/the row-build loop in app.js) while the table
+   scrolls horizontally past its many stat columns. Solid background is
+   required so scrolled-under stat cells don't show through beneath it;
+   matches .component-analyzer-table's own panel background since neither
+   header nor body rows set one of their own. */
+#component-analyzer-tables th:first-child,
+#component-analyzer-tables td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+}
+
+.component-analyzer-empty-cell {
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: normal;
+}
+
+.component-analyzer-stat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.component-analyzer-sort-btn {
+  padding: 0 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.component-analyzer-sort-btn:hover {
+  color: var(--text-primary);
+}
+
+.component-analyzer-sort-btn.active {
+  color: var(--accent-blue-bright);
+}
+
+/* Modifications Lab launcher -- circular, pushed to the far right of the
+   Name column's own header row via margin-left: auto (same "push to the
+   opposite end of a flex row" trick .ship-option-faction-icons already
+   uses), sized to comfortably frame the mods_lab.png icon (a hex badge,
+   not literally circular itself, but the button around it is). */
+.component-analyzer-mod-lab-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-blue-soft);
+  background: var(--bg-panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.component-analyzer-mod-lab-btn:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--accent-blue);
+}
+
+.component-analyzer-mod-lab-btn img {
+  width: 32px;
+  height: 32px;
+}
+
+/* Each row's own Name cell -- name text plus a half-size Modifications Lab
+   launcher (see .component-analyzer-mod-lab-btn-row below), same
+   push-to-the-far-end flex layout as the header's own
+   .component-analyzer-stat-header row. */
+.component-analyzer-name-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+/* Half the header launcher's own 40px/32px sizing -- opens the same modal
+   scoped to just this row's ware (see buildModLabButton()). */
+.component-analyzer-mod-lab-btn-row {
+  width: 20px;
+  height: 20px;
+}
+
+.component-analyzer-mod-lab-btn-row img {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---- Modifications Lab modal (placeholder shell) ---- */
+.mod-lab-modal-body {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem 0;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.mod-lab-modal-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+/* ---- Component Analyzer's "Select Stats" modal ---- */
+/* Left (collapsible group list) + right (selected stats, reorderable)
+   panels side by side -- same two-pane spirit as the Component Set
+   picker's own search+filters-above/table-below layout, just side by side
+   instead of stacked since both panels here are lists, not a list plus a
+   wide table. */
+.stat-select-modal-body {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.stat-select-groups-panel {
+  flex: 1;
+  min-width: 0;
+  max-height: 55vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: var(--bg-panel);
+}
+
+.stat-select-group {
+  margin-bottom: 0.3rem;
+}
+
+/* Holds the group's own expand/collapse toggle plus its All/None actions
+   on one row -- toggle grows to fill the space between (flex: 1) instead
+   of the plain 100%-wide button this used to be alone. */
+.stat-select-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stat-select-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stat-select-group-toggle:hover {
+  background: var(--bg-panel-hover);
+}
+
+/* Adds/removes every stat in this one group at once -- see
+   renderStatSelectGroupsPanel()'s own comment in app.js. */
+.stat-select-group-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding-right: 0.3rem;
+}
+
+.stat-select-group-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0 0.3rem 1.6rem;
+}
+
+.stat-select-stat-row {
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.stat-select-stat-row:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+}
+
+.stat-select-stat-row.selected {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.stat-select-selected-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Holds the "Selected Stats" header alongside its own "Clear" button --
+   same right-align-a-button-next-to-an-existing-row trick as
+   .filter-hint-row/.equipment-picker-header-row. */
+.stat-select-selected-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.stat-select-selected-header {
+  font-weight: 600;
+}
+
+.stat-select-selected-list {
+  flex: 1;
+  max-height: 55vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.stat-select-selected-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.3rem;
+}
+
+.stat-select-selected-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem;
+}
+
+.stat-select-selected-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-select-selected-remove-btn {
+  padding: 0 0.3rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.stat-select-selected-remove-btn:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.2);
 }

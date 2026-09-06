@@ -445,15 +445,24 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
 
     "summary" is a small read-only readout (ship size, main shield count,
     bonus medium-shield count, missile ammo capacity, drone capacity, crew
-    capacity) pulled straight from ships_base -- it exists only for
-    display, never to populate a picker's options (ships_base has no
-    per-group size/compatibility info to do that correctly with).
-    crew_capacity is ships_base.crew ("crew" is the summary key's own name
-    since "crew" alone would collide with query_ship_groups()'s crew_base
-    catalog concept on the frontend). There's no countermeasure_capacity
-    here at all -- unlike crew, no ships_base column exists for it (see
+    capacity, cargo capacity/type, S/M docks, S/M ship storage) pulled
+    straight from ships_base -- it exists only for display, never to
+    populate a picker's options (ships_base has no per-group size/
+    compatibility info to do that correctly with). crew_capacity is
+    ships_base.crew ("crew" is the summary key's own name since "crew"
+    alone would collide with query_ship_groups()'s crew_base catalog
+    concept on the frontend). There's no countermeasure_capacity here at
+    all -- unlike crew, no ships_base column exists for it (see
     generate_ships_table.py's "Countermeasures and crew" docstring
     section); the frontend assumes a fixed default by ship size instead.
+    cargo_type is untranslated raw tag text (e.g. "container", or
+    "container solid" for a mixed hold) -- see generate_ships_table.py's
+    parse_ship_docks() for what it means and GET /api/cargo_types for
+    resolving it into real display names; the frontend splits and looks up
+    each space-separated token itself, same reasoning as build_method_name
+    staying untranslated on GET /api/build_methods (see that endpoint's
+    own docstring) -- this is the real internal value, not something to
+    bake a resolved display string into.
 
     A dedicated medium shield protecting a specific engine/turret group is
     its own group here too, with its own "options" the same as any other
@@ -475,7 +484,11 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
         return {"input": identifier, "error": "ship not found"}
 
     summary_row = conn.execute(
-        "SELECT size, shields, shields_bonus_m, missile_capacity, drone_capacity, crew FROM ships_base WHERE ware_id = ?",
+        """
+        SELECT size, shields, shields_bonus_m, missile_capacity, drone_capacity, crew,
+               cargo_capacity, cargo_type, s_docks, m_docks, s_ship_storage, m_ship_storage
+        FROM ships_base WHERE ware_id = ?
+        """,
         (ship["ware_id"],),
     ).fetchone()
 
@@ -523,6 +536,12 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
             "missile_capacity": summary_row["missile_capacity"] if summary_row is not None else None,
             "drone_capacity": summary_row["drone_capacity"] if summary_row is not None else None,
             "crew_capacity": summary_row["crew"] if summary_row is not None else None,
+            "cargo_capacity": summary_row["cargo_capacity"] if summary_row is not None else None,
+            "cargo_type": summary_row["cargo_type"] if summary_row is not None else None,
+            "s_docks": summary_row["s_docks"] if summary_row is not None else None,
+            "m_docks": summary_row["m_docks"] if summary_row is not None else None,
+            "s_ship_storage": summary_row["s_ship_storage"] if summary_row is not None else None,
+            "m_ship_storage": summary_row["m_ship_storage"] if summary_row is not None else None,
         },
         "groups": groups,
     }

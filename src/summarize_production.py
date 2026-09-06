@@ -425,16 +425,27 @@ def fetch_all_wares(conn: sqlite3.Connection, lang: str = "en") -> list[dict]:
     "name" is resolved against localized_strings the same way as every
     other endpoint this session (COALESCE, falling back to the table's own
     base English name when lang has no row for this ware_id).
+
+    "volume"/"transport" (real per-unit cargo-hold stats -- see
+    economy_wares_base's own schema comment in ships_tables.sql) only
+    exist on economy_wares_base -- every other table in PRICE_WARE_TABLES
+    yields None for both, which is exactly what the Component Analyzer's
+    "Production Wares" catalog wants (WARE_STAT_DEFINITIONS in app.js):
+    those two columns only ever populate for the wares that actually have
+    them.
     """
     wares: list[dict] = []
     for table in PRICE_WARE_TABLES:
+        has_cargo_stats = table == "economy_wares_base"
+        cargo_select = f"{table}.volume AS volume, {table}.transport AS transport" if has_cargo_stats else "NULL AS volume, NULL AS transport"
         rows = conn.execute(
             f"""
             SELECT {table}.ware_id AS ware_id,
                    COALESCE(localized_strings.text, {table}.name) AS name,
                    {table}.price_min AS price_min,
                    {table}.price_avg AS price_avg,
-                   {table}.price_max AS price_max
+                   {table}.price_max AS price_max,
+                   {cargo_select}
             FROM {table}
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = {table}.ware_id
@@ -450,6 +461,8 @@ def fetch_all_wares(conn: sqlite3.Connection, lang: str = "en") -> list[dict]:
                     "price_min": row["price_min"],
                     "price_avg": row["price_avg"],
                     "price_max": row["price_max"],
+                    "volume": row["volume"],
+                    "transport": row["transport"],
                 }
             )
     return wares

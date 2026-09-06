@@ -48,7 +48,7 @@ def _key(section: str, share_uuid: str) -> str:
     return f"shares/{section}/{share_uuid}.json"
 
 
-def put_share(section: str, data: dict) -> str:
+def put_share(section: str, data: dict | list) -> str:
     """Uploads `data` as a new share under `section`, returning the generated uuid."""
     share_uuid = str(uuid_module.uuid4())
     get_client().put_object(
@@ -60,7 +60,7 @@ def put_share(section: str, data: dict) -> str:
     return share_uuid
 
 
-def get_share(section: str, share_uuid: str) -> dict | None:
+def get_share(section: str, share_uuid: str) -> dict | list | None:
     """Returns the shared payload, or None if this section/uuid pair doesn't exist
     (a bad/typo'd link, or one that's since been deleted) -- deliberately not an
     exception, since "not found" is an expected, everyday outcome here, not a bug.

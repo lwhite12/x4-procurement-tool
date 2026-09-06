@@ -372,6 +372,8 @@ const addToSavedLoadoutsStatus = document.getElementById("add-to-saved-loadouts-
 const clearShipBtnBottom = document.getElementById("clear-ship-btn-bottom");
 const cartBody = document.getElementById("cart-body");
 const cartEmptyMsg = document.getElementById("cart-empty-msg");
+const fleetStatisticsPanel = document.getElementById("fleet-statistics-panel");
+const fleetStatisticsBody = document.getElementById("fleet-statistics-body");
 const analysisFileNameInput = document.getElementById("analysis-file-name-input");
 const downloadAnalysisBtn = document.getElementById("download-analysis-btn");
 const uploadAnalysisInput = document.getElementById("upload-analysis-input");
@@ -504,6 +506,58 @@ const shipTypeNames = {};
 // raw role id. A role key with no entry yet falls back to that same raw
 // id, same spirit as shipTypeNames' own fallback.
 const crewRoleNames = {};
+
+// cargo_type_id -> real display name (e.g. "liquid" -> "Liquid"), fetched
+// once from GET /api/cargo_types (see generate_ships_table.py's
+// parse_cargo_types()/CARGO_TYPE_NAME_REF) -- used by renderShipSummary()
+// to name a ship's own cargo hold instead of its raw space-separated
+// tag(s) (e.g. "container solid"). A token with no entry yet falls back to
+// that same raw token, same spirit as shipTypeNames' own fallback.
+const cargoTypeNames = {};
+
+// compatibility_type_id -> real display name (e.g. "mining" -> "Mining"),
+// fetched once from GET /api/compatibility_types (see
+// generate_ships_table.py's parse_compatibility_types()/
+// COMPATIBILITY_NAME_REF) -- used by compatibilityDisplayName() below for
+// the Component Analyzer's own "Compatibility" stat columns and the ship
+// builder's per-slot/ship-wide compatibility display. A tag with no entry
+// yet falls back to that same raw tag, same spirit as shipTypeNames' own
+// fallback.
+const compatibilityTypeNames = {};
+
+// ammunition_compatibility_type_id -> real display name (e.g.
+// "largedumbfire" -> "Large Dumbfire"), fetched once from GET
+// /api/ammunition_compatibility_types (see generate_ships_table.py's
+// parse_ammunition_compatibility_types()/AMMUNITION_TYPE_NAME_REF) -- a
+// distinct vocabulary from compatibilityTypeNames above despite living on
+// similarly-named "compatibility"/"ammunition_tags" columns (missiles_base.
+// compatibility, weapons_base/turrets_base.ammunition_tags). A tag with no
+// entry yet falls back to that same raw tag, same spirit as
+// shipTypeNames' own fallback.
+const ammunitionCompatibilityTypeNames = {};
+
+// thruster_class_id -> real display name (e.g. "allround" -> "All-round"),
+// fetched once from GET /api/thruster_classes (see generate_ships_table.py's
+// parse_thruster_classes()/THRUSTER_CLASS_NAME_REF) -- used by
+// formatStatValue() for thrusters_base's own "Thruster Class" stat column.
+// A code with no entry yet falls back to that same raw code, same spirit
+// as shipTypeNames' own fallback.
+const thrusterClassNames = {};
+
+// deployable_type_id -> real display name (e.g. "resourceprobe" -> "Resource
+// Probe"), fetched once from GET /api/deployable_types (see
+// generate_ships_table.py's parse_deployable_types()/DEPLOYABLE_TYPE_NAME_REF)
+// -- used by formatStatValue() for deployables_base's own "Deployable Type"
+// stat column. A code with no entry yet falls back to that same raw code,
+// same spirit as shipTypeNames' own fallback.
+const deployableTypeNames = {};
+
+// weapon_system_id -> real display name (e.g. "torpedo" -> "Torpedos"),
+// fetched once from GET /api/missile_weapon_systems (see
+// generate_ships_table.py's parse_missile_weapon_systems()/
+// MISSILE_WEAPON_SYSTEM_NAME_REF) -- used by the Component Analyzer's
+// missile "Weapon System" filter group (buildMissileWeaponSystemFilterEntries()).
+const missileWeaponSystemNames = {};
 
 // ware_id -> real display name for every ware in the database, fetched
 // once from GET /api/wares (see loadWareNames()) -- used by the Cost
@@ -802,6 +856,185 @@ async function loadShipTypeNames() {
   for (const { ship_type_id, ship_type_name } of shipTypes) shipTypeNames[ship_type_id] = ship_type_name;
 }
 
+// ?lang=<i18next.language>, same convention as loadShipTypeNames() -- see
+// api.py's /api/cargo_types docstring.
+async function loadCargoTypeNames() {
+  const response = await fetch(`/api/cargo_types?lang=${i18next.language}`);
+  const cargoTypes = await response.json();
+  for (const { cargo_type_id, cargo_type_name } of cargoTypes) cargoTypeNames[cargo_type_id] = cargo_type_name;
+}
+
+// ?lang=<i18next.language>, same convention as loadCargoTypeNames() -- see
+// api.py's /api/compatibility_types docstring.
+async function loadCompatibilityTypeNames() {
+  const response = await fetch(`/api/compatibility_types?lang=${i18next.language}`);
+  const compatibilityTypes = await response.json();
+  for (const { compatibility_type_id, compatibility_type_name } of compatibilityTypes) {
+    compatibilityTypeNames[compatibility_type_id] = compatibility_type_name;
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadCompatibilityTypeNames()
+// -- see api.py's /api/ammunition_compatibility_types docstring.
+async function loadAmmunitionCompatibilityTypeNames() {
+  const response = await fetch(`/api/ammunition_compatibility_types?lang=${i18next.language}`);
+  const ammunitionCompatibilityTypes = await response.json();
+  for (const {
+    ammunition_compatibility_type_id,
+    ammunition_compatibility_type_name,
+  } of ammunitionCompatibilityTypes) {
+    ammunitionCompatibilityTypeNames[ammunition_compatibility_type_id] = ammunition_compatibility_type_name;
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadCargoTypeNames() -- see
+// api.py's /api/thruster_classes docstring.
+async function loadThrusterClassNames() {
+  const response = await fetch(`/api/thruster_classes?lang=${i18next.language}`);
+  const thrusterClasses = await response.json();
+  for (const { thruster_class_id, thruster_class_name } of thrusterClasses) {
+    thrusterClassNames[thruster_class_id] = thruster_class_name;
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadThrusterClassNames() --
+// see api.py's /api/deployable_types docstring.
+async function loadDeployableTypeNames() {
+  const response = await fetch(`/api/deployable_types?lang=${i18next.language}`);
+  const deployableTypes = await response.json();
+  for (const { deployable_type_id, deployable_type_name } of deployableTypes) {
+    deployableTypeNames[deployable_type_id] = deployable_type_name;
+  }
+}
+
+// ?lang=<i18next.language>, same convention as loadCargoTypeNames() -- see
+// api.py's /api/missile_weapon_systems docstring.
+async function loadMissileWeaponSystemNames() {
+  const response = await fetch(`/api/missile_weapon_systems?lang=${i18next.language}`);
+  const weaponSystems = await response.json();
+  for (const { weapon_system_id, weapon_system_name } of weaponSystems) {
+    missileWeaponSystemNames[weapon_system_id] = weapon_system_name;
+  }
+}
+
+// A ship's own ships_base.cargo_type is one or two space-separated tokens
+// (e.g. "container", "container solid") -- looks each up in
+// cargoTypeNames and joins them for display, same convention as
+// wareDisplayName's own "fall back to the raw token" spirit. "" (no cargo
+// hold at all) returns "" untranslated -- callers gate display on
+// summary.cargo_capacity instead of this string being non-empty.
+function cargoTypeDisplayName(cargoType) {
+  if (!cargoType) return "";
+  return cargoType
+    .split(" ")
+    .map((token) => cargoTypeNames[token] ?? token)
+    .join(", ");
+}
+
+// Every real compatibility tag on an equipment mount's own connection
+// (engines_base/shields_base/weapons_base/turrets_base/thrusters_base/
+// missiles_base.compatibility) or a ship's own required compatibility
+// class (ship_component_groups.equipment_compatibility_class -- same
+// vocabulary, exposed to the frontend as group.compatibility, see
+// query_ship_components.py's own docstring) -- both comma-joined (see
+// parse_equipment_mount()'s own docstring in generate_ships_table.py for
+// why comma here and not cargoTypeDisplayName()'s own space-separated
+// shape). Looks each token up in compatibilityTypeNames, same
+// token-split-and-lookup/fallback convention as cargoTypeDisplayName().
+// "" (no requirement at all) returns "".
+function compatibilityDisplayName(compatibility) {
+  if (!compatibility) return "";
+  return compatibility
+    .split(",")
+    .map((token) => compatibilityTypeNames[token] ?? token)
+    .join(", ");
+}
+
+// Same comma-joined token-split-and-lookup/fallback shape as
+// compatibilityDisplayName() above, but against ammunitionCompatibilityTypeNames
+// -- a distinct vocabulary (missiles_base.compatibility, weapons_base/
+// turrets_base.ammunition_tags; see AMMUNITION_TYPE_NAME_REF's own docstring
+// in generate_ships_table.py for why these can't share one lookup table).
+function ammunitionCompatibilityDisplayName(compatibility) {
+  if (!compatibility) return "";
+  return compatibility
+    .split(",")
+    .map((token) => ammunitionCompatibilityTypeNames[token] ?? token)
+    .join(", ");
+}
+
+// "universal" is thrusters' own synthetic sentinel (THRUSTER_COMPATIBILITY),
+// not a real game concept at all, on literally every thruster slot --
+// showing it anywhere would be pure noise. The rest are real connection
+// tags, but pure geometry/targeting bookkeeping rather than an actual
+// equipment restriction -- confirmed by querying every real
+// ship_component_groups.equipment_compatibility_class value (excluding
+// software groups -- see below) and cross-checking against
+// EQUIPMENT_MOUNT_STRUCTURAL_TOKENS in generate_ships_table.py, which
+// already excludes "hittable"/"combat" for exactly this reason on the
+// equipment side; the ship's own connection tag set is deliberately
+// noisier still (query_ship_components.py's own matching_items() only
+// requires it be a *superset* of equipment's clean requirement tags, so
+// nothing here ever trims it for matching correctness -- this constant
+// exists purely so the *display* side doesn't show that extra noise to a
+// player). Unlike COMPATIBILITY_BASELINE_TIER_TOKENS below, these are
+// never worth showing anywhere, in any context.
+const COMPATIBILITY_NOISE_TOKENS = new Set([
+  "universal",
+  "hittable",
+  "unhittable",
+  "combat",
+  "primary",
+  "notupgradeable",
+  "component",
+  "noshield",
+  "platformcollision",
+]);
+
+// "standard"/"advanced" are the two ordinary equipment tiers every normal
+// mount already implies (see COMPATIBILITY_NAME_REF's own docstring in
+// generate_ships_table.py) -- worth excluding from a *per-slot* badge
+// (buildGroupRow() -- flagging one of these on literally every ordinary
+// slot would be pure clutter) but worth *including* in the ship-wide
+// summary line (renderShipSummary() -- a player wants to know at a glance
+// whether this hull is a Standard or Advanced build overall).
+const COMPATIBILITY_BASELINE_TIER_TOKENS = new Set(["standard", "advanced"]);
+
+// The real, worth-showing tokens on `compatibility` (a group's own
+// equipment_compatibility_class, comma-joined) -- always drops pure
+// bookkeeping noise (COMPATIBILITY_NOISE_TOKENS, "symmetry*" tokens --
+// symmetry_1/2/3/left/right/top/bottom, which side of a mirrored turret
+// pair this connection is, filtered by prefix rather than an exhaustive
+// set since new ones show up per hull), and additionally drops the two
+// baseline tiers unless `includeBaselineTiers` is set. Shared by
+// specialCompatibilityDisplayName() (one group's own per-slot badge,
+// baseline tiers excluded) and renderShipSummary()'s own ship-wide rollup
+// (baseline tiers included, per the user's own request -- "if a ship is
+// advanced, it should say advanced"). Callers must skip software-type
+// groups entirely before calling this -- a software group's own
+// equipment_compatibility_class is repurposed to hold a raw software
+// ware_id list, not real compatibility tags at all (see
+// generate_ships_table.py's "Software" docstring section), so running it
+// through here would just look like a garbled name.
+function compatibilityTokens(compatibility, { includeBaselineTiers = false } = {}) {
+  if (!compatibility) return [];
+  return compatibility.split(",").filter((token) => {
+    if (!token || token.startsWith("symmetry")) return false;
+    if (COMPATIBILITY_NOISE_TOKENS.has(token)) return false;
+    if (!includeBaselineTiers && COMPATIBILITY_BASELINE_TIER_TOKENS.has(token)) return false;
+    return true;
+  });
+}
+
+// Display form of compatibilityTokens() (baseline tiers excluded) for one
+// group -- "" when there's nothing special about this particular slot
+// worth flagging to the player (see buildGroupRow()'s own comment).
+function specialCompatibilityDisplayName(compatibility) {
+  const tokens = compatibilityTokens(compatibility);
+  if (tokens.length === 0) return "";
+  return tokens.map((token) => compatibilityTypeNames[token] ?? token).join(", ");
+}
+
 // ?lang=<i18next.language>, same convention as loadFactionNames() -- see
 // api.py's /api/wares docstring. Also seeds allWaresCache (see
 // openPriceOverrideModal()) so opening the price-override picker never
@@ -816,36 +1049,50 @@ async function loadWareNames() {
 // actually present in allShips, sorted, so the filters never offer a choice
 // with zero matches. Multiple checkboxes in the same group can be checked
 // at once; none checked means "don't filter on that dimension".
-function populateFilterOptions() {
-  // Sizes are stored/filtered on as their raw lowercase abbreviation
-  // (ship.size, e.g. "s"/"m"/"l"/"xl" -- same value renderShipSummary()
-  // already .toUpperCase()s for display elsewhere), matching
-  // sizeValues.includes(ship.size) in renderShipOptions().
-  const sizeEntries = [...new Set(allShips.map((ship) => ship.size))]
+// Sizes are stored/filtered on as their raw lowercase abbreviation
+// (ship.size, e.g. "s"/"m"/"l"/"xl" -- same value renderShipSummary()
+// already .toUpperCase()s for display elsewhere), matching
+// sizeValues.includes(ship.size) in shipPassesCurrentFilters(). Factored
+// out of populateFilterOptions() (rather than left inline) so the
+// Component Analyzer's chassis filter panel (see buildChassisFilterPanel())
+// can build the exact same entry list for its own, independently-scoped
+// copy of this same filter group.
+// `list` defaults to allShips (the main ship picker's own #ship-filters)
+// but the Component Analyzer's per-type filter panel (see
+// buildComponentTypeFilterPanel()) passes its own currently-fetched
+// component list instead -- every entity here just needs a `.size` field,
+// ships and engine/shield/weapon/turret/thruster components alike.
+function buildSizeFilterEntries(list = allShips) {
+  return [...new Set(list.map((entity) => entity.size))]
     .sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b))
     .map((size) => ({ value: size, label: size.toUpperCase() }));
+}
 
-  // ship.purpose is a flat, single-valued AI role classification (e.g.
-  // "fight"/"trade"/"mine") -- unlike Type, no ship has more than one, so
-  // this needs none of buildTypeFilterEntries()'s multi-size splitting.
-  // Label is purposeNames' own real, localized display name (see
-  // loadPurposeNames()/api.py's GET /api/purposes) -- falling back to the
-  // same plain client-side capitalization this used before that existed,
-  // for any purpose id purposeNames doesn't have an entry for (shouldn't
-  // happen for a real purpose value, but cheap insurance). Sorted by that
-  // resolved label, not the raw code, so a non-English list is actually
-  // alphabetized in that language too -- same reasoning as Vendor's own
-  // buildVendorFilterEntries().
-  const purposeEntries = [...new Set(allShips.map((ship) => ship.purpose))]
+// ship.purpose is a flat, single-valued AI role classification (e.g.
+// "fight"/"trade"/"mine") -- unlike Type, no ship has more than one, so
+// this needs none of buildTypeFilterEntries()'s multi-size splitting.
+// Label is purposeNames' own real, localized display name (see
+// loadPurposeNames()/api.py's GET /api/purposes) -- falling back to the
+// same plain client-side capitalization this used before that existed,
+// for any purpose id purposeNames doesn't have an entry for (shouldn't
+// happen for a real purpose value, but cheap insurance). Sorted by that
+// resolved label, not the raw code, so a non-English list is actually
+// alphabetized in that language too -- same reasoning as Vendor's own
+// buildVendorFilterEntries(). Factored out for the same reason as
+// buildSizeFilterEntries() above.
+function buildPurposeFilterEntries() {
+  return [...new Set(allShips.map((ship) => ship.purpose))]
     .filter((purpose) => purpose != null)
     .map((purpose) => ({
       value: purpose,
       label: purposeNames[purpose] ?? purpose.charAt(0).toUpperCase() + purpose.slice(1),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
+}
 
-  buildCheckboxGroup(sizeFilterOptions, "size-filter", sizeEntries);
-  buildCheckboxGroup(purposeFilterOptions, "purpose-filter", purposeEntries);
+function populateFilterOptions() {
+  buildCheckboxGroup(sizeFilterOptions, "size-filter", buildSizeFilterEntries());
+  buildCheckboxGroup(purposeFilterOptions, "purpose-filter", buildPurposeFilterEntries());
   buildCheckboxGroup(typeFilterOptions, "type-filter", buildTypeFilterEntries());
   buildCheckboxGroup(vendorFilterOptions, "vendor-filter", buildVendorFilterEntries());
   buildCheckboxGroup(raceFilterOptions, "race-filter", buildRaceFilterEntries());
@@ -864,10 +1111,11 @@ function populateFilterOptions() {
 // dedicated labelEl span rather than plain text, since color/background
 // can't be expressed on a plain text node. Sorted by the displayed
 // shortname, not the raw id, so the checkbox order matches what's shown.
-function buildRaceFilterEntries() {
+// `list` -- see buildSizeFilterEntries()' own comment.
+function buildRaceFilterEntries(list = allShips) {
   const raceIds = new Set();
-  for (const ship of allShips) {
-    for (const raceId of ship.maker_races ?? []) raceIds.add(raceId);
+  for (const entity of list) {
+    for (const raceId of entity.maker_races ?? []) raceIds.add(raceId);
   }
   return [...raceIds]
     .sort((a, b) => (raceInfo[a]?.shortname ?? a).localeCompare(raceInfo[b]?.shortname ?? b))
@@ -896,8 +1144,9 @@ function buildRaceFilterEntries() {
 // the Loadout summary. `value` stays the raw English method name (the real
 // matching key -- see shipPassesCurrentFilters()); only the label text is
 // resolved through buildMethodNames (see loadBuildMethodNames()).
-function buildBuildMethodFilterEntries() {
-  const methodsPresent = new Set(allShips.map((ship) => ship.production_method).filter((method) => method != null));
+// `list` -- see buildSizeFilterEntries()' own comment.
+function buildBuildMethodFilterEntries(list = allShips) {
+  const methodsPresent = new Set(list.map((entity) => entity.production_method).filter((method) => method != null));
   return allBuildMethods
     .filter((method) => methodsPresent.has(method))
     .map((method) => {
@@ -909,6 +1158,67 @@ function buildBuildMethodFilterEntries() {
     });
 }
 
+// One checkbox per real weapon_system value present in `list` (missiles
+// only -- see COMPONENT_FILTER_GROUPS), labeled via missileWeaponSystemNames
+// (GET /api/missile_weapon_systems, see that endpoint's own docstring in
+// api.py) -- real page-1040 "Weapon Systems" text (Dumbfire/Guided/
+// Torpedos), not an invented category. Plain text label, no icon/color --
+// unlike Race/Build Method, a weapon system has no established color
+// convention elsewhere in this app to reuse.
+function buildMissileWeaponSystemFilterEntries(list) {
+  const weaponSystemIds = new Set(list.map((entity) => entity.weapon_system).filter((value) => value != null));
+  return [...weaponSystemIds]
+    .map((weaponSystemId) => ({
+      value: weaponSystemId,
+      label: missileWeaponSystemNames[weaponSystemId] ?? weaponSystemId,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// One checkbox per real mk (mark/tier) value present in `list` -- engine/
+// shield/weapon/turret/thruster only (equipment_wares_base.mk); missiles
+// have no mk column at all, so this is never built for that type (see
+// COMPONENT_FILTER_GROUPS). Sorted numerically, not alphabetically (mk
+// values are small integers, but checkbox `value` attributes are always
+// strings -- see checkedValues()/shipPassesCurrentFilters()'s own
+// String(ship.mk) comparison).
+function buildMkFilterEntries(list) {
+  return [...new Set(list.map((entity) => entity.mk).filter((mk) => mk != null))]
+    .sort((a, b) => a - b)
+    .map((mk) => ({ value: String(mk), label: `Mk${mk}` }));
+}
+
+// Economy Wares only (economy_wares_base.transport) -- one checkbox per
+// real cargo-hold type present in `list` ("container"/"liquid"/"solid",
+// plus real "condensate" outliers -- see economy_wares_base's own schema
+// comment). Reuses cargoTypeNames (loaded from GET /api/cargo_types for
+// the main ship picker's own Cargo Type stat) for a real display name,
+// same fallback-to-raw-value convention as cargoTypeDisplayName() -- a
+// "condensate" entry has no cargo_types row, so it just shows raw.
+function buildCargoTypeFilterEntries(list) {
+  const values = new Set(list.map((ware) => ware.transport).filter((value) => value != null));
+  return [...values]
+    .map((value) => ({ value, label: cargoTypeNames[value] ?? value }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// Economy Wares only (economy_wares_base.leaf_ware) -- True/False, not a
+// value actually present in the game data the way every other filter
+// entry is (see boolStatDef()'s own comment on why leaf_ware is a real
+// SQLite BOOLEAN, 0/1 under the hood). Only offers whichever of True/False
+// `list` actually contains, same "don't offer a choice with zero matches"
+// rule every other filter follows -- sorted True-then-False rather than
+// alphabetically, since "False"/"True" would put them in a confusing order.
+function buildBaseResourceFilterEntries(list) {
+  const values = new Set(list.map((ware) => ware.leaf_ware).filter((value) => value != null));
+  return [...values]
+    .map((value) => ({
+      value: String(value),
+      label: value ? t("component_analyzer.true_value") : t("component_analyzer.false_value"),
+    }))
+    .sort((a, b) => Number(b.value) - Number(a.value));
+}
+
 // One checkbox per real faction id appearing in any ship's own
 // ships_base.owners (majors and minors alike, e.g. "argon"/"buccaneers"),
 // sorted by display name. Icon is the faction's own tinted badge (see
@@ -918,10 +1228,11 @@ function buildBuildMethodFilterEntries() {
 // own text. Entries with no real icon (shouldn't happen for a genuine
 // ships_base.owners value, but factionIconUrl() returning null is a cheap
 // defensive check) are silently skipped rather than shown broken.
-function buildVendorFilterEntries() {
+// `list` -- see buildSizeFilterEntries()' own comment.
+function buildVendorFilterEntries(list = allShips) {
   const factionIds = new Set();
-  for (const ship of allShips) {
-    for (const ownerFaction of ship.owners ? ship.owners.split(",") : []) factionIds.add(ownerFaction);
+  for (const entity of list) {
+    for (const ownerFaction of entity.owners ? entity.owners.split(",") : []) factionIds.add(ownerFaction);
   }
   return [...factionIds]
     .filter((factionId) => factionIconUrl(factionId))
@@ -933,10 +1244,17 @@ function buildVendorFilterEntries() {
     }));
 }
 
-function buildCheckboxGroup(container, name, entries) {
+// `onChange` defaults to renderShipOptions (the main ship picker's own
+// filter group) -- the Component Analyzer's chassis filter panel (see
+// buildChassisFilterPanel()) passes its own renderComponentSetPickerRows-
+// triggering callback instead, since its checkboxes filter a completely
+// different list.
+function buildCheckboxGroup(container, name, entries, onChange = renderShipOptions) {
   container.innerHTML = "";
   for (const entry of entries) {
-    container.appendChild(buildCheckboxOption(name, entry.value, entry.label, entry.iconEl ?? null, entry.labelEl ?? null));
+    container.appendChild(
+      buildCheckboxOption(name, entry.value, entry.label, entry.iconEl ?? null, entry.labelEl ?? null, onChange),
+    );
   }
 }
 
@@ -951,26 +1269,35 @@ function buildCheckboxGroup(container, name, entries) {
 // buildRaceFilterEntries()'s own colored/plated race-abbreviation span,
 // which a plain createTextNode(displayLabel) couldn't render (no styling on
 // a text node); `displayLabel` is simply ignored when `labelEl` is given.
-function buildCheckboxOption(name, value, displayLabel, iconEl = null, labelEl = null) {
+function buildCheckboxOption(name, value, displayLabel, iconEl = null, labelEl = null, onChange = renderShipOptions) {
   const label = document.createElement("label");
   const input = document.createElement("input");
   input.type = "checkbox";
   input.name = name;
   input.value = value;
-  input.addEventListener("change", renderShipOptions);
+  input.addEventListener("change", onChange);
   label.appendChild(input);
   if (iconEl) label.appendChild(iconEl);
   label.appendChild(labelEl ?? document.createTextNode(displayLabel));
   return label;
 }
 
-function checkedValues(name) {
-  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map((input) => input.value);
+// `root` scopes the query to one filter panel's own checkboxes -- needed
+// once the same filter-group `name`s (see buildChassisFilterPanel()) can
+// legitimately appear twice in the document at once (the main ship picker's
+// static #ship-filters, and the Component Analyzer's own dynamically-built
+// copy inside the "Select Components" modal). Defaults to the whole
+// document, matching every pre-existing call site's own behavior.
+function checkedValues(name, root = document) {
+  return Array.from(root.querySelectorAll(`input[name="${name}"]:checked`)).map((input) => input.value);
 }
 
 // "All"/"None" buttons are static markup (unlike the checkboxes themselves,
 // which are (re)built from the API response), so wiring them up once here
-// at load time is enough.
+// at load time is enough. Only ever targets the main ship picker's own
+// #ship-filters buttons -- the Component Analyzer's own filter panel wires
+// its All/None buttons itself (see buildFilterFieldsetForModal()), since
+// those don't exist yet when this loop runs.
 for (const btn of document.querySelectorAll(".filter-all-btn")) {
   btn.addEventListener("click", () => {
     for (const input of document.querySelectorAll(`input[name="${btn.dataset.filter}"]`)) {
@@ -999,13 +1326,31 @@ for (const btn of document.querySelectorAll(".filter-none-btn")) {
 // when opened generically, so "what ships are currently visible in the
 // picker" and "what ships' loadouts show up in Select Filter Loadout"
 // never drift apart.
-function shipPassesCurrentFilters(ship) {
-  const sizeValues = checkedValues("size-filter");
-  const purposeValues = checkedValues("purpose-filter");
-  const typeValues = checkedValues("type-filter");
-  const vendorValues = checkedValues("vendor-filter");
-  const raceValues = checkedValues("race-filter");
-  const buildMethodValues = checkedValues("build-method-filter");
+// `root` -- see checkedValues()' own docstring -- defaults to the whole
+// document (the main ship picker's own #ship-filters), but is passed
+// explicitly by the Component Analyzer's chassis filter panel so this same
+// predicate can be evaluated against that panel's own, independent
+// checkbox selections instead.
+function shipPassesCurrentFilters(ship, root = document) {
+  const sizeValues = checkedValues("size-filter", root);
+  const purposeValues = checkedValues("purpose-filter", root);
+  const typeValues = checkedValues("type-filter", root);
+  const vendorValues = checkedValues("vendor-filter", root);
+  const raceValues = checkedValues("race-filter", root);
+  const buildMethodValues = checkedValues("build-method-filter", root);
+  // Missile-only (see COMPONENT_FILTER_GROUPS) -- no such checkboxes exist
+  // under any other root, so weaponSystemValues is always [] there, making
+  // this clause a no-op everywhere except the missile filter panel.
+  const weaponSystemValues = checkedValues("weapon-system-filter", root);
+  // Equipment-only (see COMPONENT_FILTER_GROUPS) -- no such checkboxes
+  // exist under any other root, so mkValues is always [] elsewhere.
+  // String(ship.mk), not ship.mk itself: checkbox `value`s are always
+  // strings (see buildMkFilterEntries()'s own comment).
+  const mkValues = checkedValues("mk-filter", root);
+  // Economy Wares-only (see COMPONENT_FILTER_GROUPS) -- no such checkboxes
+  // exist under any other root, so these are always [] elsewhere.
+  const cargoTypeValues = checkedValues("cargo-type-filter", root);
+  const baseResourceValues = checkedValues("base-resource-filter", root);
   const shipOwners = ship.owners ? ship.owners.split(",") : [];
   const shipMakerRaces = ship.maker_races ?? [];
   return (
@@ -1014,14 +1359,23 @@ function shipPassesCurrentFilters(ship) {
     (typeValues.length === 0 || typeValues.some((value) => shipMatchesTypeValue(ship, value))) &&
     (vendorValues.length === 0 || vendorValues.some((value) => shipOwners.includes(value))) &&
     (raceValues.length === 0 || raceValues.some((value) => shipMakerRaces.includes(value))) &&
-    (buildMethodValues.length === 0 || buildMethodValues.includes(ship.production_method))
+    (buildMethodValues.length === 0 || buildMethodValues.includes(ship.production_method)) &&
+    (weaponSystemValues.length === 0 || weaponSystemValues.includes(ship.weapon_system)) &&
+    (mkValues.length === 0 || mkValues.includes(String(ship.mk))) &&
+    (cargoTypeValues.length === 0 || cargoTypeValues.includes(ship.transport)) &&
+    (baseResourceValues.length === 0 || baseResourceValues.includes(String(ship.leaf_ware)))
   );
 }
 
 function renderShipOptions() {
   shipOptionsList.innerHTML = "";
 
-  const filtered = allShips.filter(shipPassesCurrentFilters);
+  // Explicit arrow wrapper, not a bare shipPassesCurrentFilters reference --
+  // Array.prototype.filter's callback gets (element, index, array), and
+  // shipPassesCurrentFilters's second parameter is now `root` (see its own
+  // docstring), so a bare reference would silently pass the row index as
+  // root and break every root.querySelectorAll() call inside it.
+  const filtered = allShips.filter((ship) => shipPassesCurrentFilters(ship));
 
   if (filtered.length === 0) {
     const empty = document.createElement("div");
@@ -1056,29 +1410,28 @@ function renderShipOptions() {
 // applyShipSelection() for the shared part also used by editCartEntry(),
 // which must NOT reset editingIndex/addToCartBtn's label -- that's why
 // that part is factored out separately rather than done here).
-function buildShipOptionRow(ship) {
-  const row = document.createElement("div");
-  row.className = "ship-option-row";
-  row.dataset.wareId = ship.ware_id;
-  row.setAttribute("role", "option");
-
-  if (ship.icon) row.appendChild(buildIconImg(ship.icon, "ship-icon"));
-
+// The "name, with colored design-race abbreviation(s) stacked underneath"
+// text column shared by the ship picker's own listbox rows (below) and the
+// Component Analyzer's "Select Components" picker table rows (see
+// buildComponentPickerRowContent()) -- any entity with a `name` and a real
+// `maker_races` list (ships_base/equipment_wares_base both feed this via
+// the same maker_races join, see GET /api/ships and GET /api/components'
+// own comments) renders identically either place.
+function buildEntityIdentityColumn(entity) {
   const textCol = document.createElement("span");
   textCol.className = "ship-option-text";
 
   const text = document.createElement("span");
   text.className = "ship-option-name";
-  text.textContent = ship.name;
+  text.textContent = entity.name;
   textCol.appendChild(text);
 
-  // One colored abbreviation per real design race in ship.maker_races (see
-  // GET /api/ships' own docstring) -- usually one, occasionally more (e.g.
-  // the Envoy shows both "ARG" and "TEL"), each independently colored via
-  // RACE_COLORS/raceInfo. A raceIds container rather than a single span
-  // since there can now be more than one (see .ship-option-races in
-  // style.css for the wrapping/gap).
-  const raceIds = ship.maker_races ?? [];
+  // One colored abbreviation per real design race in entity.maker_races --
+  // usually one, occasionally more (e.g. the Envoy chassis shows both
+  // "ARG" and "TEL"), each independently colored via RACE_COLORS/raceInfo.
+  // A raceIds container rather than a single span since there can be more
+  // than one (see .ship-option-races in style.css for the wrapping/gap).
+  const raceIds = entity.maker_races ?? [];
   if (raceIds.length > 0) {
     const racesGroup = document.createElement("span");
     racesGroup.className = "ship-option-races";
@@ -1093,26 +1446,41 @@ function buildShipOptionRow(ship) {
     textCol.appendChild(racesGroup);
   }
 
-  row.appendChild(textCol);
+  return textCol;
+}
 
-  // Owner faction badges -- right-aligned as one group at the far end of
-  // the row (see .ship-option-faction-icons' margin-left: auto), opposite
-  // the ship's own class icon on the left. One full-size badge per entry
-  // in ship.owners (the ship's actual sales list, majors and minors both
-  // -- e.g. "argon,buccaneers,hatikvah,scaleplate" -- see
-  // generate_minor_faction_icons.py for the minors' own real in-game
-  // colors). No separate manufacturer/design-race badge here any more --
-  // that's already shown as the colored race abbreviation(s) under the
-  // ship's name (.ship-option-races above), so showing it a second time
-  // as an icon would be redundant.
+// Right-aligned (via .ship-option-faction-icons' own margin-left: auto)
+// group of full-size owner-faction badges -- one per entry in
+// entity.owners (comma-joined, e.g. "argon,buccaneers,hatikvah,scaleplate"
+// -- ships_base.owners and equipment_wares_base.owners share this exact
+// shape, see generate_ships_table.py's parse_ship_wares()/
+// parse_equipment_wares()). No separate manufacturer/design-race badge
+// here -- that's already shown as the colored race abbreviation(s) from
+// buildEntityIdentityColumn(), so showing it a second time as an icon
+// would be redundant. Returns an empty (no-children) group when there are
+// no real owners to show -- callers check .children.length before
+// appending, same as buildShipOptionRow() always did.
+function buildEntityOwnerIconsGroup(entity) {
   const factionIconsGroup = document.createElement("span");
   factionIconsGroup.className = "ship-option-faction-icons";
-
-  for (const ownerFaction of ship.owners ? ship.owners.split(",") : []) {
+  for (const ownerFaction of entity.owners ? entity.owners.split(",") : []) {
     if (factionIconUrl(ownerFaction)) {
       factionIconsGroup.appendChild(buildFactionIconImg(ownerFaction, "ship-option-owner-icon"));
     }
   }
+  return factionIconsGroup;
+}
+
+function buildShipOptionRow(ship) {
+  const row = document.createElement("div");
+  row.className = "ship-option-row";
+  row.dataset.wareId = ship.ware_id;
+  row.setAttribute("role", "option");
+
+  if (ship.icon) row.appendChild(buildIconImg(ship.icon, "ship-icon"));
+  row.appendChild(buildEntityIdentityColumn(ship));
+
+  const factionIconsGroup = buildEntityOwnerIconsGroup(ship);
   if (factionIconsGroup.children.length > 0) row.appendChild(factionIconsGroup);
 
   row.addEventListener("click", () => {
@@ -1323,6 +1691,24 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
     marker.textContent = " *";
     marker.title = t("ship_builder.recommended_tooltip");
     label.appendChild(marker);
+  }
+
+  // Only shown when this slot needs something beyond the two ordinary
+  // equipment tiers (e.g. "Mining", "High-Energy", a race lock) -- see
+  // specialCompatibilityDisplayName()'s own comment on why plain
+  // standard/advanced/bookkeeping tags never render one, to avoid flagging
+  // the vast majority of perfectly ordinary slots. Software groups are
+  // skipped entirely -- their own compatibility field is a ware_id list,
+  // not real compatibility tags (see specialCompatibilityTokens()'s own
+  // comment).
+  const specialCompat =
+    group.component_type === "software" ? "" : specialCompatibilityDisplayName(group.compatibility);
+  if (specialCompat) {
+    const compatBadge = document.createElement("span");
+    compatBadge.className = "group-row-compatibility-badge";
+    compatBadge.textContent = specialCompat;
+    compatBadge.title = t("component_analyzer.stat_labels.compatibility");
+    label.appendChild(compatBadge);
   }
   row.appendChild(label);
 
@@ -2728,6 +3114,70 @@ function renderShipSummary(data) {
   });
   shipSummaryEl.appendChild(missileCapacityLine);
 
+  // Ship-wide rollup of every real compatibility requirement across this
+  // ship's own groups -- baseline tiers (Standard/Advanced) included here
+  // (unlike the per-slot badge below), per the user's own request: "if a
+  // ship is advanced, it should say advanced." Still drops pure
+  // bookkeeping noise (symmetry/hittable/etc. -- see
+  // compatibilityTokens()'s own comment) and software groups (a ware_id
+  // list, not real compatibility tags). Conditional only in the sense
+  // that a ship with literally zero component groups shows nothing --
+  // every real ship has at least one standard/advanced slot, so this line
+  // effectively always renders in practice.
+  const compatTokens = new Set();
+  for (const group of data.groups ?? []) {
+    if (group.component_type === "software") continue;
+    for (const token of compatibilityTokens(group.compatibility, { includeBaselineTiers: true })) {
+      compatTokens.add(token);
+    }
+  }
+  if (compatTokens.size > 0) {
+    const compatNames = [...compatTokens].map((token) => compatibilityTypeNames[token] ?? token).sort();
+    const compatibilityLine = document.createElement("div");
+    compatibilityLine.textContent = t("ship_builder.compatibility_summary", { value: compatNames.join(", ") });
+    shipSummaryEl.appendChild(compatibilityLine);
+  }
+
+  // The five lines below are all conditional on the ship actually having
+  // that stat at all (0/null for most combat ships -- see
+  // generate_ships_table.py's parse_ship_docks()) rather than always
+  // shown with a "-"/0 placeholder like the shield/missile lines above --
+  // unlike those, most ships have none of these at all, so a placeholder
+  // row for every one of them would clutter the summary far more often
+  // than it would inform it.
+  if (data.summary.cargo_capacity) {
+    const cargoCapacityLine = document.createElement("div");
+    cargoCapacityLine.textContent = t("ship_builder.cargo_capacity_summary", {
+      type: cargoTypeDisplayName(data.summary.cargo_type),
+      value: data.summary.cargo_capacity,
+    });
+    shipSummaryEl.appendChild(cargoCapacityLine);
+  }
+
+  if (data.summary.s_docks) {
+    const sDocksLine = document.createElement("div");
+    sDocksLine.textContent = t("ship_builder.s_docks_summary", { value: data.summary.s_docks });
+    shipSummaryEl.appendChild(sDocksLine);
+  }
+
+  if (data.summary.s_ship_storage) {
+    const sShipStorageLine = document.createElement("div");
+    sShipStorageLine.textContent = t("ship_builder.s_ship_storage_summary", { value: data.summary.s_ship_storage });
+    shipSummaryEl.appendChild(sShipStorageLine);
+  }
+
+  if (data.summary.m_docks) {
+    const mDocksLine = document.createElement("div");
+    mDocksLine.textContent = t("ship_builder.m_docks_summary", { value: data.summary.m_docks });
+    shipSummaryEl.appendChild(mDocksLine);
+  }
+
+  if (data.summary.m_ship_storage) {
+    const mShipStorageLine = document.createElement("div");
+    mShipStorageLine.textContent = t("ship_builder.m_ship_storage_summary", { value: data.summary.m_ship_storage });
+    shipSummaryEl.appendChild(mShipStorageLine);
+  }
+
   // Kept up to date by updateSelectedAmmoCapacity() (called on every
   // .group-select change, and once right after this renders) -- looked up
   // fresh each time rather than cached, since this whole panel gets
@@ -3259,6 +3709,132 @@ function renderLoadoutCell(loadoutTd, entry) {
   }
 }
 
+// {shipType, sCapacity, mCapacity} for one ship_id, looked up from
+// allShips (already loaded before any fleet list ever renders -- see
+// bootstrap()) rather than snapshotted onto the cart entry itself, so it
+// always reflects the current build's own data even for a fleet list
+// imported from an older file. sCapacity/mCapacity are s_docks +
+// s_ship_storage and m_docks + m_ship_storage respectively -- external
+// docking points and internal hangar storage combined into one "how many
+// ships of this size can this hull carry or host" number (see
+// generate_ships_table.py's parse_ship_docks()). Returns null for a
+// ware_id allShips has no row for at all (e.g. a loadout imported from a
+// build where that ship since got removed/renamed).
+function shipCapacity(shipWareId) {
+  const ship = allShips.find((s) => s.ware_id === shipWareId);
+  if (!ship) return null;
+  return {
+    shipType: ship.ship_type,
+    sCapacity: (ship.s_docks ?? 0) + (ship.s_ship_storage ?? 0),
+    mCapacity: (ship.m_docks ?? 0) + (ship.m_ship_storage ?? 0),
+  };
+}
+
+// (Re)builds one cart row's own S/M Ship Capacity lines in `shipTd` from
+// `entry`'s *current* count -- a standalone function, not inlined into
+// renderCart()'s own per-entry loop, specifically so the qty +/-/input
+// handlers below can call it directly instead of re-running the whole
+// cart table. Those handlers deliberately don't call renderCart() itself
+// on every click/keystroke (see their own comments), so without this
+// they'd leave these two lines showing a stale count-1 total after any
+// qty change. Clears any previous .cart-ship-capacity lines first --
+// idempotent, safe to call as often as needed.
+function renderRowCapacityLines(shipTd, entry) {
+  shipTd.querySelectorAll(".cart-ship-capacity").forEach((el) => el.remove());
+  const capacity = shipCapacity(entry.shipWareId);
+  if (!capacity) return;
+  const sTotal = capacity.sCapacity * entry.count;
+  const mTotal = capacity.mCapacity * entry.count;
+  if (sTotal) {
+    const sLine = document.createElement("div");
+    sLine.className = "cart-ship-capacity";
+    sLine.textContent = t("fleet_lists.total_s_capacity", { value: sTotal });
+    shipTd.appendChild(sLine);
+  }
+  if (mTotal) {
+    const mLine = document.createElement("div");
+    mLine.className = "cart-ship-capacity";
+    mLine.textContent = t("fleet_lists.total_m_capacity", { value: mTotal });
+    shipTd.appendChild(mLine);
+  }
+}
+
+// Populates the "Ships Total Statistics" panel below the Download/Upload
+// Fleet List buttons -- in order: how many ships of each ship_type are in
+// the active fleet (every entry's own count, summed per type -- shown
+// whenever the fleet has any ships at all, regardless of whether they
+// have any S/M capacity), then the fleet's own total S/M Ship Capacity
+// (every entry's own shipCapacity() × its count, summed), then that same
+// capacity split out per ship_type actually present (only a type with a
+// nonzero total gets its own line there). Hidden entirely only when the
+// active fleet is empty (or every entry is an unrecognized ware_id
+// allShips has no row for) -- same "don't show an empty section"
+// convention as the ship builder's own summary lines (see
+// renderShipSummary()).
+function renderFleetStatistics() {
+  fleetStatisticsBody.innerHTML = "";
+
+  let totalS = 0;
+  let totalM = 0;
+  const countByType = new Map();
+  const capacityByType = new Map();
+
+  for (const entry of activeFleet().cart) {
+    if (!entry.count) continue;
+    const capacity = shipCapacity(entry.shipWareId);
+    if (!capacity) continue;
+
+    countByType.set(capacity.shipType, (countByType.get(capacity.shipType) ?? 0) + entry.count);
+
+    const sTotal = capacity.sCapacity * entry.count;
+    const mTotal = capacity.mCapacity * entry.count;
+    totalS += sTotal;
+    totalM += mTotal;
+    if (!sTotal && !mTotal) continue;
+    const bucket = capacityByType.get(capacity.shipType) ?? { sCapacity: 0, mCapacity: 0 };
+    bucket.sCapacity += sTotal;
+    bucket.mCapacity += mTotal;
+    capacityByType.set(capacity.shipType, bucket);
+  }
+
+  const hasAnything = countByType.size > 0 || totalS > 0 || totalM > 0;
+  fleetStatisticsPanel.classList.toggle("hidden", !hasAnything);
+  if (!hasAnything) return;
+
+  const sortByTypeName = (a, b) => (shipTypeNames[a[0]] ?? a[0]).localeCompare(shipTypeNames[b[0]] ?? b[0]);
+
+  for (const [shipType, count] of [...countByType.entries()].sort(sortByTypeName)) {
+    const line = document.createElement("div");
+    line.textContent = t("fleet_lists.type_count", { type: shipTypeNames[shipType] ?? shipType, value: count });
+    fleetStatisticsBody.appendChild(line);
+  }
+
+  if (totalS) {
+    const line = document.createElement("div");
+    line.textContent = t("fleet_lists.total_s_capacity", { value: totalS });
+    fleetStatisticsBody.appendChild(line);
+  }
+  if (totalM) {
+    const line = document.createElement("div");
+    line.textContent = t("fleet_lists.total_m_capacity", { value: totalM });
+    fleetStatisticsBody.appendChild(line);
+  }
+
+  for (const [shipType, bucket] of [...capacityByType.entries()].sort(sortByTypeName)) {
+    const typeName = shipTypeNames[shipType] ?? shipType;
+    if (bucket.sCapacity) {
+      const line = document.createElement("div");
+      line.textContent = t("fleet_lists.type_s_capacity", { type: typeName, value: bucket.sCapacity });
+      fleetStatisticsBody.appendChild(line);
+    }
+    if (bucket.mCapacity) {
+      const line = document.createElement("div");
+      line.textContent = t("fleet_lists.type_m_capacity", { type: typeName, value: bucket.mCapacity });
+      fleetStatisticsBody.appendChild(line);
+    }
+  }
+}
+
 // Called after every fleet-list mutation (add/edit, remove, load) to keep
 // the cart table and the fleet-list tab bar in sync. Does NOT trigger any
 // recalculation -- cart edits just mark the active fleet dirty (see the qty
@@ -3321,6 +3897,8 @@ function renderCart() {
     qtyInput.addEventListener("change", () => {
       entry.count = Math.max(0, Number(qtyInput.value) || 0);
       qtyInput.value = entry.count;
+      renderRowCapacityLines(shipTd, entry);
+      renderFleetStatistics();
       activeFleet().dirty = true;
       saveState();
     });
@@ -3336,6 +3914,8 @@ function renderCart() {
     minusBtn.addEventListener("click", (event) => {
       entry.count = event.shiftKey ? 0 : Math.max(0, entry.count - (event.ctrlKey ? 10 : 1));
       qtyInput.value = entry.count;
+      renderRowCapacityLines(shipTd, entry);
+      renderFleetStatistics();
       activeFleet().dirty = true;
       saveState();
     });
@@ -3347,6 +3927,8 @@ function renderCart() {
     plusBtn.addEventListener("click", (event) => {
       entry.count += event.ctrlKey ? 10 : 1;
       qtyInput.value = entry.count;
+      renderRowCapacityLines(shipTd, entry);
+      renderFleetStatistics();
       activeFleet().dirty = true;
       saveState();
     });
@@ -3377,6 +3959,12 @@ function renderCart() {
     qtyRow.appendChild(removeBtn);
 
     shipTd.appendChild(qtyRow);
+
+    // This entry's own S/M Ship Capacity at its current count -- only
+    // shown when actually nonzero, same "don't show a stat this ship
+    // doesn't have" convention as the ship builder's own summary lines.
+    renderRowCapacityLines(shipTd, entry);
+
     tr.appendChild(shipTd);
 
     const loadoutTd = document.createElement("td");
@@ -3386,6 +3974,8 @@ function renderCart() {
 
     cartBody.appendChild(tr);
   });
+
+  renderFleetStatistics();
 }
 
 async function editCartEntry(index) {
@@ -5006,6 +5596,26 @@ const SHARE_SECTIONS = [
       return true;
     },
   },
+  {
+    section: "component_analyzer_tables",
+    checkbox: document.getElementById("share-option-component_analyzer_tables"),
+    hasContent: () => componentAnalyzerTables.length > 0,
+    buildPayload: () =>
+      buildComponentAnalyzerTablesPayload(new Set(componentAnalyzerTables.map((table) => table.id))),
+    // importComponentAnalyzerTables() is async (it warms componentListCache
+    // for every imported table's own type before rendering -- see its own
+    // docstring) but applyShareLinksFromUrl() calls every section's
+    // applyPayload() synchronously and doesn't await the result -- fine
+    // here since the only thing that actually needs to happen before this
+    // returns is the basic shape check; the import itself (and its own
+    // render) finishes shortly after, same as any other async work kicked
+    // off from a synchronous event handler.
+    applyPayload: (data) => {
+      if (!Array.isArray(data) || data.length === 0) return false;
+      importComponentAnalyzerTables(data);
+      return true;
+    },
+  },
 ];
 
 // See SHARE_SECTIONS' own comment on why `label` isn't a field there.
@@ -5475,13 +6085,2340 @@ function updatePlayerLocationMarker(iconName) {
   }
 }
 
+// ---- Component Analyzer ----
+// Metadata catalog for the chassis component type's own comparison stats --
+// a flat list, not a nested group -> stats table, so adding a new stat is
+// one line and "which group is this in" always lives right next to the
+// stat's own definition. Each entry's `key` is a real field GET /api/ships
+// already returns on every ship object (allShips) -- `table` just records
+// which underlying table it actually came from (ships_base vs flight_model,
+// LEFT JOINed together server-side -- see that endpoint's own docstring),
+// purely for documentation, since both land in the same flat ship object.
+// `group` is one of CHASSIS_STAT_GROUPS below; a stat-set tab (not built
+// yet -- see the Component Analyzer's own "statSets" infrastructure)
+// eventually filters this list by group to decide its own columns.
+//
+// turret_l/turret_m/bonus_l_weapons are the two dynamically-named column
+// families explained in GET /api/ships' own docstring -- only the sizes
+// actually present in the current dataset exist as real fields, so this
+// list only names the ones that happen to exist right now; a future DLC
+// adding e.g. turret_s would need a new entry here (and in that endpoint's
+// own SELECT) too.
+//
+// steeringcurve is the one flight stat with no plain numeric value (an
+// encoded curve string, e.g. "1.01:1.0,1.2:0.9,...") -- displayed as a
+// plain string for now, same as every other stat here, since no per-stat
+// formatting/rendering exists yet at all.
+const CHASSIS_STAT_GROUPS = ["core", "components", "capacities", "modifiers", "flight", "economy"];
+
+const CHASSIS_STAT_DEFINITIONS = [
+  // core
+  { key: "size", table: "ships_base", group: "core", labelKey: "component_analyzer.stat_labels.size" },
+  { key: "hull", table: "ships_base", group: "core", labelKey: "component_analyzer.stat_labels.hull" },
+  {
+    key: "ship_type",
+    table: "ships_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.ship_type",
+    // Real, already-localized name (e.g. "Tug"), not the raw internal
+    // code -- see formatStatValue()'s own comment.
+    shipType: true,
+  },
+  {
+    key: "traveldrivestability",
+    table: "ships_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.traveldrivestability",
+  },
+
+  // components (hardpoint slot counts)
+  { key: "shields", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.shields" },
+  {
+    key: "shields_bonus_m",
+    table: "ships_base",
+    group: "components",
+    labelKey: "component_analyzer.stat_labels.shields_bonus_m",
+  },
+  { key: "engines", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.engines" },
+  { key: "weapons", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.weapons" },
+  {
+    key: "bonus_l_weapons",
+    table: "ships_base",
+    group: "components",
+    labelKey: "component_analyzer.stat_labels.bonus_l_weapons",
+  },
+  {
+    key: "missile_launchers",
+    table: "ships_base",
+    group: "components",
+    labelKey: "component_analyzer.stat_labels.missile_launchers",
+  },
+  { key: "turret_l", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.turret_l" },
+  { key: "turret_m", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.turret_m" },
+
+  // capacities
+  { key: "crew", table: "ships_base", group: "capacities", labelKey: "component_analyzer.stat_labels.crew" },
+  {
+    key: "missile_capacity",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.missile_capacity",
+  },
+  {
+    key: "drone_capacity",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.drone_capacity",
+  },
+  {
+    key: "cargo_capacity",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.cargo_capacity",
+  },
+  {
+    key: "cargo_type",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.cargo_type",
+    // Real page 20205 "Ware Transport Types" name(s), not the raw
+    // "container"/"container solid" token(s) -- see formatStatValue()'s
+    // own comment.
+    cargoType: true,
+  },
+  { key: "s_docks", table: "ships_base", group: "capacities", labelKey: "component_analyzer.stat_labels.s_docks" },
+  { key: "m_docks", table: "ships_base", group: "capacities", labelKey: "component_analyzer.stat_labels.m_docks" },
+  {
+    key: "s_ship_storage",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.s_ship_storage",
+  },
+  {
+    key: "m_ship_storage",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.m_ship_storage",
+  },
+
+  // modifiers -- hull-wide multipliers applied on top of whatever's
+  // actually mounted (confirmed real in-game, not dead data -- see
+  // generate_ships_table.py's load_macro_data()' own docstring). Absence
+  // in the game's own files means an implicit, unmodified 1.0, not
+  // "unknown" -- every ship always has a real value for all four here.
+  {
+    key: "weapon_heat_modifier",
+    table: "ships_base",
+    group: "modifiers",
+    labelKey: "component_analyzer.stat_labels.weapon_heat_modifier",
+  },
+  {
+    key: "shield_capacity_modifier",
+    table: "ships_base",
+    group: "modifiers",
+    labelKey: "component_analyzer.stat_labels.shield_capacity_modifier",
+  },
+  {
+    key: "shield_rechargerate_modifier",
+    table: "ships_base",
+    group: "modifiers",
+    labelKey: "component_analyzer.stat_labels.shield_rechargerate_modifier",
+  },
+  {
+    key: "shield_rechargedelay_modifier",
+    table: "ships_base",
+    group: "modifiers",
+    labelKey: "component_analyzer.stat_labels.shield_rechargedelay_modifier",
+  },
+
+  // flight (flight_model)
+  {
+    key: "jerk_angular_value",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_angular_value",
+  },
+  {
+    key: "jerk_forward_accel",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_accel",
+  },
+  {
+    key: "jerk_forward_boost_accel",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_boost_accel",
+  },
+  {
+    key: "jerk_forward_boost_ratio",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_boost_ratio",
+  },
+  {
+    key: "jerk_forward_decel",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_decel",
+  },
+  {
+    key: "jerk_forward_ratio",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_ratio",
+  },
+  {
+    key: "jerk_forward_travel_accel",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_travel_accel",
+  },
+  {
+    key: "jerk_forward_travel_decel",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_travel_decel",
+  },
+  {
+    key: "jerk_forward_travel_ratio",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_forward_travel_ratio",
+  },
+  {
+    key: "jerk_strafe_value",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.jerk_strafe_value",
+  },
+  {
+    key: "physics_accfactors_forward",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_accfactors_forward",
+  },
+  {
+    key: "physics_accfactors_horizontal",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_accfactors_horizontal",
+  },
+  {
+    key: "physics_accfactors_reverse",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_accfactors_reverse",
+  },
+  {
+    key: "physics_accfactors_vertical",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_accfactors_vertical",
+  },
+  {
+    key: "physics_drag_forward",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_forward",
+  },
+  {
+    key: "physics_drag_horizontal",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_horizontal",
+  },
+  {
+    key: "physics_drag_pitch",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_pitch",
+  },
+  {
+    key: "physics_drag_reverse",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_reverse",
+  },
+  {
+    key: "physics_drag_roll",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_roll",
+  },
+  {
+    key: "physics_drag_vertical",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_vertical",
+  },
+  {
+    key: "physics_drag_yaw",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_drag_yaw",
+  },
+  {
+    key: "physics_inertia_pitch",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_inertia_pitch",
+  },
+  {
+    key: "physics_inertia_roll",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_inertia_roll",
+  },
+  {
+    key: "physics_inertia_yaw",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_inertia_yaw",
+  },
+  {
+    key: "physics_mass",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.physics_mass",
+  },
+  {
+    key: "steeringcurve",
+    table: "flight_model",
+    group: "flight",
+    labelKey: "component_analyzer.stat_labels.steeringcurve",
+  },
+
+  // economy
+  { key: "price_min", table: "ships_base", group: "economy", labelKey: "component_analyzer.stat_labels.price_min" },
+  { key: "price_avg", table: "ships_base", group: "economy", labelKey: "component_analyzer.stat_labels.price_avg" },
+  { key: "price_max", table: "ships_base", group: "economy", labelKey: "component_analyzer.stat_labels.price_max" },
+  {
+    key: "production_time",
+    table: "ships_base",
+    group: "economy",
+    labelKey: "component_analyzer.stat_labels.production_time",
+  },
+  {
+    key: "production_method",
+    table: "ships_base",
+    group: "economy",
+    labelKey: "component_analyzer.stat_labels.production_method",
+    // Real per-language text via buildMethodNames, not the raw internal
+    // code -- see formatStatValue()'s own comment.
+    buildMethod: true,
+  },
+];
+
+// {key, table, group, labelKey} shorthand -- see CHASSIS_STAT_DEFINITIONS'
+// own docstring above for what each field means. Used for every catalog
+// below (chassis's own predates this helper and is left in its original,
+// more verbose form rather than churned for no functional change).
+function statDef(key, table, group, labelKey) {
+  return { key, table, group, labelKey };
+}
+
+// Same shape as statDef(), plus `boolean: true` -- a handful of real
+// columns (leaf_ware, trigger_oncollision, missile_guided) are SQLite
+// BOOLEAN, which SQLite/JSON both represent as a plain 0/1 integer, not
+// true/false. formatStatValue() checks this flag to render "True"/"False"
+// instead of a bare "0"/"1" that'd otherwise look like any other numeric
+// stat.
+function boolStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), boolean: true };
+}
+
+// Same shape as statDef(), plus `cargoType: true` -- see
+// formatStatValue()'s own comment for why economy_wares_base.transport
+// (and ships_base.cargo_type, chassis's own object-literal stat def) both
+// need this rather than a bare String(value).
+function cargoTypeStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), cargoType: true };
+}
+
+// Same shape as statDef(), plus `buildMethod: true` -- see
+// formatStatValue()'s own comment for why every table's own
+// production_method column needs this rather than a bare String(value).
+function buildMethodStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), buildMethod: true };
+}
+
+// Same shape as statDef(), plus `compatibility: true` -- see
+// formatStatValue()'s own comment for why every table's own compatibility
+// column needs this rather than a bare String(value).
+function compatibilityStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), compatibility: true };
+}
+
+// Same shape as statDef(), plus `ammunitionCompatibility: true` -- a
+// distinct vocabulary from compatibilityStatDef() above despite living on
+// similarly-named "compatibility"/"ammunition_tags" columns
+// (missiles_base.compatibility, weapons_base/turrets_base.ammunition_tags)
+// -- see ammunitionCompatibilityDisplayName()'s own comment.
+function ammunitionCompatibilityStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), ammunitionCompatibility: true };
+}
+
+// Same shape as statDef(), plus `thrusterClass: true` -- see
+// formatStatValue()'s own comment for why thrusters_base's own
+// thruster_class column needs this rather than a bare String(value).
+function thrusterClassStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), thrusterClass: true };
+}
+
+// Same shape as statDef(), plus `missileWeaponSystem: true` -- see
+// formatStatValue()'s own comment for why missiles_base's own weapon_system
+// column needs this rather than a bare String(value). Deliberately not
+// used for bullets_base's own same-named "weapon_system" column (shared by
+// WEAPON_STAT_DEFINITIONS/TURRET_STAT_DEFINITIONS via bulletDamageStatDefs())
+// -- that one is a completely different vocabulary (turret range class/
+// weapon role, e.g. "turret_longrange", "weapon_mining"), not covered by
+// missileWeaponSystemNames at all.
+function missileWeaponSystemStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), missileWeaponSystem: true };
+}
+
+// Same shape as statDef(), plus `purpose: true` -- see formatStatValue()'s
+// own comment for why a table's own purpose column needs this rather than
+// a bare String(value).
+function purposeStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), purpose: true };
+}
+
+// Same shape as statDef(), plus `deployableType: true` -- see
+// formatStatValue()'s own comment for why deployables_base's own
+// deployable_type column needs this rather than a bare String(value).
+function deployableTypeStatDef(key, table, group, labelKey) {
+  return { ...statDef(key, table, group, labelKey), deployableType: true };
+}
+
+// Shared by the component table's own row-rendering loop (see
+// buildComponentAnalyzerTableElement()) -- missing values stay blank
+// (matches compareStatValues()' own "empty" handling), boolean columns
+// (see boolStatDef()) render as "True"/"False", everything else is just
+// String(value).
+function formatStatValue(def, value) {
+  if (value === null || value === undefined) return "";
+  if (def.boolean) return value ? t("component_analyzer.true_value") : t("component_analyzer.false_value");
+  // ships_base.cargo_type (one or two space-separated tokens) and
+  // economy_wares_base.transport (always one token) are both real page
+  // 20205 "Ware Transport Types" ids under the hood -- cargoTypeDisplayName()
+  // already does the token-split-and-lookup/fallback for the chassis case
+  // (see its own docstring) and works unchanged on a single token too.
+  if (def.cargoType) return cargoTypeDisplayName(value) || "";
+  // ships_base.ship_type (e.g. "tug") -- shipTypeNames is the same real,
+  // already-localized page 20221/1001 lookup the Type filter and Fleet
+  // List statistics already use (see loadShipTypeNames()); falls back to
+  // the raw code for the rare type with no SHIP_TYPE_NAME_REF entry, same
+  // spirit as cargoTypeDisplayName()'s own fallback.
+  if (def.shipType) return shipTypeNames[value] ?? value;
+  // production_method (e.g. "argon") -- buildMethodNames is fetched
+  // straight from GET /api/build_method_names, real per-language text
+  // (unlike ship_type/cargo_type, not a hardcoded {page,id} guess -- see
+  // that endpoint's own docstring), already used by the Build Method
+  // filter and every fleet-tab priority button (loadBuildMethodNames()).
+  if (def.buildMethod) return buildMethodNames[value] ?? value;
+  // engines_base/shields_base/weapons_base/turrets_base/thrusters_base.
+  // compatibility -- real page 20228 "Equipment Compatibility Types" names
+  // (or a matching race's own name -- see compatibilityDisplayName()'s own
+  // comment) joined for display, not the raw comma-joined tag set.
+  if (def.compatibility) return compatibilityDisplayName(value) || "";
+  // missiles_base.compatibility, weapons_base/turrets_base.ammunition_tags
+  // -- a distinct ammunition vocabulary from def.compatibility above (see
+  // ammunitionCompatibilityDisplayName()'s own comment), joined for display
+  // instead of the raw comma-joined/unsplit tag set (e.g. "largedumbfire").
+  if (def.ammunitionCompatibility) return ammunitionCompatibilityDisplayName(value) || "";
+  // thrusters_base.thruster_class ("allround"/"combat") -- real page 20107
+  // text via thrusterClassNames, same single-token lookup/fallback
+  // convention as def.shipType/def.buildMethod above (no comma-splitting
+  // needed, unlike def.compatibility/def.ammunitionCompatibility).
+  if (def.thrusterClass) return thrusterClassNames[value] ?? value;
+  // missiles_base.weapon_system (e.g. "missile_dumbfire") -- real page 1040
+  // "Weapon Systems" text via missileWeaponSystemNames, already used
+  // elsewhere (the missile Weapon System filter, buildMissileWeaponSystemFilterEntries())
+  // but not previously wired into this table's own stat column, which
+  // showed the raw internal code instead.
+  if (def.missileWeaponSystem) return missileWeaponSystemNames[value] ?? value;
+  // drones_base.purpose (e.g. "mine") -- real page 20213 text via
+  // purposeNames, already used elsewhere (the ship Purpose filter,
+  // buildPurposeFilterEntries()) but not previously wired into this
+  // table's own stat column, which showed the raw internal code instead.
+  if (def.purpose) return purposeNames[value] ?? value;
+  // deployables_base.deployable_type (e.g. "resourceprobe") -- real page
+  // 20201 text (page 20221 for "lasertower" specifically -- see
+  // DEPLOYABLE_TYPE_NAME_REF's own comment in generate_ships_table.py) via
+  // deployableTypeNames.
+  if (def.deployableType) return deployableTypeNames[value] ?? value;
+  return String(value);
+}
+
+// engines_base -- see GET /api/components' own docstring in api.py for
+// where every column here comes from. Groups match the user's own design:
+// core (identity/mount + the two plain thrust numbers), boost and travel
+// (every boost_*/travel_* jerk-adjacent stat, split by flight mode), economy
+// (price + build method, joined from equipment_wares_base -- engines_base
+// itself has no price/production concept of its own).
+const ENGINE_STAT_GROUPS = ["core", "boost", "travel", "economy"];
+const ENGINE_STAT_DEFINITIONS = [
+  statDef("mk", "engines_base", "core", "component_analyzer.stat_labels.mk"),
+  statDef("hull", "engines_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("size", "engines_base", "core", "component_analyzer.stat_labels.size"),
+  statDef("thrust_forward", "engines_base", "core", "component_analyzer.stat_labels.thrust_forward"),
+  statDef("thrust_reverse", "engines_base", "core", "component_analyzer.stat_labels.thrust_reverse"),
+  compatibilityStatDef("compatibility", "engines_base", "core", "component_analyzer.stat_labels.compatibility"),
+  statDef("boost_duration", "engines_base", "boost", "component_analyzer.stat_labels.boost_duration"),
+  statDef("boost_recharge", "engines_base", "boost", "component_analyzer.stat_labels.boost_recharge"),
+  statDef("boost_thrust", "engines_base", "boost", "component_analyzer.stat_labels.boost_thrust"),
+  statDef("boost_acceleration", "engines_base", "boost", "component_analyzer.stat_labels.boost_acceleration"),
+  statDef("boost_attack", "engines_base", "boost", "component_analyzer.stat_labels.boost_attack"),
+  statDef("boost_release", "engines_base", "boost", "component_analyzer.stat_labels.boost_release"),
+  statDef("boost_coast", "engines_base", "boost", "component_analyzer.stat_labels.boost_coast"),
+  statDef("travel_charge", "engines_base", "travel", "component_analyzer.stat_labels.travel_charge"),
+  statDef("travel_thrust", "engines_base", "travel", "component_analyzer.stat_labels.travel_thrust"),
+  statDef("travel_attack", "engines_base", "travel", "component_analyzer.stat_labels.travel_attack"),
+  statDef("travel_release", "engines_base", "travel", "component_analyzer.stat_labels.travel_release"),
+  statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
+];
+
+// shields_base -- every real column ("all stats besides macro, ware_id",
+// per the user's own spec) in one core group, plus the same economy group
+// every equipment type gets (joined from equipment_wares_base).
+const SHIELD_STAT_GROUPS = ["core", "economy"];
+const SHIELD_STAT_DEFINITIONS = [
+  statDef("mk", "shields_base", "core", "component_analyzer.stat_labels.mk"),
+  statDef("recharge_max", "shields_base", "core", "component_analyzer.stat_labels.recharge_max"),
+  statDef("recharge_rate", "shields_base", "core", "component_analyzer.stat_labels.recharge_rate"),
+  statDef("recharge_delay", "shields_base", "core", "component_analyzer.stat_labels.recharge_delay"),
+  statDef(
+    "recharge_disruptionstability",
+    "shields_base",
+    "core",
+    "component_analyzer.stat_labels.recharge_disruptionstability",
+  ),
+  statDef("hull", "shields_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("size", "shields_base", "core", "component_analyzer.stat_labels.size"),
+  compatibilityStatDef("compatibility", "shields_base", "core", "component_analyzer.stat_labels.compatibility"),
+  statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
+];
+
+// Every bullets_base column (besides bullet_class itself, which is only a
+// join key -- already shown as its own "core" stat) -- shared verbatim by
+// both WEAPON_STAT_DEFINITIONS and TURRET_STAT_DEFINITIONS' own "damage"
+// group below, since both LEFT JOIN the exact same table the exact same
+// way (see GET /api/components' own comment in api.py). Not every
+// weapon/turret resolves a row here -- 8 real bullet_class values point to
+// a missile macro instead (already covered by missiles_base) -- those
+// components simply render blank cells for this whole group, same as any
+// other missing-stat case.
+function bulletDamageStatDefs(table) {
+  return [
+    statDef("damage_value", table, "damage", "component_analyzer.stat_labels.damage_value"),
+    statDef("damage_shield", table, "damage", "component_analyzer.stat_labels.damage_shield"),
+    statDef("damage_hull", table, "damage", "component_analyzer.stat_labels.damage_hull"),
+    statDef("damage_repair", table, "damage", "component_analyzer.stat_labels.damage_repair"),
+    statDef("damage_shielddisruption", table, "damage", "component_analyzer.stat_labels.damage_shielddisruption"),
+    statDef("bullet_speed", table, "damage", "component_analyzer.stat_labels.bullet_speed"),
+    statDef("bullet_lifetime", table, "damage", "component_analyzer.stat_labels.bullet_lifetime"),
+    statDef("bullet_range", table, "damage", "component_analyzer.stat_labels.bullet_range"),
+    statDef("bullet_amount", table, "damage", "component_analyzer.stat_labels.bullet_amount"),
+    statDef("bullet_barrelamount", table, "damage", "component_analyzer.stat_labels.bullet_barrelamount"),
+    statDef("reload_rate", table, "damage", "component_analyzer.stat_labels.reload_rate"),
+    statDef("reload_time", table, "damage", "component_analyzer.stat_labels.reload_time"),
+    statDef("heat_value", table, "damage", "component_analyzer.stat_labels.heat_value"),
+    statDef("heat_initial", table, "damage", "component_analyzer.stat_labels.heat_initial"),
+    statDef("ammunition_value", table, "damage", "component_analyzer.stat_labels.ammunition_value"),
+    statDef("ammunition_reload", table, "damage", "component_analyzer.stat_labels.ammunition_reload"),
+    statDef("weapon_system", table, "damage", "component_analyzer.stat_labels.weapon_system"),
+    statDef("areadamage_value", table, "damage", "component_analyzer.stat_labels.areadamage_value"),
+    statDef("areadamage_shield", table, "damage", "component_analyzer.stat_labels.areadamage_shield"),
+    statDef(
+      "areadamage_shielddisruption",
+      table,
+      "damage",
+      "component_analyzer.stat_labels.areadamage_shielddisruption",
+    ),
+    statDef("areadamage_lifetime", table, "damage", "component_analyzer.stat_labels.areadamage_lifetime"),
+  ];
+}
+
+// weapons_base -- core (identity/mount + aim), ammunition (both
+// ammunition_* mount-compatibility columns -- which missile types this
+// mount accepts, NOT the bullet's own per-shot clip, see bulletDamageStatDefs()'
+// own ammunition_value/ammunition_reload for that), heat (weapon-level
+// overheat/cooldown mechanics), damage (every real per-shot stat, LEFT
+// JOINed from bullets_base -- see GET /api/components' own comment),
+// economy.
+const WEAPON_STAT_GROUPS = ["core", "ammunition", "heat", "damage", "economy"];
+const WEAPON_STAT_DEFINITIONS = [
+  statDef("mk", "weapons_base", "core", "component_analyzer.stat_labels.mk"),
+  statDef("hull", "weapons_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("size", "weapons_base", "core", "component_analyzer.stat_labels.size"),
+  statDef("rotation_speed", "weapons_base", "core", "component_analyzer.stat_labels.rotation_speed"),
+  statDef("rotation_acceleration", "weapons_base", "core", "component_analyzer.stat_labels.rotation_acceleration"),
+  statDef("weapon_angle", "weapons_base", "core", "component_analyzer.stat_labels.weapon_angle"),
+  compatibilityStatDef("compatibility", "weapons_base", "core", "component_analyzer.stat_labels.compatibility"),
+  statDef("bullet_class", "weapons_base", "core", "component_analyzer.stat_labels.bullet_class"),
+  ammunitionCompatibilityStatDef(
+    "ammunition_tags",
+    "weapons_base",
+    "ammunition",
+    "component_analyzer.stat_labels.ammunition_tags",
+  ),
+  statDef("ammunition_capacity", "weapons_base", "ammunition", "component_analyzer.stat_labels.ammunition_capacity"),
+  statDef("heat_overheat", "weapons_base", "heat", "component_analyzer.stat_labels.heat_overheat"),
+  statDef("heat_cooldelay", "weapons_base", "heat", "component_analyzer.stat_labels.heat_cooldelay"),
+  statDef("heat_coolrate", "weapons_base", "heat", "component_analyzer.stat_labels.heat_coolrate"),
+  statDef("heat_reenable", "weapons_base", "heat", "component_analyzer.stat_labels.heat_reenable"),
+  statDef(
+    "heat_overheatcooldelay",
+    "weapons_base",
+    "heat",
+    "component_analyzer.stat_labels.heat_overheatcooldelay",
+  ),
+  ...bulletDamageStatDefs("bullets_base"),
+  statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
+];
+
+// turrets_base -- core (identity/mount + aim), attack (rotation + both
+// ammunition_* mount-compatibility columns), damage (every real per-shot
+// stat, LEFT JOINed from bullets_base), economy.
+const TURRET_STAT_GROUPS = ["core", "attack", "damage", "economy"];
+const TURRET_STAT_DEFINITIONS = [
+  statDef("mk", "turrets_base", "core", "component_analyzer.stat_labels.mk"),
+  statDef("bullet_class", "turrets_base", "core", "component_analyzer.stat_labels.bullet_class"),
+  statDef("hull", "turrets_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("size", "turrets_base", "core", "component_analyzer.stat_labels.size"),
+  compatibilityStatDef("compatibility", "turrets_base", "core", "component_analyzer.stat_labels.compatibility"),
+  statDef("rotation_speed", "turrets_base", "attack", "component_analyzer.stat_labels.rotation_speed"),
+  statDef("rotation_acceleration", "turrets_base", "attack", "component_analyzer.stat_labels.rotation_acceleration"),
+  ammunitionCompatibilityStatDef(
+    "ammunition_tags",
+    "turrets_base",
+    "attack",
+    "component_analyzer.stat_labels.ammunition_tags",
+  ),
+  statDef("ammunition_capacity", "turrets_base", "attack", "component_analyzer.stat_labels.ammunition_capacity"),
+  ...bulletDamageStatDefs("bullets_base"),
+  statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
+];
+
+// thrusters_base -- core (identity: mk/size/class/compatibility, all
+// recovered from the ware_id string, not a macro -- thrusters have no
+// hardpoint-mount connection, see parse_thruster_wares()' own docstring),
+// flight (real per-mk RCS thrust numbers -- thrust_strafe/pitch/yaw/roll --
+// found via parse_thruster_macros() despite the above; see this session's
+// own probe that debunked the earlier "thrusters have no macro data at
+// all" assumption), economy.
+const THRUSTER_STAT_GROUPS = ["core", "flight", "economy"];
+const THRUSTER_STAT_DEFINITIONS = [
+  statDef("mk", "thrusters_base", "core", "component_analyzer.stat_labels.mk"),
+  thrusterClassStatDef("thruster_class", "thrusters_base", "core", "component_analyzer.stat_labels.thruster_class"),
+  statDef("size", "thrusters_base", "core", "component_analyzer.stat_labels.size"),
+  compatibilityStatDef("compatibility", "thrusters_base", "core", "component_analyzer.stat_labels.compatibility"),
+  statDef("thrust_strafe", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_strafe"),
+  statDef("thrust_pitch", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_pitch"),
+  statDef("thrust_yaw", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_yaw"),
+  statDef("thrust_roll", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_roll"),
+  statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
+];
+
+// software_base -- core is everything besides ware_id/name (which the
+// fixed Name column already shows): category, mk. economy is price only --
+// software has no macro/component file, no owners/production_method
+// concept at all (see software_base's own schema comment) -- just the
+// three price columns list_components()'s own software special-case query
+// already exposes.
+const SOFTWARE_STAT_GROUPS = ["core", "economy"];
+const SOFTWARE_STAT_DEFINITIONS = [
+  statDef("category", "software_base", "core", "component_analyzer.stat_labels.category"),
+  statDef("mk", "software_base", "core", "component_analyzer.stat_labels.mk"),
+  statDef("price_min", "software_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "software_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "software_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// drones_base -- core is everything besides ware_id/name/macro (which the
+// fixed Name column already shows, macro being an internal join key never
+// surfaced as a stat anywhere else either): ship_type, purpose, hull,
+// physics_mass. economy is price only. Backed by GET /api/drones, now
+// expanded past just ware_id/name to carry every drones_base column.
+const DRONE_STAT_GROUPS = ["core", "economy"];
+const DRONE_STAT_DEFINITIONS = [
+  statDef("ship_type", "drones_base", "core", "component_analyzer.stat_labels.ship_type"),
+  purposeStatDef("purpose", "drones_base", "core", "component_analyzer.stat_labels.purpose"),
+  statDef("hull", "drones_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("physics_mass", "drones_base", "core", "component_analyzer.stat_labels.physics_mass"),
+  statDef("price_min", "drones_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "drones_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "drones_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// deployables_base -- satellites/resource probes/mines/laser towers/nav
+// beacons all share this one table (see deployable_jobs()'s own docstring
+// in extract_game_data.py), but each subtype only populates a handful of
+// its columns (confirmed by inspection -- e.g. only satellites/laser
+// towers have radar_range, only mines/laser towers/the nav beacon have any
+// explosion_*, only laser towers/mines have physics_mass), so this splits
+// into groups by *purpose* rather than dumping everything in one "core":
+// core (identity: deployable_type, hull, physics_mass), detection
+// (radar_range -- satellites/laser towers), combat (explosion_strength/
+// explosion_damage/trigger_oncollision -- mines/laser towers/nav beacon),
+// economy (price). A blank cell for a stat that subtype doesn't have is
+// expected, not a bug -- same "wares that have that stat" shape as
+// WARE_STAT_DEFINITIONS' own volume/transport below.
+const DEPLOYABLE_STAT_GROUPS = ["core", "detection", "combat", "economy"];
+const DEPLOYABLE_STAT_DEFINITIONS = [
+  deployableTypeStatDef("deployable_type", "deployables_base", "core", "component_analyzer.stat_labels.deployable_type"),
+  statDef("hull", "deployables_base", "core", "component_analyzer.stat_labels.hull"),
+  statDef("physics_mass", "deployables_base", "core", "component_analyzer.stat_labels.physics_mass"),
+  statDef("radar_range", "deployables_base", "detection", "component_analyzer.stat_labels.radar_range"),
+  statDef("explosion_strength", "deployables_base", "combat", "component_analyzer.stat_labels.explosion_strength"),
+  statDef("explosion_damage", "deployables_base", "combat", "component_analyzer.stat_labels.explosion_damage"),
+  boolStatDef(
+    "trigger_oncollision",
+    "deployables_base",
+    "combat",
+    "component_analyzer.stat_labels.trigger_oncollision",
+  ),
+  statDef("price_min", "deployables_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "deployables_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "deployables_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// countermeasures_base -- price is the only stat this table has at all
+// (see its own schema comment in ships_tables.sql) -- economy only, no
+// core group. Only one real row in the base game ("Flares").
+const COUNTERMEASURE_STAT_GROUPS = ["economy"];
+const COUNTERMEASURE_STAT_DEFINITIONS = [
+  statDef("price_min", "countermeasures_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "countermeasures_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "countermeasures_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// crew_base -- same story as countermeasures_base immediately above:
+// price is the only stat, one real row ("Crew").
+const CREW_STAT_GROUPS = ["economy"];
+const CREW_STAT_DEFINITIONS = [
+  statDef("price_min", "crew_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "crew_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "crew_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// "Economy Wares" (componentType "economy_ware") -- economy_wares_base
+// alone (GET /api/economy_wares), real production-chain materials only
+// (raw resources, refined goods, station wares), unlike the old
+// "Production Wares" type this replaced (a flat union across every table
+// in PRICE_WARE_TABLES, mostly duplicating ships/equipment/etc. that
+// already have their own tabs). core is volume/transport (real per-unit
+// cargo-hold stats -- every row here actually has them now, unlike the
+// old type) plus leaf_ware (true = a bottom-of-chain resource with no
+// further recipe inputs, e.g. Ore/Silicon/Ice -- false = manufactured from
+// other wares). economy is price.
+const ECONOMY_WARE_STAT_GROUPS = ["core", "economy"];
+const ECONOMY_WARE_STAT_DEFINITIONS = [
+  statDef("volume", "economy_wares_base", "core", "component_analyzer.stat_labels.volume"),
+  cargoTypeStatDef("transport", "economy_wares_base", "core", "component_analyzer.stat_labels.transport"),
+  boolStatDef("leaf_ware", "economy_wares_base", "core", "component_analyzer.stat_labels.leaf_ware"),
+  statDef("price_min", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// missiles_base -- core (identity), flight (movement/lock/lifetime),
+// damage (everything else besides name/ware_id/macro -- ammo counts,
+// explosion numbers, reload, launcher-compatibility tag), economy (price
+// only -- missiles_base has no production_method/production_time column at
+// all, unlike every equipment_wares_base-backed type above).
+const MISSILE_STAT_GROUPS = ["core", "flight", "damage", "economy"];
+const MISSILE_STAT_DEFINITIONS = [
+  statDef("hull", "missiles_base", "core", "component_analyzer.stat_labels.hull"),
+  missileWeaponSystemStatDef("weapon_system", "missiles_base", "core", "component_analyzer.stat_labels.weapon_system"),
+  statDef(
+    "countermeasure_resilience",
+    "missiles_base",
+    "core",
+    "component_analyzer.stat_labels.countermeasure_resilience",
+  ),
+  statDef("physics_mass", "missiles_base", "flight", "component_analyzer.stat_labels.physics_mass"),
+  statDef("missile_lifetime", "missiles_base", "flight", "component_analyzer.stat_labels.missile_lifetime"),
+  statDef("missile_range", "missiles_base", "flight", "component_analyzer.stat_labels.missile_range"),
+  boolStatDef("missile_guided", "missiles_base", "flight", "component_analyzer.stat_labels.missile_guided"),
+  statDef("lock_time", "missiles_base", "flight", "component_analyzer.stat_labels.lock_time"),
+  statDef("lock_range", "missiles_base", "flight", "component_analyzer.stat_labels.lock_range"),
+  statDef("ammunition_value", "missiles_base", "damage", "component_analyzer.stat_labels.ammunition_value"),
+  statDef("ammunition_reload", "missiles_base", "damage", "component_analyzer.stat_labels.ammunition_reload"),
+  statDef("missile_amount", "missiles_base", "damage", "component_analyzer.stat_labels.missile_amount"),
+  statDef("missile_barrelamount", "missiles_base", "damage", "component_analyzer.stat_labels.missile_barrelamount"),
+  statDef("explosiondamage_value", "missiles_base", "damage", "component_analyzer.stat_labels.explosiondamage_value"),
+  statDef(
+    "explosiondamage_shielddisruption",
+    "missiles_base",
+    "damage",
+    "component_analyzer.stat_labels.explosiondamage_shielddisruption",
+  ),
+  statDef("reload_time", "missiles_base", "damage", "component_analyzer.stat_labels.reload_time"),
+  ammunitionCompatibilityStatDef(
+    "compatibility",
+    "missiles_base",
+    "damage",
+    "component_analyzer.stat_labels.compatibility",
+  ),
+  statDef("price_min", "missiles_base", "economy", "component_analyzer.stat_labels.price_min"),
+  statDef("price_avg", "missiles_base", "economy", "component_analyzer.stat_labels.price_avg"),
+  statDef("price_max", "missiles_base", "economy", "component_analyzer.stat_labels.price_max"),
+];
+
+// Every real component type this app already models a flat, ship-agnostic
+// list for -- "chassis" reuses data this app already loads elsewhere
+// (allShips) rather than adding a redundant fetch; missile/drone/
+// deployable/countermeasure/crew/economy_ware reuse their own existing GET
+// /api/<plural> endpoints; every other type is backed by the new GET
+// /api/components/{component_type} (see api.py's COMPONENT_LIST_SPECS,
+// which mirrors query_ship_components.py's own COMPONENT_TYPE_TABLES).
+const COMPONENT_TYPES = [
+  { id: "chassis", i18nKey: "component_analyzer.type_chassis" },
+  { id: "engine", i18nKey: "component_analyzer.type_engine" },
+  { id: "shield", i18nKey: "component_analyzer.type_shield" },
+  { id: "weapon", i18nKey: "component_analyzer.type_weapon" },
+  { id: "missile_launcher", i18nKey: "component_analyzer.type_missile_launcher" },
+  { id: "turret", i18nKey: "component_analyzer.type_turret" },
+  { id: "thruster", i18nKey: "component_analyzer.type_thruster" },
+  { id: "software", i18nKey: "component_analyzer.type_software" },
+  { id: "missile", i18nKey: "component_analyzer.type_missile" },
+  { id: "drone", i18nKey: "component_analyzer.type_drone" },
+  { id: "deployable", i18nKey: "component_analyzer.type_deployable" },
+  { id: "countermeasure", i18nKey: "component_analyzer.type_countermeasure" },
+  { id: "crew", i18nKey: "component_analyzer.type_crew" },
+  { id: "economy_ware", i18nKey: "component_analyzer.type_economy_ware" },
+];
+
+function componentTypeI18nKey(componentType) {
+  return COMPONENT_TYPES.find((type) => type.id === componentType)?.i18nKey ?? componentType;
+}
+
+// type id -> {ware_id, name}[], fetched once per type per page load (a
+// language switch reloads the whole page -- see i18n.js -- so there's no
+// separate cache-invalidation path to wire up here).
+const componentListCache = {};
+
+async function fetchComponentList(componentType) {
+  if (componentListCache[componentType]) return componentListCache[componentType];
+  let list;
+  if (componentType === "chassis") {
+    // maker_races/owners carried through (not just ware_id/name) so the
+    // picker's own rows get the same race-plate/owner-icon treatment as
+    // every other component type -- see renderComponentSetPickerRows().
+    list = allShips.map((ship) => ({
+      ware_id: ship.ware_id,
+      name: ship.name,
+      maker_races: ship.maker_races,
+      owners: ship.owners,
+    }));
+  } else {
+    const endpointByType = {
+      missile: "/api/missiles",
+      drone: "/api/drones",
+      deployable: "/api/deployables",
+      countermeasure: "/api/countermeasures",
+      crew: "/api/crew",
+      economy_ware: "/api/economy_wares",
+    };
+    const endpoint = endpointByType[componentType] ?? `/api/components/${componentType}`;
+    const response = await fetch(`${endpoint}?lang=${i18next.language}`);
+    list = await response.json();
+  }
+  componentListCache[componentType] = list;
+  return list;
+}
+
+// {id, title, componentType, components: [{ware_id, name}], statSets:
+// [{id, name}], activeStatSetIndex}[] -- newest first (see the "+ Add
+// Table" handler below, which unshift()s), matching issue #4's "pushes
+// existing tables down" spec. Persisted like `fleets` (see
+// saveState()/restorePersistedState() below).
+//
+// statSets is the tab strip issue #4 calls for -- named, user-defined
+// column groups a table can switch between, always at least one (mirrors
+// `fleets` itself never being empty). Only the tabs themselves exist so
+// far (create/rename/select/delete) -- no stat set actually drives which
+// columns render yet (component_analyzer_tables' own table still only
+// ever shows the fixed component-name column -- see
+// buildComponentAnalyzerTableElement()), that's future work once real
+// stat definitions exist.
+let componentAnalyzerTables = [];
+let nextComponentAnalyzerTableId = 1;
+let nextStatSetId = 1;
+
+function makeStatSet(name = "") {
+  return { id: nextStatSetId++, name, selectedStats: [] };
+}
+
+// componentType -> {groups, definitions} -- see each catalog's own
+// docstring above (CHASSIS_STAT_GROUPS et al.) for that type's own stat
+// breakdown. The "Select Stats" button (see
+// buildComponentAnalyzerTableElement()) only shows for a type with an
+// entry here; any type without one yet keeps the plain fixed-name-column
+// table, same "no catalog yet" gating COMPONENT_FILTER_GROUPS already uses
+// for the filter panel.
+const STAT_CATALOG_BY_TYPE = {
+  chassis: { groups: CHASSIS_STAT_GROUPS, definitions: CHASSIS_STAT_DEFINITIONS },
+  engine: { groups: ENGINE_STAT_GROUPS, definitions: ENGINE_STAT_DEFINITIONS },
+  shield: { groups: SHIELD_STAT_GROUPS, definitions: SHIELD_STAT_DEFINITIONS },
+  weapon: { groups: WEAPON_STAT_GROUPS, definitions: WEAPON_STAT_DEFINITIONS },
+  turret: { groups: TURRET_STAT_GROUPS, definitions: TURRET_STAT_DEFINITIONS },
+  thruster: { groups: THRUSTER_STAT_GROUPS, definitions: THRUSTER_STAT_DEFINITIONS },
+  missile: { groups: MISSILE_STAT_GROUPS, definitions: MISSILE_STAT_DEFINITIONS },
+  software: { groups: SOFTWARE_STAT_GROUPS, definitions: SOFTWARE_STAT_DEFINITIONS },
+  drone: { groups: DRONE_STAT_GROUPS, definitions: DRONE_STAT_DEFINITIONS },
+  deployable: { groups: DEPLOYABLE_STAT_GROUPS, definitions: DEPLOYABLE_STAT_DEFINITIONS },
+  countermeasure: { groups: COUNTERMEASURE_STAT_GROUPS, definitions: COUNTERMEASURE_STAT_DEFINITIONS },
+  crew: { groups: CREW_STAT_GROUPS, definitions: CREW_STAT_DEFINITIONS },
+  economy_ware: { groups: ECONOMY_WARE_STAT_GROUPS, definitions: ECONOMY_WARE_STAT_DEFINITIONS },
+};
+
+// componentType -> Map(ware_id -> full stat-carrying object) -- looked up
+// fresh at render time (see buildComponentAnalyzerTableElement()), never
+// snapshotted onto table.components itself, so a selected stat always
+// shows this build's live numbers rather than a copy frozen at selection
+// time (same "always live, never a stale snapshot" reasoning
+// shipCapacity() already follows for fleet entries).
+//
+// Every type besides chassis reuses componentListCache (see
+// fetchComponentList()) -- already populated with every real stat column
+// (GET /api/components/{type}/GET /api/missiles now return the full row,
+// not just the picker's own display fields) the moment "Select Components"
+// is opened for that type, which always happens before any component of
+// that type can exist in a table in the first place.
+function statSourceForComponentType(componentType) {
+  if (componentType === "chassis") return new Map(allShips.map((ship) => [ship.ware_id, ship]));
+  return new Map((componentListCache[componentType] ?? []).map((component) => [component.ware_id, component]));
+}
+
+function makeComponentAnalyzerTable() {
+  return {
+    id: nextComponentAnalyzerTableId++,
+    title: "",
+    componentType: COMPONENT_TYPES[0].id,
+    components: [],
+    statSets: [makeStatSet()],
+    activeStatSetIndex: 0,
+    minimized: false,
+    sortKey: null,
+    sortDirection: "asc",
+  };
+}
+
+function defaultNewStatSetLabel() {
+  return t("component_analyzer.default_stat_set_name");
+}
+
+// Picks "New Stat Set", "New Stat Set 2", ... -- same collision-avoidance
+// as nextNewFleetName(), but scoped to one table's own statSets rather
+// than a global list, since two different tables reusing the same stat
+// set name is fine (they're never shown side by side).
+function nextNewStatSetName(table) {
+  const label = defaultNewStatSetLabel();
+  const existingNames = new Set(table.statSets.map((statSet) => statSet.name.trim()));
+  if (!existingNames.has(label)) return label;
+  let n = 2;
+  while (existingNames.has(`${label} ${n}`)) n += 1;
+  return `${label} ${n}`;
+}
+
+const componentAnalyzerTablesContainer = document.getElementById("component-analyzer-tables");
+const componentAnalyzerAddTableBtn = document.getElementById("component-analyzer-add-table-btn");
+
+function renderComponentAnalyzerTables() {
+  componentAnalyzerTablesContainer.innerHTML = "";
+  for (const table of componentAnalyzerTables) {
+    componentAnalyzerTablesContainer.appendChild(buildComponentAnalyzerTableElement(table));
+  }
+}
+
+// One stat-set tab -- same look/behavior as the Fleet Lists tab bar's own
+// buildFleetTabButton() (reuses its exact .fleet-list-tab-btn/
+// .fleet-list-tab-name-stack/.fleet-list-tab-remove-btn classes, per the
+// user's own "should look like the fleet lists tabs" spec), minus that
+// button's ship icon/Build Priority sub-button, neither of which apply
+// here. Renaming happens via the edit-button field below the tab bar (see
+// buildComponentAnalyzerTableElement()), which commits on blur/Enter with
+// a full renderComponentAnalyzerTables() rather than live per-keystroke --
+// so this tab always just reads statSet.name fresh, no live text-node
+// wiring needed.
+function buildStatSetTabButton(table, statSet, index) {
+  const isActive = index === table.activeStatSetIndex;
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.className = isActive ? "fleet-list-tab-btn active" : "fleet-list-tab-btn";
+  tab.addEventListener("click", () => {
+    if (table.activeStatSetIndex === index) return;
+    table.activeStatSetIndex = index;
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+
+  const nameStack = document.createElement("span");
+  nameStack.className = "fleet-list-tab-name-stack";
+  nameStack.textContent = statSet.name.trim() || defaultNewStatSetLabel();
+  tab.appendChild(nameStack);
+
+  if (table.statSets.length > 1) {
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "fleet-list-tab-remove-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("component_analyzer.delete_stat_set_tooltip");
+    removeBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteStatSet(table, index);
+    });
+    tab.appendChild(removeBtn);
+  }
+
+  return tab;
+}
+
+function deleteStatSet(table, statSetIndex) {
+  if (table.statSets.length <= 1) return;
+  table.statSets.splice(statSetIndex, 1);
+  if (statSetIndex === table.activeStatSetIndex) {
+    table.activeStatSetIndex = Math.min(statSetIndex, table.statSets.length - 1);
+  } else if (statSetIndex < table.activeStatSetIndex) {
+    table.activeStatSetIndex -= 1;
+  }
+  saveState();
+  renderComponentAnalyzerTables();
+}
+
+// Builds the whole tab strip -- one .fleet-list-tab-btn per stat set plus
+// a trailing "+" (.fleet-list-tab-add-btn, same class as the Fleet Lists
+// tab bar's own).
+function buildStatSetTabBar(table) {
+  const nav = document.createElement("nav");
+  nav.className = "fleet-list-tabs";
+
+  table.statSets.forEach((statSet, index) => {
+    nav.appendChild(buildStatSetTabButton(table, statSet, index));
+  });
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "fleet-list-tab-add-btn";
+  addBtn.textContent = "+";
+  addBtn.title = t("component_analyzer.add_stat_set_tooltip");
+  addBtn.addEventListener("click", () => {
+    table.statSets.push(makeStatSet(nextNewStatSetName(table)));
+    table.activeStatSetIndex = table.statSets.length - 1;
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+  nav.appendChild(addBtn);
+
+  return nav;
+}
+
+// A name shown as plain text with an edit (pencil) button to its left --
+// click it to swap the text for an inline input; Enter or blur commits
+// (writes back via setValue, saveState()s, then a full
+// renderComponentAnalyzerTables() rebuilds everything, including this
+// field itself, from the new value) and Escape reverts without saving.
+// Used for both the table's own title and the active stat set's name (see
+// buildComponentAnalyzerTableElement()) -- replaces what used to be a
+// permanently-live <input> in both places, per the user's own request:
+// editing is now a deliberate discrete action, not continuous typing, so
+// there's no need to avoid a full re-render on commit the way a live
+// per-keystroke input would have.
+function buildEditableNameField(getValue, placeholder, setValue, className) {
+  const wrap = document.createElement("span");
+  wrap.className = className;
+
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "editable-name-edit-btn";
+  editBtn.textContent = "✎";
+  editBtn.title = t("component_analyzer.rename_tooltip");
+  editBtn.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "editable-name-input";
+    input.placeholder = placeholder;
+    input.value = getValue();
+
+    const commit = () => {
+      setValue(input.value);
+      saveState();
+      renderComponentAnalyzerTables();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      } else if (event.key === "Escape") {
+        input.removeEventListener("blur", commit);
+        renderComponentAnalyzerTables();
+      }
+    });
+
+    wrap.replaceChildren(editBtn, input);
+    input.focus();
+    input.select();
+  });
+
+  const nameText = document.createElement("span");
+  nameText.className = "editable-name-text";
+  nameText.textContent = getValue().trim() || placeholder;
+
+  wrap.append(editBtn, nameText);
+  return wrap;
+}
+
+function buildComponentAnalyzerTableElement(table) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "component-analyzer-table";
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "component-analyzer-table-header";
+
+  const titleField = buildEditableNameField(
+    () => table.title,
+    t("component_analyzer.table_title_placeholder"),
+    (value) => {
+      table.title = value;
+    },
+    "component-analyzer-table-title-field",
+  );
+
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "component-analyzer-table-type-select";
+  for (const type of COMPONENT_TYPES) {
+    const option = document.createElement("option");
+    option.value = type.id;
+    option.textContent = t(type.i18nKey);
+    if (type.id === table.componentType) option.selected = true;
+    typeSelect.appendChild(option);
+  }
+  typeSelect.addEventListener("change", () => {
+    // Switching type invalidates any already-selected components -- a
+    // ware_id from the old type's list has no meaning against the new
+    // type's own component set.
+    table.componentType = typeSelect.value;
+    table.components = [];
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+
+  const selectComponentsBtn = document.createElement("button");
+  selectComponentsBtn.type = "button";
+  selectComponentsBtn.textContent = t("component_analyzer.select_components_btn");
+  selectComponentsBtn.addEventListener("click", () => openComponentSetPickerModal(table));
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "component-analyzer-table-remove-btn";
+  removeBtn.textContent = "×";
+  removeBtn.title = t("component_analyzer.remove_table");
+  removeBtn.addEventListener("click", () => {
+    componentAnalyzerTables = componentAnalyzerTables.filter((other) => other.id !== table.id);
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+
+  // Minimize/maximize -- same "+"/"−" toggle-button convention as the
+  // Fleet Lists loadout cell's own cart-loadout-toggle-btn (reuses that
+  // exact class), just collapsing this whole table down to its header row
+  // instead of collapsing a loadout down to its chassis line. A discrete
+  // click, not continuous typing, so a full renderComponentAnalyzerTables()
+  // on toggle is fine here (unlike the rename inputs above, which
+  // deliberately avoid that to not lose focus mid-keystroke).
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "cart-loadout-toggle-btn component-analyzer-table-minimize-btn";
+  minimizeBtn.textContent = table.minimized ? "+" : "−";
+  minimizeBtn.title = t(
+    table.minimized ? "component_analyzer.expand_table_tooltip" : "component_analyzer.collapse_table_tooltip",
+  );
+  minimizeBtn.addEventListener("click", () => {
+    table.minimized = !table.minimized;
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+
+  headerRow.append(minimizeBtn, titleField, typeSelect, selectComponentsBtn, removeBtn);
+  wrapper.appendChild(headerRow);
+
+  if (!table.minimized) {
+    wrapper.appendChild(buildStatSetTabBar(table));
+
+    const activeStatSet = table.statSets[table.activeStatSetIndex];
+    const statSetRow = document.createElement("div");
+    statSetRow.className = "component-analyzer-stat-set-row";
+
+    const statSetNameField = buildEditableNameField(
+      () => activeStatSet.name,
+      t("component_analyzer.stat_set_name_placeholder"),
+      (value) => {
+        activeStatSet.name = value;
+      },
+      "component-analyzer-stat-set-name-field",
+    );
+    statSetRow.appendChild(statSetNameField);
+
+    // Only shown for a type with a real stat catalog (currently just
+    // chassis -- see STAT_CATALOG_BY_TYPE).
+    if (STAT_CATALOG_BY_TYPE[table.componentType]) {
+      const selectStatsBtn = document.createElement("button");
+      selectStatsBtn.type = "button";
+      selectStatsBtn.textContent = t("component_analyzer.select_stats_btn");
+      selectStatsBtn.addEventListener("click", () => openStatSelectModal(table));
+      statSetRow.appendChild(selectStatsBtn);
+    }
+    wrapper.appendChild(statSetRow);
+
+    const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+    const selectedStatDefs = (activeStatSet.selectedStats ?? [])
+      .map((key) => catalog?.definitions.find((def) => def.key === key))
+      .filter(Boolean);
+
+    const tableWrapper = document.createElement("div");
+    tableWrapper.className = "component-analyzer-table-wrapper";
+
+    // Looked up once per render (not per row/stat) -- statSourceForComponentType()
+    // builds a fresh Map from allShips each call. Needed by both the sort
+    // (below) and the row-value lookups.
+    const statSource = statSourceForComponentType(table.componentType);
+
+    const componentTable = document.createElement("table");
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    headTr.appendChild(buildNameColumnHeader(table));
+    for (const def of selectedStatDefs) {
+      headTr.appendChild(buildStatColumnHeader(table, def, statSource));
+    }
+    thead.appendChild(headTr);
+    componentTable.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    if (table.components.length === 0) {
+      const emptyRow = document.createElement("tr");
+      const emptyTd = document.createElement("td");
+      emptyTd.textContent = t("component_analyzer.no_components_selected");
+      emptyTd.className = "component-analyzer-empty-cell";
+      emptyTd.colSpan = 1 + selectedStatDefs.length;
+      emptyRow.appendChild(emptyTd);
+      tbody.appendChild(emptyRow);
+    } else {
+      // table.components is the one shared row order every stat-set tab
+      // renders -- sorting (see buildStatColumnHeader()) mutates it in
+      // place when triggered, rather than this render computing its own
+      // transient sorted copy, so the order a user sees never depends on
+      // which stat set happens to be active (previously it did: a sort
+      // only got applied here while its own column happened to be one of
+      // the currently-visible ones, silently reverting to insertion order
+      // on any tab that didn't show that column -- same row set, but a
+      // different-looking order per tab).
+      for (const component of table.components) {
+        const tr = document.createElement("tr");
+        const nameTd = document.createElement("td");
+        nameTd.className = "component-analyzer-name-cell";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = component.name;
+        nameTd.appendChild(nameSpan);
+        const rowModLabBtn = buildModLabButton(component.name);
+        rowModLabBtn.classList.add("component-analyzer-mod-lab-btn-row");
+        nameTd.appendChild(rowModLabBtn);
+        tr.appendChild(nameTd);
+
+        const sourceRow = statSource.get(component.ware_id);
+        for (const def of selectedStatDefs) {
+          const statTd = document.createElement("td");
+          const value = sourceRow ? sourceRow[def.key] : undefined;
+          statTd.textContent = formatStatValue(def, value);
+          tr.appendChild(statTd);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+    componentTable.appendChild(tbody);
+    tableWrapper.appendChild(componentTable);
+    wrapper.appendChild(tableWrapper);
+  }
+
+  return wrapper;
+}
+
+// Missing values (null/undefined/"") count as the lowest possible value --
+// not displayed as 0 anywhere (the empty cell stays empty, see the row-
+// rendering loop's own `value === null ... ? "" : ...`), just treated as
+// lower than any real value for ordering purposes. That means plain
+// direction-multiplication at the call site (see buildStatColumnHeader())
+// already places it correctly with no special-casing needed: ascending
+// puts missing first, descending puts it last, exactly like a genuinely
+// low number would, in either direction. Otherwise: numeric comparison
+// when both sides are real numbers, string comparison otherwise (covers
+// text stats like ship_type/cargo_type/production_method and
+// steeringcurve's own encoded-curve string).
+function compareStatValues(a, b) {
+  const aMissing = a === null || a === undefined || a === "";
+  const bMissing = b === null || b === undefined || b === "";
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return -1;
+  if (bMissing) return 1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b));
+}
+
+// Shared by every sortable column header (the fixed Name column and every
+// stat column alike) -- label plus a sort toggle button. Neutral "⇅" when
+// this column isn't the active sort; "▲"/"▼" (matching table.sortDirection)
+// when it is. Clicking a not-yet-active column makes it the sort key at
+// ascending; clicking the already-active column just flips direction --
+// "up for ascending, down for descending" is shown by the glyph itself
+// changing, not two separate buttons. `getValue(component)` returns
+// whatever this column actually sorts by (a component's own `.name` for
+// the Name column, a looked-up stat value for a stat column -- see
+// buildNameColumnHeader()/buildStatColumnHeader()) -- computed once per
+// component up front by the caller when that's expensive (a Map lookup),
+// not recomputed per pairwise comparison. Returns {th, headerContent} so
+// buildNameColumnHeader() can append its own extra control (the
+// Modifications Lab button) into the same flex row.
+function buildSortableColumnHeader(table, sortKey, labelText, getValue) {
+  const th = document.createElement("th");
+  const headerContent = document.createElement("span");
+  headerContent.className = "component-analyzer-stat-header";
+
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = labelText;
+  headerContent.appendChild(labelSpan);
+
+  const isActive = table.sortKey === sortKey;
+  const sortBtn = document.createElement("button");
+  sortBtn.type = "button";
+  sortBtn.className = isActive ? "component-analyzer-sort-btn active" : "component-analyzer-sort-btn";
+  sortBtn.textContent = isActive ? (table.sortDirection === "desc" ? "▼" : "▲") : "⇅";
+  sortBtn.title = t("component_analyzer.sort_column_tooltip");
+  sortBtn.addEventListener("click", () => {
+    table.sortDirection = isActive && table.sortDirection === "asc" ? "desc" : "asc";
+    table.sortKey = sortKey;
+    // Sorts table.components itself -- the one shared row order every
+    // stat-set tab renders (see the component table's own comment) --
+    // rather than a per-render copy, so the result sticks regardless of
+    // which stat set is active afterward, even one that doesn't show this
+    // column at all.
+    const direction = table.sortDirection === "desc" ? -1 : 1;
+    table.components.sort((a, b) => direction * compareStatValues(getValue(a), getValue(b)));
+    saveState();
+    renderComponentAnalyzerTables();
+  });
+  headerContent.appendChild(sortBtn);
+
+  th.appendChild(headerContent);
+  return { th, headerContent };
+}
+
+// Shared by both the Name column header's own launcher (whole table, every
+// ware) and each row's half-size launcher (that one ware only) -- see
+// .component-analyzer-mod-lab-btn-row for the row variant's sizing.
+// wareName is null for the table-wide button (opens scoped to "All"),
+// otherwise the specific component's own name (opens scoped to it) -- see
+// openModLabModal()'s own comment for how that scope reaches the modal
+// title. Icon is the neutral/unmodded mod_lab_button.png (see
+// generate_mod_lab_icons.py's own docstring) rather than any one tier's
+// color, since no mod is actually applied yet.
+function buildModLabButton(wareName) {
+  const modLabBtn = document.createElement("button");
+  modLabBtn.type = "button";
+  modLabBtn.className = "component-analyzer-mod-lab-btn";
+  const modLabIcon = document.createElement("img");
+  modLabIcon.src = "/images/mod_lab_icons/mod_lab_button.png";
+  modLabIcon.alt = "";
+  modLabBtn.appendChild(modLabIcon);
+  modLabBtn.title = t("component_analyzer.mod_lab_btn_tooltip");
+  modLabBtn.addEventListener("click", () => openModLabModal(wareName));
+  return modLabBtn;
+}
+
+// The fixed Name column's own header -- alphabetical sort (getValue reads
+// component.name directly, same compareStatValues() string path every
+// text stat already uses) plus, right-aligned in the same row (via
+// .component-analyzer-mod-lab-btn's own margin-left: auto), the
+// table-wide Modifications Lab launcher button. Not wired to any real mod
+// logic yet -- see openModLabModal()'s own comment.
+function buildNameColumnHeader(table) {
+  const { th, headerContent } = buildSortableColumnHeader(
+    table,
+    "name",
+    t("component_analyzer.component_name_header"),
+    (component) => component.name,
+  );
+  headerContent.appendChild(buildModLabButton(null));
+  return th;
+}
+
+// One stat column's <th> -- see buildSortableColumnHeader()'s own
+// docstring. `statSource` is built once by the caller (see the component
+// table's own comment) and closed over here rather than rebuilt per
+// comparison.
+function buildStatColumnHeader(table, def, statSource) {
+  return buildSortableColumnHeader(table, def.key, t(def.labelKey), (component) => statSource.get(component.ware_id)?.[def.key]).th;
+}
+
+// ---- Modifications Lab (shell only) ----
+// Opened from the circular button on any table's own Name column header
+// (whole table, every ware -- wareName null) or a row's own half-size
+// button (see buildModLabButton()) (that one ware only -- wareName set).
+// Purely a placeholder for now, per its own scope: no real mod data/logic
+// exists yet -- this will eventually apply real game mod sets
+// (Basic/Enhanced/Exceptional -- page 20110 "Equipment Mods") or ship
+// chassis modifiers (see ships_base.weapon_heat_modifier and friends) to a
+// component's own displayed stats. One shared modal (not one per table/row)
+// since there's nothing table- or row-specific to show yet either way --
+// only the title's own scope differs.
+const modLabModalOverlay = document.getElementById("mod-lab-modal-overlay");
+const modLabModalTitle = document.getElementById("mod-lab-modal-title");
+const modLabCloseBtn = document.getElementById("mod-lab-close-btn");
+
+function openModLabModal(wareName = null) {
+  modLabModalTitle.textContent = wareName
+    ? t("mod_lab_modal.title_ware", { ware: wareName })
+    : t("mod_lab_modal.title_all");
+  modLabModalOverlay.classList.remove("hidden");
+}
+
+function closeModLabModal() {
+  modLabModalOverlay.classList.add("hidden");
+}
+
+modLabCloseBtn.addEventListener("click", closeModLabModal);
+
+componentAnalyzerAddTableBtn.addEventListener("click", () => {
+  componentAnalyzerTables.unshift(makeComponentAnalyzerTable());
+  saveState();
+  renderComponentAnalyzerTables();
+});
+
+// Builds a new Component Analyzer table pre-populated from another page's
+// own current selection, rather than the fully-empty table "+ Add Table"
+// creates -- e.g. the Ship Builder's "View in Component Analyzer" button
+// below, which passes every ship currently passing #ship-filters. One stat
+// set per real group in that type's own catalog (STAT_CATALOG_BY_TYPE),
+// named after the group itself (t("component_analyzer.stat_groups.<group>"),
+// same lookup the "Select Stats" modal's own group toggles use), with
+// every stat belonging to that group pre-selected -- immediately useful,
+// no further setup needed.
+//
+// `components` must already be in whatever shape statSourceForComponentType()
+// expects that type's rows to carry name/ware_id from (for chassis: the
+// same {ware_id, name, maker_races, owners} shape fetchComponentList()
+// itself builds from allShips) -- callers for any type other than chassis
+// would additionally need componentListCache[componentType] already warm
+// (fetchComponentList(componentType)) before this renders, since every
+// stat column reads from that cache, not from `components` itself (see
+// statSourceForComponentType()'s own docstring); not a concern yet since
+// chassis is the only type this is wired up for so far.
+//
+// `chassisName`, when given (the equipment picker's own button -- see
+// viewEquipmentInAnalyzerBtn below), scopes the title to that one ship
+// ("<chassis> <type> Fleet Planner View") since `components` there is
+// already narrowed to just that ship's own compatible options for one
+// slot -- omitted for the Ship Builder's own chassis button, which has no
+// single ship to name (its own `components` spans every ship currently
+// passing the filters).
+function createFleetPlannerViewTable(componentType, components, chassisName = null) {
+  const catalog = STAT_CATALOG_BY_TYPE[componentType];
+  const table = makeComponentAnalyzerTable();
+  table.componentType = componentType;
+  const type = t(componentTypeI18nKey(componentType));
+  table.title = chassisName
+    ? t("component_analyzer.fleet_planner_view_title_for_chassis", { chassis: chassisName, type })
+    : t("component_analyzer.fleet_planner_view_title", { type });
+  table.components = [...components].sort((a, b) => a.name.localeCompare(b.name));
+  if (catalog) {
+    table.statSets = catalog.groups.map((group) => {
+      const statSet = makeStatSet(t(`component_analyzer.stat_groups.${group}`));
+      statSet.selectedStats = catalog.definitions.filter((def) => def.group === group).map((def) => def.key);
+      return statSet;
+    });
+    table.activeStatSetIndex = 0;
+  }
+  componentAnalyzerTables.unshift(table);
+  saveState();
+  renderComponentAnalyzerTables();
+  showPage("component-analyzer");
+}
+
+const viewChassisInAnalyzerBtn = document.getElementById("view-chassis-in-analyzer-btn");
+viewChassisInAnalyzerBtn.addEventListener("click", () => {
+  const visibleChassis = allShips
+    .filter((ship) => shipPassesCurrentFilters(ship))
+    .map((ship) => ({ ware_id: ship.ware_id, name: ship.name, maker_races: ship.maker_races, owners: ship.owners }));
+  createFleetPlannerViewTable("chassis", visibleChassis);
+});
+
+// Same idea as viewChassisInAnalyzerBtn above, scoped to one ship's own
+// equipment picker instead of the whole Ship Builder's ship list -- every
+// option currently listed in this modal's own table (group.options,
+// already narrowed to this one slot's real compatible candidates) becomes
+// the new table's components. Unlike chassis, engine/shield/weapon/turret
+// stats read from componentListCache (see statSourceForComponentType()),
+// not from table.components itself, so fetchComponentList() has to
+// resolve first -- almost always already cached by the time this modal is
+// even open (equipment_picker_modal's own table renders from the same
+// group.options, populated from the ship's own /api/ships/{id}/groups
+// call, independently of componentListCache -- so this is the first real
+// fetch for this type only if "Select Components" was never opened for it
+// this session).
+const viewEquipmentInAnalyzerBtn = document.getElementById("view-equipment-in-analyzer-btn");
+viewEquipmentInAnalyzerBtn.addEventListener("click", async () => {
+  if (!equipmentPickerModalGroup) return;
+  // Read componentType/options before closing -- closeEquipmentPickerModal()
+  // nulls out equipmentPickerModalGroup itself.
+  const componentType = equipmentPickerModalGroup.component_type;
+  const options = equipmentPickerModalGroup.options;
+  const chassisName = currentShip?.name ?? null;
+  closeEquipmentPickerModal();
+  const fullList = await fetchComponentList(componentType);
+  const byWareId = new Map(fullList.map((component) => [component.ware_id, component]));
+  const components = options.map((option) => byWareId.get(option.ware_id)).filter(Boolean);
+  createFleetPlannerViewTable(componentType, components, chassisName);
+});
+
+// ---- Component Analyzer Export/Import ----
+// Plain-data snapshot of `tableIds`' own tables -- exactly
+// componentAnalyzerTables' own shape, no reshaping -- shared by the Export
+// modal's own JSON path and the "Component Analyzer Tables" share section
+// (SHARE_SECTIONS below), so both produce byte-identical JSON for the same
+// table selection ("the json representation we use for the s3 save", per
+// the user's own spec). A deep clone (JSON round-trip), not a live
+// reference -- callers serialize/upload this immediately and it must not
+// change out from under them if a table is edited afterward.
+function buildComponentAnalyzerTablesPayload(tableIds) {
+  return JSON.parse(JSON.stringify(componentAnalyzerTables.filter((table) => tableIds.has(table.id))));
+}
+
+// One flattened {table_name, tab_name, headers, rows} sheet per (table,
+// stat-set) pair among `tableIds` -- every row already resolved to plain
+// display strings via formatStatValue(), the exact same values/formatting
+// the on-screen table itself shows (True/False for booleans, blank for
+// missing), not a raw re-dump of table.components' own (possibly stale)
+// embedded fields. Backs the CSV/XLSX export paths -- component_export.py
+// has no opinion on what any of this means (see its own docstring), this
+// is where the actual X4-domain resolution happens.
+function gatherComponentAnalyzerExportSheets(tableIds) {
+  const sheets = [];
+  for (const table of componentAnalyzerTables) {
+    if (!tableIds.has(table.id)) continue;
+    const tableName = table.title.trim() || t(componentTypeI18nKey(table.componentType));
+    const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+    const statSource = statSourceForComponentType(table.componentType);
+    for (const statSet of table.statSets) {
+      const tabName = statSet.name.trim() || defaultNewStatSetLabel();
+      const selectedStatDefs = (statSet.selectedStats ?? [])
+        .map((key) => catalog?.definitions.find((def) => def.key === key))
+        .filter(Boolean);
+      const headers = [
+        t("component_analyzer.component_name_header"),
+        ...selectedStatDefs.map((def) => t(def.labelKey)),
+      ];
+      const rows = table.components.map((component) => {
+        const sourceRow = statSource.get(component.ware_id);
+        return [
+          component.name,
+          ...selectedStatDefs.map((def) => formatStatValue(def, sourceRow ? sourceRow[def.key] : undefined)),
+        ];
+      });
+      sheets.push({ table_name: tableName, tab_name: tabName, headers, rows });
+    }
+  }
+  return sheets;
+}
+
+// Triggers a browser download of `content` (a string, paired with
+// `mimeType`, or an already-typed Blob straight off a fetch response) named
+// `filename` -- build a blob, click a throwaway <a>, revoke the URL.
+function downloadBlob(content, mimeType, filename) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+const componentAnalyzerExportBtn = document.getElementById("component-analyzer-export-btn");
+const componentAnalyzerExportModalOverlay = document.getElementById("component-analyzer-export-modal-overlay");
+const componentAnalyzerExportFormatSelect = document.getElementById("component-analyzer-export-format-select");
+const componentAnalyzerExportTablesList = document.getElementById("component-analyzer-export-tables-list");
+const componentAnalyzerExportTablesAllBtn = document.getElementById("component-analyzer-export-tables-all-btn");
+const componentAnalyzerExportTablesNoneBtn = document.getElementById("component-analyzer-export-tables-none-btn");
+const componentAnalyzerExportModalStatus = document.getElementById("component-analyzer-export-modal-status");
+const componentAnalyzerExportCancelBtn = document.getElementById("component-analyzer-export-cancel-btn");
+const componentAnalyzerExportConfirmBtn = document.getElementById("component-analyzer-export-confirm-btn");
+const componentAnalyzerImportInput = document.getElementById("component-analyzer-import-input");
+
+function showComponentAnalyzerExportStatus(text, isError) {
+  componentAnalyzerExportModalStatus.textContent = text;
+  componentAnalyzerExportModalStatus.classList.toggle("hidden", !text);
+  componentAnalyzerExportModalStatus.classList.toggle("status-error", !!isError);
+}
+
+// Rebuilt fresh every opening (not kept in sync with renderComponentAnalyzerTables()
+// the way the picker modals are) -- a plain snapshot list, not something a
+// user edits while this modal happens to be open.
+function openComponentAnalyzerExportModal() {
+  componentAnalyzerExportFormatSelect.value = "json";
+  componentAnalyzerExportTablesList.innerHTML = "";
+  showComponentAnalyzerExportStatus("", false);
+
+  if (componentAnalyzerTables.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "component-analyzer-empty-cell";
+    empty.textContent = t("component_analyzer_export_modal.no_tables");
+    componentAnalyzerExportTablesList.appendChild(empty);
+  } else {
+    for (const table of componentAnalyzerTables) {
+      const label = document.createElement("label");
+      label.className = "checkbox-label";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = true;
+      checkbox.value = String(table.id);
+      const span = document.createElement("span");
+      span.textContent = table.title.trim() || t(componentTypeI18nKey(table.componentType));
+      label.append(checkbox, span);
+      componentAnalyzerExportTablesList.appendChild(label);
+    }
+  }
+  componentAnalyzerExportModalOverlay.classList.remove("hidden");
+}
+
+function closeComponentAnalyzerExportModal() {
+  componentAnalyzerExportModalOverlay.classList.add("hidden");
+}
+
+componentAnalyzerExportBtn.addEventListener("click", openComponentAnalyzerExportModal);
+componentAnalyzerExportCancelBtn.addEventListener("click", closeComponentAnalyzerExportModal);
+
+componentAnalyzerExportTablesAllBtn.addEventListener("click", () => {
+  for (const cb of componentAnalyzerExportTablesList.querySelectorAll('input[type="checkbox"]')) cb.checked = true;
+});
+componentAnalyzerExportTablesNoneBtn.addEventListener("click", () => {
+  for (const cb of componentAnalyzerExportTablesList.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+});
+
+componentAnalyzerExportConfirmBtn.addEventListener("click", async () => {
+  const checkedIds = new Set(
+    [...componentAnalyzerExportTablesList.querySelectorAll('input[type="checkbox"]:checked')].map((cb) =>
+      Number(cb.value),
+    ),
+  );
+  if (checkedIds.size === 0) {
+    showComponentAnalyzerExportStatus(t("component_analyzer_export_modal.select_at_least_one"), true);
+    return;
+  }
+
+  const format = componentAnalyzerExportFormatSelect.value;
+  componentAnalyzerExportConfirmBtn.disabled = true;
+  showComponentAnalyzerExportStatus(format === "json" ? "" : t("component_analyzer_export_modal.exporting"), false);
+
+  try {
+    if (format === "json") {
+      const payload = buildComponentAnalyzerTablesPayload(checkedIds);
+      downloadBlob(JSON.stringify(payload, null, 2), "application/json", "component_analyzer_export.json");
+      closeComponentAnalyzerExportModal();
+      return;
+    }
+
+    // csv/xlsx both go through the same endpoint -- component_export.py
+    // picks the actual builder off `format` (see its own docstring for the
+    // CSV-vs-XLSX file/zip shape).
+    const sheets = gatherComponentAnalyzerExportSheets(checkedIds);
+    const response = await fetch("/api/export_component_analyzer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format, sheets }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    downloadBlob(blob, blob.type, `component_analyzer_export_${format}.zip`);
+    closeComponentAnalyzerExportModal();
+  } catch (err) {
+    showComponentAnalyzerExportStatus(t("component_analyzer_export_modal.export_failed", { error: err.message }), true);
+  } finally {
+    componentAnalyzerExportConfirmBtn.disabled = false;
+  }
+});
+
+// Deep-clones + backfills one imported/shared Component Analyzer table,
+// reassigning fresh table/statSet ids (nextComponentAnalyzerTableId/
+// nextStatSetId) so a file exported from a different session/device can
+// never collide with this session's own counters -- restorePersistedState()
+// doesn't need to do this since a localStorage round-trip is always the
+// same session's own ids. Same backfill shape as restorePersistedState()'s
+// own (missing statSets/selectedStats/etc.), since an imported file could
+// just as easily predate a field that's since been added.
+function reviveImportedComponentAnalyzerTable(rawTable) {
+  const table = JSON.parse(JSON.stringify(rawTable ?? {}));
+  table.id = nextComponentAnalyzerTableId++;
+  table.title = typeof table.title === "string" ? table.title : "";
+  table.componentType = typeof table.componentType === "string" ? table.componentType : COMPONENT_TYPES[0].id;
+  table.components = Array.isArray(table.components) ? table.components : [];
+  table.minimized = false;
+  table.sortKey = typeof table.sortKey === "string" ? table.sortKey : null;
+  table.sortDirection = table.sortDirection === "desc" ? "desc" : "asc";
+
+  if (!Array.isArray(table.statSets) || table.statSets.length === 0) {
+    table.statSets = [makeStatSet()];
+    table.activeStatSetIndex = 0;
+  } else {
+    table.statSets = table.statSets.map((statSet) => ({
+      id: nextStatSetId++,
+      name: typeof statSet?.name === "string" ? statSet.name : "",
+      selectedStats: Array.isArray(statSet?.selectedStats) ? statSet.selectedStats : [],
+    }));
+    if (!(table.activeStatSetIndex >= 0 && table.activeStatSetIndex < table.statSets.length)) {
+      table.activeStatSetIndex = 0;
+    }
+  }
+  return table;
+}
+
+// Imports a Component Analyzer export/share payload (an array of table
+// objects, same shape buildComponentAnalyzerTablesPayload() produces) --
+// additive (unshift), same "never wipes what's already there" spirit as
+// "+ Add Table"/createFleetPlannerViewTable(), not a destructive replace,
+// since these are independent, freely-addable units like fleets are.
+// Warms componentListCache for every distinct componentType among the
+// imported tables before rendering -- same reload-persistence fix
+// restorePersistedState() already relies on (see its own docstring): every
+// stat column reads live from that cache, not from each table's own
+// embedded component rows, so a re-import always shows this build's
+// current numbers -- "re-populate the data from underlying data", not
+// trust whatever the export happened to snapshot.
+async function importComponentAnalyzerTables(data) {
+  if (!Array.isArray(data) || data.length === 0) return false;
+  const tables = data.map(reviveImportedComponentAnalyzerTable);
+
+  const typesToWarm = new Set(
+    tables.map((table) => table.componentType).filter((type) => type && type !== "chassis"),
+  );
+  await Promise.all([...typesToWarm].map((type) => fetchComponentList(type)));
+
+  componentAnalyzerTables.unshift(...tables);
+  saveState();
+  renderComponentAnalyzerTables();
+  return true;
+}
+
+componentAnalyzerImportInput.addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (err) {
+    alert(t("component_analyzer.import_parse_error", { error: err.message }));
+    event.target.value = "";
+    return;
+  }
+
+  const ok = await importComponentAnalyzerTables(data);
+  if (!ok) alert(t("component_analyzer.import_invalid_file"));
+  event.target.value = ""; // allow re-selecting the same file later
+});
+
+// ---- Component Analyzer's "Select Stats" modal ----
+// Left panel: every group in this table's own componentType catalog
+// (STAT_CATALOG_BY_TYPE), collapsed by default -- clicking a group's own
+// toggle expands it to show its stats; clicking a not-yet-selected stat
+// appends it to the working order. Right panel: that working order,
+// reorderable (same ↑/↓ .build-method-reorder-btn convention as the Build
+// Method Priority modal) with a remove "×" on the left of each row, per
+// the user's own spec. Nothing is written back onto the table's real
+// statSet until Save.
+const statSelectModalOverlay = document.getElementById("stat-select-modal-overlay");
+const statSelectModalTitle = document.getElementById("stat-select-modal-title");
+const statSelectGroupsPanel = document.getElementById("stat-select-groups-panel");
+const statSelectSelectedList = document.getElementById("stat-select-selected-list");
+const statSelectClearBtn = document.getElementById("stat-select-clear-btn");
+const statSelectCancelBtn = document.getElementById("stat-select-cancel-btn");
+const statSelectSaveBtn = document.getElementById("stat-select-save-btn");
+
+let statSelectModalTable = null;
+let statSelectModalOrder = [];
+let statSelectExpandedGroups = new Set();
+
+function openStatSelectModal(table) {
+  const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+  if (!catalog) return;
+  statSelectModalTable = table;
+  const activeStatSet = table.statSets[table.activeStatSetIndex];
+  statSelectModalOrder = [...(activeStatSet.selectedStats ?? [])];
+  statSelectExpandedGroups = new Set(); // every group starts minimized, each opening
+  statSelectModalTitle.textContent = t("stat_select_modal.select_type_title", {
+    type: t(componentTypeI18nKey(table.componentType)),
+  });
+  renderStatSelectModal();
+  statSelectModalOverlay.classList.remove("hidden");
+}
+
+function renderStatSelectModal() {
+  renderStatSelectGroupsPanel();
+  renderStatSelectSelectedList();
+}
+
+function renderStatSelectGroupsPanel() {
+  statSelectGroupsPanel.innerHTML = "";
+  const catalog = STAT_CATALOG_BY_TYPE[statSelectModalTable.componentType];
+
+  for (const group of catalog.groups) {
+    const groupEl = document.createElement("div");
+    groupEl.className = "stat-select-group";
+    const isExpanded = statSelectExpandedGroups.has(group);
+    const groupDefs = catalog.definitions.filter((d) => d.group === group);
+
+    const groupHeader = document.createElement("div");
+    groupHeader.className = "stat-select-group-header";
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "stat-select-group-toggle";
+    const toggleIcon = document.createElement("span");
+    toggleIcon.className = "cart-loadout-toggle-btn";
+    toggleIcon.textContent = isExpanded ? "−" : "+";
+    toggleBtn.appendChild(toggleIcon);
+    toggleBtn.appendChild(document.createTextNode(t(`component_analyzer.stat_groups.${group}`)));
+    toggleBtn.addEventListener("click", () => {
+      if (isExpanded) statSelectExpandedGroups.delete(group);
+      else statSelectExpandedGroups.add(group);
+      renderStatSelectGroupsPanel();
+    });
+    groupHeader.appendChild(toggleBtn);
+
+    // Adds/removes every stat in this one group at once -- same
+    // .filter-all-btn/.filter-none-btn convention (and filter.all/
+    // filter.none labels) every other "All"/"None" pair in this app
+    // already uses, just scoped to this group's own definitions rather
+    // than a filter checkbox group.
+    const groupActions = document.createElement("div");
+    groupActions.className = "stat-select-group-actions";
+
+    const groupAllBtn = document.createElement("button");
+    groupAllBtn.type = "button";
+    groupAllBtn.className = "filter-all-btn";
+    groupAllBtn.textContent = t("filter.all");
+    groupAllBtn.addEventListener("click", () => {
+      for (const def of groupDefs) {
+        if (!statSelectModalOrder.includes(def.key)) statSelectModalOrder.push(def.key);
+      }
+      renderStatSelectModal();
+    });
+    groupActions.appendChild(groupAllBtn);
+
+    const groupNoneBtn = document.createElement("button");
+    groupNoneBtn.type = "button";
+    groupNoneBtn.className = "filter-none-btn";
+    groupNoneBtn.textContent = t("filter.none");
+    groupNoneBtn.addEventListener("click", () => {
+      const groupKeys = new Set(groupDefs.map((def) => def.key));
+      statSelectModalOrder = statSelectModalOrder.filter((key) => !groupKeys.has(key));
+      renderStatSelectModal();
+    });
+    groupActions.appendChild(groupNoneBtn);
+
+    groupHeader.appendChild(groupActions);
+    groupEl.appendChild(groupHeader);
+
+    if (isExpanded) {
+      const statsList = document.createElement("div");
+      statsList.className = "stat-select-group-stats";
+      for (const def of groupDefs) {
+        const alreadySelected = statSelectModalOrder.includes(def.key);
+        const statBtn = document.createElement("button");
+        statBtn.type = "button";
+        statBtn.className = alreadySelected ? "stat-select-stat-row selected" : "stat-select-stat-row";
+        statBtn.textContent = t(def.labelKey);
+        statBtn.disabled = alreadySelected;
+        statBtn.addEventListener("click", () => {
+          if (statSelectModalOrder.includes(def.key)) return;
+          statSelectModalOrder.push(def.key);
+          renderStatSelectModal();
+        });
+        statsList.appendChild(statBtn);
+      }
+      groupEl.appendChild(statsList);
+    }
+
+    statSelectGroupsPanel.appendChild(groupEl);
+  }
+}
+
+function renderStatSelectSelectedList() {
+  statSelectSelectedList.innerHTML = "";
+  const catalog = STAT_CATALOG_BY_TYPE[statSelectModalTable.componentType];
+
+  if (statSelectModalOrder.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "stat-select-selected-empty";
+    empty.textContent = t("stat_select_modal.no_stats_selected");
+    statSelectSelectedList.appendChild(empty);
+    return;
+  }
+
+  statSelectModalOrder.forEach((key, index) => {
+    const def = catalog.definitions.find((d) => d.key === key);
+    const row = document.createElement("div");
+    row.className = "stat-select-selected-row";
+
+    // "x button to the left" -- removal control comes before the label,
+    // unlike every other remove-"×" in this app (which sit at the end of
+    // their row) -- this one's placement was explicitly requested this way.
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "stat-select-selected-remove-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("stat_select_modal.remove_stat_tooltip");
+    removeBtn.addEventListener("click", () => {
+      statSelectModalOrder.splice(index, 1);
+      renderStatSelectModal();
+    });
+    row.appendChild(removeBtn);
+
+    const label = document.createElement("span");
+    label.className = "stat-select-selected-label";
+    label.textContent = def ? t(def.labelKey) : key;
+    row.appendChild(label);
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.className = "build-method-reorder-btn";
+    upBtn.textContent = "↑";
+    upBtn.disabled = index === 0;
+    upBtn.title = t("stat_select_modal.move_up_tooltip");
+    upBtn.addEventListener("click", (event) => {
+      // Shift+click jumps straight to the top instead of swapping with the
+      // one neighbor above -- same shape as the move, just splice-to-front
+      // instead of a two-element swap.
+      if (event.shiftKey) {
+        const [moved] = statSelectModalOrder.splice(index, 1);
+        statSelectModalOrder.unshift(moved);
+      } else {
+        [statSelectModalOrder[index - 1], statSelectModalOrder[index]] = [
+          statSelectModalOrder[index],
+          statSelectModalOrder[index - 1],
+        ];
+      }
+      renderStatSelectSelectedList();
+    });
+    row.appendChild(upBtn);
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.className = "build-method-reorder-btn";
+    downBtn.textContent = "↓";
+    downBtn.disabled = index === statSelectModalOrder.length - 1;
+    downBtn.title = t("stat_select_modal.move_down_tooltip");
+    downBtn.addEventListener("click", (event) => {
+      // Shift+click jumps straight to the bottom -- see upBtn's own comment.
+      if (event.shiftKey) {
+        const [moved] = statSelectModalOrder.splice(index, 1);
+        statSelectModalOrder.push(moved);
+      } else {
+        [statSelectModalOrder[index], statSelectModalOrder[index + 1]] = [
+          statSelectModalOrder[index + 1],
+          statSelectModalOrder[index],
+        ];
+      }
+      renderStatSelectSelectedList();
+    });
+    row.appendChild(downBtn);
+
+    statSelectSelectedList.appendChild(row);
+  });
+}
+
+function closeStatSelectModal() {
+  statSelectModalOverlay.classList.add("hidden");
+  statSelectModalTable = null;
+  statSelectModalOrder = [];
+}
+
+statSelectCancelBtn.addEventListener("click", closeStatSelectModal);
+
+// Empties the working selection in one click -- same "not written back
+// onto the table's real statSet until Save" scope as every other edit in
+// this modal (see its own docstring above), so Cancel still discards this
+// too.
+statSelectClearBtn.addEventListener("click", () => {
+  statSelectModalOrder = [];
+  renderStatSelectModal();
+});
+
+statSelectSaveBtn.addEventListener("click", () => {
+  if (!statSelectModalTable) return;
+  const activeStatSet = statSelectModalTable.statSets[statSelectModalTable.activeStatSetIndex];
+  activeStatSet.selectedStats = [...statSelectModalOrder];
+  closeStatSelectModal();
+  saveState();
+  renderComponentAnalyzerTables();
+});
+
+// ---- Component Analyzer's "Select Components" picker modal ----
+// Mirrors the equipment-picker-modal's visual shape (same .modal-wide/
+// .equipment-picker-table-wrapper/.equipment-picker-row styling) but is
+// multi-select (checkboxes, a working-copy Set committed on "Done") rather
+// than equipment-picker-modal's single-select-per-slot click-to-choose.
+const componentSetPickerModalOverlay = document.getElementById("component-set-picker-modal-overlay");
+const componentSetPickerModalTitle = document.getElementById("component-set-picker-modal-title");
+const componentSetPickerSearchInput = document.getElementById("component-set-picker-search-input");
+const componentSetPickerFiltersBtn = document.getElementById("component-set-picker-filters-btn");
+const componentSetPickerFiltersPanel = document.getElementById("component-set-picker-filters-panel");
+const componentSetPickerFiltersGrid = document.getElementById("component-set-picker-filters-grid");
+const componentSetPickerModalStatus = document.getElementById("component-set-picker-modal-status");
+const componentSetPickerTbody = document.getElementById("component-set-picker-tbody");
+const componentSetPickerSelectAllBtn = document.getElementById("component-set-picker-select-all-btn");
+const componentSetPickerSelectNoneBtn = document.getElementById("component-set-picker-select-none-btn");
+const componentSetPickerCancelBtn = document.getElementById("component-set-picker-cancel-btn");
+const componentSetPickerDoneBtn = document.getElementById("component-set-picker-done-btn");
+
+let componentSetPickerTable = null;
+let componentSetPickerCurrentList = null;
+let componentSetPickerSelection = new Set();
+
+// Chassis keeps its own full Size/Purpose/Type/Race/Vendor/Build Method set
+// (see buildChassisFilterPanel() below -- unchanged, still reads allShips
+// directly, since fetchComponentList("chassis") is just a reshaped view of
+// that same array). Every other component type gets only the groups that
+// actually mean something for it -- no Purpose/Type concept exists at all
+// for equipment (see the design discussion that settled this), and
+// thrusters carry no race/vendor/build-method data in the game files
+// either (every thruster is faction-agnostic and always "Universal"-built --
+// see COMPONENT_LIST_SPECS' sibling comment in api.py). Order here is
+// display order, left to right (see buildComponentTypeFilterPanel()).
+const COMPONENT_FILTER_GROUPS = {
+  engine: ["size", "mk", "race", "vendor", "build_method"],
+  shield: ["size", "mk", "race", "vendor", "build_method"],
+  weapon: ["size", "mk", "race", "vendor", "build_method"],
+  turret: ["size", "mk", "race", "vendor", "build_method"],
+  // No owners/maker_races/build-method data at all for thrusters (every
+  // thruster is faction-agnostic and always "Universal"-built), but mk is
+  // real (equipment_wares_base.mk).
+  thruster: ["size", "mk"],
+  // No dedicated size or mk column (missiles_base) and no maker_races/
+  // build-method concept at all (see load_maker_races()' own docstring) --
+  // but weapon_system is real, structured data (page 1040 "Weapon
+  // Systems", see generate_ships_table.py's parse_missile_weapon_systems())
+  // with genuine variety (Dumbfire/Guided/Torpedo), so it gets its own
+  // group.
+  missile: ["weapon_system"],
+  economy_ware: ["cargo_type", "base_resource"],
+};
+
+// One entry per buildable filter group -- `buildEntries` is one of the
+// same reusable, list-parameterized entry-builders #ship-filters' own
+// populateFilterOptions() uses (see each function's own "list --" comment).
+const FILTER_GROUP_DEFS = {
+  size: { legendKey: "filter.size", filterName: "size-filter", buildEntries: buildSizeFilterEntries },
+  race: { legendKey: "filter.race", filterName: "race-filter", buildEntries: buildRaceFilterEntries },
+  vendor: { legendKey: "filter.vendor", filterName: "vendor-filter", buildEntries: buildVendorFilterEntries },
+  build_method: {
+    legendKey: "filter.build_method",
+    filterName: "build-method-filter",
+    buildEntries: buildBuildMethodFilterEntries,
+  },
+  weapon_system: {
+    legendKey: "filter.weapon_system",
+    filterName: "weapon-system-filter",
+    buildEntries: buildMissileWeaponSystemFilterEntries,
+  },
+  mk: { legendKey: "filter.mk", filterName: "mk-filter", buildEntries: buildMkFilterEntries },
+  cargo_type: {
+    legendKey: "filter.cargo_type",
+    filterName: "cargo-type-filter",
+    buildEntries: buildCargoTypeFilterEntries,
+  },
+  base_resource: {
+    legendKey: "filter.base_resource",
+    filterName: "base-resource-filter",
+    buildEntries: buildBaseResourceFilterEntries,
+  },
+};
+
+// Fills left to right, wrapping to a new row after every 3rd group (an
+// explicit .filter-row-break, not just relying on the modal's own wider
+// available width to wrap naturally, so the visual grouping always matches
+// #ship-filters' own "3 boxes per row" regardless of viewport -- same
+// reasoning as buildChassisFilterPanel()'s own explicit break). 1-2 groups
+// (e.g. thruster's lone Size filter): a single short row. 4: a row of 3
+// plus a row of 1.
+function buildComponentTypeFilterPanel(groupKeys, list, container, onChange) {
+  container.innerHTML = "";
+  groupKeys.forEach((key, index) => {
+    if (index > 0 && index % 3 === 0) {
+      const rowBreak = document.createElement("div");
+      rowBreak.className = "filter-row-break";
+      container.appendChild(rowBreak);
+    }
+    const def = FILTER_GROUP_DEFS[key];
+    container.appendChild(buildFilterFieldsetForModal(def.legendKey, def.filterName, def.buildEntries(list), onChange));
+  });
+}
+
+// The exact same Size/Purpose/Type/Race/Vendor/Build Method filter groups
+// as the main ship picker's own #ship-filters (same entry-building
+// functions: buildSizeFilterEntries()/buildPurposeFilterEntries()/
+// buildTypeFilterEntries()/buildVendorFilterEntries()/
+// buildRaceFilterEntries()/buildBuildMethodFilterEntries(), same
+// buildCheckboxGroup() renderer, same "3 boxes per row" layout via
+// .filter-panel-grid -- see that class's own comment in style.css) but
+// built fresh into `container` each time the modal opens, wired to
+// `onChange` instead of #ship-filters' own hardcoded renderShipOptions.
+// Every opening starts with nothing checked (no filter), matching how a
+// freshly-loaded page's own #ship-filters starts. Kept separate from
+// buildComponentTypeFilterPanel() above -- chassis's own Purpose/Type
+// groups have no equivalent for any other component type, and its entries
+// come from allShips directly rather than a `list` parameter.
+function buildChassisFilterPanel(container, onChange) {
+  container.innerHTML = "";
+  const rowBreak = document.createElement("div");
+  rowBreak.className = "filter-row-break";
+  container.append(
+    buildFilterFieldsetForModal("filter.size", "size-filter", buildSizeFilterEntries(), onChange),
+    buildFilterFieldsetForModal("filter.purpose", "purpose-filter", buildPurposeFilterEntries(), onChange),
+    buildFilterFieldsetForModal("filter.type", "type-filter", buildTypeFilterEntries(), onChange),
+    rowBreak,
+    buildFilterFieldsetForModal("filter.race", "race-filter", buildRaceFilterEntries(), onChange),
+    buildFilterFieldsetForModal("filter.vendor", "vendor-filter", buildVendorFilterEntries(), onChange),
+    buildFilterFieldsetForModal("filter.build_method", "build-method-filter", buildBuildMethodFilterEntries(), onChange),
+  );
+}
+
+// One <fieldset class="filter-group"> -- legend, All/None actions, checkbox
+// options -- built dynamically rather than living in static index.html
+// markup like #ship-filters' own fieldsets do, since this is instantiated
+// fresh per modal opening rather than existing once at page load.
+function buildFilterFieldsetForModal(legendI18nKey, filterName, entries, onChange) {
+  const fieldset = document.createElement("fieldset");
+  fieldset.className = "filter-group";
+
+  const legend = document.createElement("legend");
+  legend.textContent = t(legendI18nKey);
+  fieldset.appendChild(legend);
+
+  const actions = document.createElement("div");
+  actions.className = "filter-actions";
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.textContent = t("filter.all");
+  const noneBtn = document.createElement("button");
+  noneBtn.type = "button";
+  noneBtn.textContent = t("filter.none");
+  actions.append(allBtn, noneBtn);
+  fieldset.appendChild(actions);
+
+  const optionsContainer = document.createElement("div");
+  optionsContainer.className = "filter-options";
+  buildCheckboxGroup(optionsContainer, filterName, entries, onChange);
+  fieldset.appendChild(optionsContainer);
+
+  allBtn.addEventListener("click", () => {
+    for (const input of optionsContainer.querySelectorAll("input")) input.checked = true;
+    onChange();
+  });
+  noneBtn.addEventListener("click", () => {
+    for (const input of optionsContainer.querySelectorAll("input")) input.checked = false;
+    onChange();
+  });
+
+  return fieldset;
+}
+
+async function openComponentSetPickerModal(table) {
+  componentSetPickerTable = table;
+  componentSetPickerCurrentList = null;
+  componentSetPickerSelection = new Set(table.components.map((component) => component.ware_id));
+  componentSetPickerSearchInput.value = "";
+  componentSetPickerModalTitle.textContent = t("component_set_picker_modal.select_type_title", {
+    type: t(componentTypeI18nKey(table.componentType)),
+  });
+
+  componentSetPickerFiltersPanel.classList.add("hidden"); // always starts collapsed
+  componentSetPickerFiltersGrid.innerHTML = "";
+
+  const filterGroups = COMPONENT_FILTER_GROUPS[table.componentType];
+  const hasFilterPanel = table.componentType === "chassis" || (filterGroups?.length ?? 0) > 0;
+  componentSetPickerFiltersBtn.classList.toggle("hidden", !hasFilterPanel);
+  if (hasFilterPanel) {
+    componentSetPickerFiltersBtn.textContent = t("component_set_picker_modal.filters_btn", {
+      type: t(componentTypeI18nKey(table.componentType)),
+    });
+  }
+  // Chassis's own panel derives entries from allShips directly (see
+  // buildChassisFilterPanel()), so it can be built right away -- every
+  // other type's panel derives entries from this type's own fetched
+  // component list instead (see buildComponentTypeFilterPanel()), so it
+  // has to wait until that fetch resolves, below.
+  if (table.componentType === "chassis") {
+    buildChassisFilterPanel(componentSetPickerFiltersGrid, renderComponentSetPickerRows);
+  }
+
+  componentSetPickerTbody.innerHTML = "";
+  componentSetPickerModalStatus.textContent = t("component_set_picker_modal.loading");
+  componentSetPickerModalStatus.classList.remove("hidden");
+  componentSetPickerModalOverlay.classList.remove("hidden");
+
+  const list = await fetchComponentList(table.componentType);
+  if (componentSetPickerTable !== table) return; // picker closed/reopened for a different table while this was in flight
+  componentSetPickerModalStatus.classList.add("hidden");
+  componentSetPickerCurrentList = list;
+
+  if (filterGroups && filterGroups.length > 0) {
+    buildComponentTypeFilterPanel(filterGroups, list, componentSetPickerFiltersGrid, renderComponentSetPickerRows);
+  }
+
+  renderComponentSetPickerRows();
+}
+
+componentSetPickerFiltersBtn.addEventListener("click", () => {
+  componentSetPickerFiltersPanel.classList.toggle("hidden");
+});
+
+// Search text plus, for every component type with a real filter panel (see
+// COMPONENT_FILTER_GROUPS/buildChassisFilterPanel()), the exact same
+// shipPassesCurrentFilters() predicate the main ship picker itself uses --
+// evaluated against componentSetPickerFiltersGrid rather than the whole
+// document (see that function's own docstring) so this panel's checkboxes
+// never interact with the main picker's identically-named ones. Shared by
+// the row renderer and the header's own All/None buttons, so "what's
+// selected by All/None" always matches "what's currently showing".
+function filteredComponentSetPickerList() {
+  let list = componentSetPickerCurrentList ?? [];
+  const query = componentSetPickerSearchInput.value.trim().toLowerCase();
+  if (query) list = list.filter((component) => component.name.toLowerCase().includes(query));
+
+  const componentType = componentSetPickerTable?.componentType;
+  if (componentType === "chassis") {
+    // fetchComponentList("chassis") reshapes allShips down to just
+    // {ware_id, name, maker_races, owners} -- look the real ship back up
+    // for shipPassesCurrentFilters()'s full set of fields (size/purpose/
+    // ship_type/production_method too, none of which chassis's own reduced
+    // component shape carries).
+    const shipsByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
+    list = list.filter((component) => {
+      const ship = shipsByWareId.get(component.ware_id);
+      return ship ? shipPassesCurrentFilters(ship, componentSetPickerFiltersGrid) : true;
+    });
+  } else if ((COMPONENT_FILTER_GROUPS[componentType]?.length ?? 0) > 0) {
+    // Every other filterable type's own /api/components/{type} response
+    // already carries size/owners/maker_races/production_method directly
+    // on each component (see api.py's GET /api/components), so the
+    // predicate runs against it with no lookup needed.
+    list = list.filter((component) => shipPassesCurrentFilters(component, componentSetPickerFiltersGrid));
+  }
+  return list;
+}
+
+function renderComponentSetPickerRows() {
+  const filtered = filteredComponentSetPickerList();
+  componentSetPickerTbody.innerHTML = "";
+  for (const component of filtered) {
+    const tr = document.createElement("tr");
+    tr.className = "equipment-picker-row";
+
+    const checkboxTd = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = componentSetPickerSelection.has(component.ware_id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) componentSetPickerSelection.add(component.ware_id);
+      else componentSetPickerSelection.delete(component.ware_id);
+    });
+    checkboxTd.appendChild(checkbox);
+
+    // Same "name, race plate underneath, owner-faction icons at the far
+    // right" look as the ship picker's own .ship-option-row (see
+    // buildEntityIdentityColumn()/buildEntityOwnerIconsGroup()) -- every
+    // component type carries maker_races/owners now (see GET
+    // /api/components' own comment), engines/shields/weapons/turrets
+    // included, not just chassis.
+    const nameTd = document.createElement("td");
+    const rowContent = document.createElement("span");
+    rowContent.className = "component-picker-row-content";
+    rowContent.appendChild(buildEntityIdentityColumn(component));
+    const factionIconsGroup = buildEntityOwnerIconsGroup(component);
+    if (factionIconsGroup.children.length > 0) rowContent.appendChild(factionIconsGroup);
+    nameTd.appendChild(rowContent);
+
+    tr.append(checkboxTd, nameTd);
+    tr.addEventListener("click", (event) => {
+      if (event.target !== checkbox) checkbox.click();
+    });
+    componentSetPickerTbody.appendChild(tr);
+  }
+}
+
+componentSetPickerSearchInput.addEventListener("input", () => {
+  if (componentSetPickerCurrentList) renderComponentSetPickerRows();
+});
+
+// Operate on the currently-showing (search- and filter-narrowed) rows
+// only, not the whole type's list -- e.g. typing "Envoy" then clicking
+// "All" selects just the Envoy engines, leaving every other engine's own
+// checked state untouched.
+componentSetPickerSelectAllBtn.addEventListener("click", () => {
+  for (const component of filteredComponentSetPickerList()) componentSetPickerSelection.add(component.ware_id);
+  renderComponentSetPickerRows();
+});
+componentSetPickerSelectNoneBtn.addEventListener("click", () => {
+  for (const component of filteredComponentSetPickerList()) componentSetPickerSelection.delete(component.ware_id);
+  renderComponentSetPickerRows();
+});
+
+function closeComponentSetPickerModal() {
+  componentSetPickerModalOverlay.classList.add("hidden");
+  componentSetPickerTable = null;
+  componentSetPickerCurrentList = null;
+}
+
+componentSetPickerCancelBtn.addEventListener("click", closeComponentSetPickerModal);
+
+componentSetPickerDoneBtn.addEventListener("click", () => {
+  if (!componentSetPickerTable || !componentSetPickerCurrentList) return;
+  const byWareId = new Map(componentSetPickerCurrentList.map((component) => [component.ware_id, component]));
+  componentSetPickerTable.components = [...componentSetPickerSelection]
+    .map((wareId) => byWareId.get(wareId))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  closeComponentSetPickerModal();
+  saveState();
+  renderComponentAnalyzerTables();
+});
+
 // ---- Page navigation (Fleet Planner / Cost Analysis / About) ----
 // Client-side only -- switching pages just toggles which #page-<id> div is
 // visible, no navigation/reload involved, so fleets/currentShip/
 // priceOverrides etc. all stay exactly as they were.
 // location.hash still updates so a page is linkable/bookmarkable and the
 // browser's own back/forward buttons work.
-const PAGE_IDS = ["fleet-planner", "cost-analysis", "about"];
+const PAGE_IDS = ["fleet-planner", "cost-analysis", "component-analyzer", "about"];
 
 function showPage(pageId) {
   if (!PAGE_IDS.includes(pageId)) pageId = PAGE_IDS[0];
@@ -5550,6 +8487,7 @@ function saveState() {
     priceOverrides,
     importedLoadoutsResult,
     shareCache,
+    componentAnalyzerTables,
     filters: {
       size: checkedValues("size-filter"),
       purpose: checkedValues("purpose-filter"),
@@ -5589,7 +8527,18 @@ function loadPersistedState() {
 // checkboxes -- see loadShips()) exists to restore filter selections
 // into. Re-renders through the same functions saveState() is hooked into,
 // so restoring doesn't need its own separate render logic.
-function restorePersistedState(state) {
+//
+// async because of the Component Analyzer step below: every table's own
+// stat columns read from componentListCache (see statSourceForComponentType()),
+// which is otherwise only ever populated lazily when "Select Components"/
+// "Select Stats" is opened for that table. Without proactively warming it
+// here first, a restored table would render with every stat column blank
+// (Name still shows fine, since that's stored directly on table.components
+// itself) until the user happened to reopen one of those modals for it --
+// confirmed via Playwright as the actual cause of a real bug report: stat
+// values not surviving a reload despite table.components itself (and
+// everything else about the table) persisting correctly.
+async function restorePersistedState(state) {
   if (!state) return;
 
   if (Array.isArray(state.fleets) && state.fleets.length > 0) {
@@ -5609,6 +8558,32 @@ function restorePersistedState(state) {
   // missing/malformed value here just means the next share regenerates
   // from scratch -- nothing to validate strictly.
   if (state.shareCache && typeof state.shareCache === "object") shareCache = state.shareCache;
+  if (Array.isArray(state.componentAnalyzerTables)) {
+    componentAnalyzerTables = state.componentAnalyzerTables;
+    nextComponentAnalyzerTableId =
+      1 + componentAnalyzerTables.reduce((max, table) => Math.max(max, table.id ?? 0), 0);
+    // Backfill for a table persisted before stat sets existed -- same "fail
+    // safe to one default" contract makeComponentAnalyzerTable() itself
+    // guarantees for a freshly-created table.
+    for (const table of componentAnalyzerTables) {
+      if (!Array.isArray(table.statSets) || table.statSets.length === 0) {
+        table.statSets = [makeStatSet()];
+        table.activeStatSetIndex = 0;
+      } else if (!(table.activeStatSetIndex >= 0 && table.activeStatSetIndex < table.statSets.length)) {
+        table.activeStatSetIndex = 0;
+      }
+      // Backfill for a stat set persisted before selectedStats existed.
+      for (const statSet of table.statSets) {
+        if (!Array.isArray(statSet.selectedStats)) statSet.selectedStats = [];
+      }
+    }
+    nextStatSetId =
+      1 +
+      componentAnalyzerTables.reduce(
+        (max, table) => Math.max(max, ...table.statSets.map((statSet) => statSet.id ?? 0)),
+        0,
+      );
+  }
 
   if (state.filters) {
     const filterGroups = {
@@ -5627,6 +8602,21 @@ function restorePersistedState(state) {
   updateLoadoutManagerBtnStates();
   renderShipOptions();
   renderCart();
+
+  // Warm componentListCache for every distinct componentType a restored
+  // table actually uses (skip "chassis" -- statSourceForComponentType()
+  // reads allShips directly for that one, already loaded by now) *before*
+  // the render below, so every stat column has real data to show on first
+  // paint instead of rendering blank once and silently fixing itself the
+  // next time something happens to call fetchComponentList() for that
+  // type (opening "Select Components"/"Select Stats") -- see this
+  // function's own docstring for the full story.
+  const restoredComponentTypes = new Set(
+    componentAnalyzerTables.map((table) => table.componentType).filter((type) => type && type !== "chassis"),
+  );
+  await Promise.all([...restoredComponentTypes].map((type) => fetchComponentList(type)));
+
+  renderComponentAnalyzerTables();
 }
 
 async function bootstrap() {
@@ -5652,13 +8642,19 @@ async function bootstrap() {
   await loadPurposeNames();
   await loadRaceNames();
   await loadShipTypeNames();
+  await loadCargoTypeNames();
+  await loadCompatibilityTypeNames();
+  await loadAmmunitionCompatibilityTypeNames();
+  await loadThrusterClassNames();
+  await loadDeployableTypeNames();
+  await loadMissileWeaponSystemNames();
   await loadBuildMethods();
   await loadBuildMethodNames();
   await loadCrewRoleNames(); // must finish before loadCrew() (in the Promise.all below) runs
   await loadShips(); // filter checkboxes (restorePersistedState needs them) live here
   await Promise.all([loadMissiles(), loadDrones(), loadDeployables(), loadCountermeasures(), loadCrew(), loadWareNames()]);
   stateReady = true;
-  restorePersistedState(loadPersistedState());
+  await restorePersistedState(loadPersistedState());
   // Judged against the just-restored real state above, not empty defaults
   // -- see applyShareLinksFromUrl()'s own comment for why this has to come
   // after restorePersistedState(), not before it.

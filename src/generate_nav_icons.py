@@ -1,14 +1,18 @@
 """Converts the raw map-object station icons extracted by
 extract_game_data.py's "nav_icons" job, plus the existing full ship-class
 icon set ship_icon_jobs() already extracts, into this website's top-nav
-page icons (Fleet Planner/Cost Analysis/About), their small "you are
-here" player-location markers, and the Fleet Lists tab bar's own per-fleet
-ship icon + selected-fleet indicator.
+page icons (Fleet Planner/Cost Analysis/About/Component Analyzer), their
+small "you are here" player-location markers, and the Fleet Lists tab
+bar's own per-fleet ship icon + selected-fleet indicator.
 
 Reads:
   - data/images/nav_icons_raw/mapob_shipyard.gz
   - data/images/nav_icons_raw/mapob_tradestation.gz
   - data/images/nav_icons_raw/mapob_equipmentdock.gz
+  - data/images/nav_icons_raw/mapob_hightech.gz (a microchip glyph -- the
+    closest real game asset to issue #4's "advanced electronics station
+    symbol" spec for the Component Analyzer tab; see nav_icon_jobs()'s own
+    docstring in extract_game_data.py)
   - data/images/nav_icons_raw/bordersquare.gz (the map's own "selected
     item" white frame -- see SELECTION_BOX_SRC below)
   - data/images/ships/symbols_raw/*.gz (every ship-class icon, already
@@ -16,7 +20,8 @@ Reads:
     rather than adding a second extraction job for the same in-catalog
     files)
 
-Writes, per station type ("fleet_planner"/"cost_analysis"/"about"):
+Writes, per station type ("fleet_planner"/"cost_analysis"/"about"/
+"component_analyzer"):
   - data/images/nav_icons/<name>.png            (normal, unselected page)
   - data/images/nav_icons/<name>_highlight.png   (that page currently selected)
 
@@ -128,6 +133,7 @@ ICON_MAP = {
     "mapob_shipyard": "fleet_planner",
     "mapob_tradestation": "cost_analysis",
     "mapob_equipmentdock": "about",
+    "mapob_hightech": "component_analyzer",
 }
 
 

@@ -166,14 +166,29 @@ def ship_macro_jobs() -> list[ExtractionJob]:
     turned out to be harmless, and would silently miss whatever a mod
     calls its own new size folder, if it ever adds one.
 
-    Extracted flat into macros_raw/ (no size-named subfolder at all,
-    since none can be assumed at this stage) -- sort_ship_files_by_class(),
-    called from main() right after this job runs, re-sorts every file from
-    there into <class>_macros/ based on each macro's own real <macro
-    class="..."/> attribute, which is what generate_ships_table.py actually
-    treats as authoritative (see that module's "Ship stats and flight
-    model" docstring section) -- not a guess from a folder name a mod has
-    no obligation to follow.
+    A second, newer convention for ship storage/cargo macros specifically
+    lives at assets/props/storagemodules/macros/ -- confirmed via a
+    game_input_paths()-wide probe (162 files there, zero overlap with what
+    the assets/units/ job above already pulls) after a real bug report:
+    every Boron/ATF/Yaki ship (plus a chunk of DLC-added Argon/Paranid/
+    Teladi ships) had 0/null cargo_capacity because their storage macro's
+    <connections> ref (parse_ship_docks() in generate_ships_table.py) only
+    ever resolved against assets/units/'s own macro_index, which this
+    second convention was never part of. Boron/Split/Pirate/Timelines/mini
+    DLCs moved their ship storage macros here; Terran DLC still uses the
+    old assets/units/ convention, which is why it wasn't fully broken.
+
+    Both jobs write into the same flat macros_raw/ (no size- or source-
+    named subfolder at all, since neither can be assumed at this stage) --
+    sort_ship_files_by_class(), called from main() right after these jobs
+    run, re-sorts every file from there into <class>_macros/ based on each
+    macro's own real <macro class="..."/> attribute (here, "storage" for
+    the ones this second job actually cares about; the other ~1/3 of
+    storagemodules/macros/ are collectablewares/lockbox/etc., which sort
+    harmlessly into their own unused folders) -- what
+    generate_ships_table.py actually treats as authoritative (see that
+    module's "Ship stats and flight model" docstring section), not a guess
+    from a folder name or path convention a mod has no obligation to follow.
     """
     return [
         ExtractionJob(
@@ -181,7 +196,60 @@ def ship_macro_jobs() -> list[ExtractionJob]:
             group="ships",
             include_pattern=r"assets/units/[^/]+/macros/.*\.xml$",
             out_dir=SHIPS_DIR / "macros_raw",
-        )
+        ),
+        ExtractionJob(
+            name="ship_storage_module_macros",
+            group="ships",
+            include_pattern=r"assets/props/storagemodules/macros/.*\.xml$",
+            out_dir=SHIPS_DIR / "macros_raw",
+        ),
+    ]
+
+
+def dock_macro_jobs() -> list[ExtractionJob]:
+    """Ship-to-ship docking macros -- external docking bays (dockarea_*
+    wrapping dockingbay_*, under assets/structures/dock/macros/) and
+    internal ship-storage hangar bays plus the fixed XS ship/spacesuit dock
+    (shipstorage_gen_*/dock_gen_*, under assets/props/SurfaceElements/
+    macros/) -- referenced by a ship's own top-level macro <connections>
+    (con_dockarea_.../con_dock_.../con_shipstorage_...). Completely
+    separate from the per-hardpoint <connections> in a ship's *component*
+    file that parse_component_slots() already reads in
+    generate_ships_table.py -- these live in the *macro* file's own
+    <connections> instead, alongside con_cockpit/con_storage01. See that
+    module's dock/ship-storage parsing (parse_ship_docks()) for how this
+    gets resolved into s_docks/m_docks/s_ship_storage/m_ship_storage.
+
+    Both jobs write into one flat, unsorted directory (unlike ship macros,
+    these have no per-class subfolder convention worth mirroring -- there
+    are only a few dozen of them total, resolved purely by macro name, not
+    by which folder they came from).
+
+    assets/structures/dock/macros/ also contains station-only docking
+    assets (pier_*/launchtube_*, plus dockarea_*/dockingbay_* entries for
+    station docks like dockarea_arg_m_station_01 or dockingbay_gen_s_inv)
+    this project has no use for. (dockarea|dockingbay)_ narrows out the
+    pier/launchtube prefixes, but still pulls the station-only dockarea/
+    dockingbay entries too, since there's no consistent naming trait to
+    separate "ship dock" from "station dock" by regex (e.g.
+    dockarea_arg_xl_builder_01 is ship-relevant despite not saying "ship"
+    or anything station-specific either) -- left in rather than narrowed
+    further; harmless, generate_ships_table.py only ever looks up a name a
+    real ship's own macro actually references.
+    """
+    return [
+        ExtractionJob(
+            name="dockarea_macros",
+            group="docks",
+            include_pattern=r"assets/structures/dock/macros/(dockarea|dockingbay)_.*\.xml$",
+            out_dir=SHIPS_DIR / "dock_macros",
+        ),
+        ExtractionJob(
+            name="ship_storage_macros",
+            group="docks",
+            include_pattern=r"assets/props/SurfaceElements/macros/(dock_gen|shipstorage_gen)_.*\.xml$",
+            out_dir=SHIPS_DIR / "dock_macros",
+        ),
     ]
 
 
@@ -314,6 +382,70 @@ def equipment_component_jobs() -> list[ExtractionJob]:
         )
         for equip_type, path_prefix in EQUIPMENT_TYPE_PATH_PREFIXES.items()
         for size in SHIP_SIZES
+    ]
+
+
+def bullet_macro_jobs() -> list[ExtractionJob]:
+    """Weapon/turret projectile macro files -- what weapons_base.bullet_class/
+    turrets_base.bullet_class (parsed from each weapon/turret macro's own
+    <bullet class="..."/> reference) actually points to. Real per-shot
+    damage numbers live here, not on the weapon/turret ware itself -- see
+    generate_ships_table.py's own "combat stats... live in a different file
+    entirely" docstring note in its equipment_wares_base section.
+
+    Confirmed (via a one-off probe, not yet a permanent job at the time)
+    that every one of the 162 real bullet_class values actually referenced
+    by weapons_base/turrets_base resolves to exactly one file here once
+    every DLC extension's own catalogs are searched too, not just the base
+    game's -- several races' bullets (Boron/Split/Terran heaviest) ship
+    entirely from their own extension. A separate 8 bullet_class values
+    point to missile macros instead (dumbfire/torpedo-style "weapons" that
+    fire a real missile projectile) -- those are already covered by
+    missile_jobs()/missiles_base, not this job.
+
+    One flat job, no per-size/per-type split needed -- every bullet macro
+    for every race/size/weapon-type lives together in this one folder.
+    """
+    return [
+        ExtractionJob(
+            name="bullet_macros",
+            group="bullets",
+            include_pattern=r"assets/fx/weaponFx/macros/bullet_.*\.xml$",
+            out_dir=DATA_DIR / "bullets" / "macros",
+        )
+    ]
+
+
+def thruster_macro_jobs() -> list[ExtractionJob]:
+    """Thruster macro files -- real per-mk RCS thrust stats
+    (<thrust strafe="..." pitch="..." yaw="..." roll="..."/>) that
+    thrusters_base has never had. parse_thruster_wares()'s own docstring
+    claims thrusters have "no macro or component file anywhere in the
+    extracted data" -- that was true of data/thrusters/ (which genuinely
+    doesn't exist) but wrong in general: a probe searching every base+DLC
+    catalog (not just the one folder that claim was based on) for
+    "thruster" in any file path found real macros living right alongside
+    the engine macros themselves, under assets/props/Engines/macros/
+    (macro class="engine" -- the game internally treats a ship's RCS
+    thrusters as a kind of engine component, which is presumably why the
+    original search never thought to look there). One file per
+    (size, thruster_class, mk) combo, exactly matching
+    thrusters_base.ware_id/THRUSTER_WARE_RE -- 18 total: S/M sizes get
+    both allround and combat variants (mk1-3 each, 12 files), L/XL get
+    allround only (mk1-3 each, 6 files) -- no L/XL "combat" variant exists
+    at all, matching real in-game ship maneuverability design (only
+    smaller ships mount the more agile "combat" RCS thrusters).
+
+    One flat job, not a per-size split like equipment_macro_jobs()'s own
+    engine job -- only 21 files total, no need for the extra structure.
+    """
+    return [
+        ExtractionJob(
+            name="thruster_macros",
+            group="thrusters",
+            include_pattern=r"assets/props/Engines/macros/thruster_.*\.xml$",
+            out_dir=DATA_DIR / "thrusters" / "macros",
+        )
     ]
 
 
@@ -592,15 +724,22 @@ def language_jobs() -> list[ExtractionJob]:
 
 
 def nav_icon_jobs() -> list[ExtractionJob]:
-    """Three station-type icons *as they actually appear on the map*
+    """Four station-type icons *as they actually appear on the map*
     (assets/textures/ui/map_objects/mapob_<type>.gz), not the plain glyph
     set under stationicon/ favicon_icon_jobs() uses -- each mapob_ texture
     already has the hexagon badge baked in (black hex fill, white glyph +
     border), unlike si_shipyard.gz which is just the bare glyph. Used for
     this website's own top-nav page icons (Fleet Planner/Cost Analysis/
-    About -- see generate_nav_icons.py, which recolors the black fill to
-    the game's own "faction_player" green from libraries/colors.xml
-    instead of shipping it black).
+    About/Component Analyzer -- see generate_nav_icons.py, which recolors
+    the black fill to the game's own "faction_player" green from
+    libraries/colors.xml instead of shipping it black).
+
+    mapob_hightech.gz (a microchip glyph, used on the in-game map for
+    Hi-Tech-sector production) is the closest real game asset to issue #4's
+    "advanced electronics station symbol" spec for the Component Analyzer
+    tab -- Advanced Electronics is itself a hitech-group ware in wares.xml,
+    and there's no dedicated "electronics station" map icon in the game to
+    source instead.
 
     Also pulls widget/bordersquare.gz, the game's own generic "this map
     item is selected" white square-bracket frame (see libraries/colors.xml's
@@ -613,7 +752,7 @@ def nav_icon_jobs() -> list[ExtractionJob]:
         ExtractionJob(
             name="nav_icons",
             group="nav_icons",
-            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock)\.gz$",
+            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock|hightech)\.gz$",
             out_dir=DATA_DIR / "images" / "nav_icons_raw",
         ),
         ExtractionJob(
@@ -621,6 +760,41 @@ def nav_icon_jobs() -> list[ExtractionJob]:
             group="nav_icons",
             include_pattern=r"assets/textures/ui/widget/bordersquare\.gz$",
             out_dir=DATA_DIR / "images" / "nav_icons_raw",
+        ),
+    ]
+
+
+def mod_lab_icon_jobs() -> list[ExtractionJob]:
+    """Icons for the Component Analyzer's Modifications Lab (currently just
+    a placeholder modal + a launcher button -- see generate_mod_lab_icons.py
+    for the actual conversion).
+
+    mods_grade_circle_0{1,2,3}.gz are the real in-game mod-quality-tier
+    badges from the equipment mods menu -- a circle with 1/2/3 chevrons
+    inside, one per tier (Basic/Enhanced/Exceptional, page 20110 "Equipment
+    Mods" -- {20110,1001}/{20110,1101}/{20110,1201}). Confirmed by visual
+    inspection, not yet wired to any actual mod logic -- pulled now so
+    they're on hand once that gets built. mods_grade_0{1,2,3}.gz (no
+    "circle") are the same chevrons without the ring, not currently used.
+
+    mapob_buildstorage.gz is the same map_objects family nav_icon_jobs()
+    already pulls from (a build-storage station's own map icon -- a
+    hexagon of stacked boxes) -- reused here as the Modifications Lab
+    modal's own header icon, tinted the same "faction_player" green as
+    every other nav-style icon in this app (see generate_mod_lab_icons.py).
+    """
+    return [
+        ExtractionJob(
+            name="mod_lab_grade_icons",
+            group="mod_lab_icons",
+            include_pattern=r"assets/textures/ui/modifications/mods_grade_circle_0[123]\.gz$",
+            out_dir=DATA_DIR / "images" / "mod_lab_icons_raw",
+        ),
+        ExtractionJob(
+            name="mod_lab_buildstorage_icon",
+            group="mod_lab_icons",
+            include_pattern=r"assets/textures/ui/map_objects/mapob_buildstorage\.gz$",
+            out_dir=DATA_DIR / "images" / "mod_lab_icons_raw",
         ),
     ]
 
@@ -729,9 +903,12 @@ def factions_xml_jobs() -> list[ExtractionJob]:
 
 EXTRACTION_JOBS: list[ExtractionJob] = [
     *ship_macro_jobs(),
+    *dock_macro_jobs(),
     *ship_component_jobs(),
     *equipment_macro_jobs(),
     *equipment_component_jobs(),
+    *bullet_macro_jobs(),
+    *thruster_macro_jobs(),
     *missile_jobs(),
     *deployable_jobs(),
     *wares_xml_jobs(),
@@ -739,6 +916,7 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *ship_icon_jobs(),
     *favicon_icon_jobs(),
     *nav_icon_jobs(),
+    *mod_lab_icon_jobs(),
     *faction_icon_jobs(),
     *minor_faction_icon_jobs(),
     *colors_xml_job(),

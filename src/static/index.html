@@ -27,7 +27,15 @@
           <img src="/images/nav_icons/cost_analysis_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
           <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
         </span>
-        <span data-i18n="nav.cost_analysis">Cost Analysis</span>
+        <span data-i18n="nav.cost_analysis">Cost Analyzer</span>
+      </button>
+      <button type="button" class="main-nav-btn" data-page="component-analyzer">
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/component_analyzer.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/component_analyzer_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        <span data-i18n="nav.component_analyzer">Component Analyzer</span>
       </button>
       <button type="button" class="main-nav-btn" data-page="about">
         <span class="main-nav-icon-wrap">
@@ -111,7 +119,15 @@
         </div>
         <div id="build-method-filter-options" class="filter-options"></div>
       </fieldset>
-      <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+      <div class="filter-hint-row">
+        <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+        <button
+          type="button"
+          id="view-chassis-in-analyzer-btn"
+          class="view-in-analyzer-btn"
+          data-i18n="ship_builder.view_in_analyzer_btn"
+        >View in Component Analyzer</button>
+      </div>
     </div>
     <fieldset class="filter-group loadout-manager-group">
       <legend data-i18n="filter.loadout_manager">Loadout Manager</legend>
@@ -184,6 +200,10 @@
         <input id="load-cart-input" type="file" accept="application/json,.json" class="hidden" />
       </label>
     </div>
+    <div id="fleet-statistics-panel" class="summary-panel hidden">
+      <div class="summary-subheader" data-i18n="fleet_lists.statistics_title">Ships Total Statistics</div>
+      <div id="fleet-statistics-body"></div>
+    </div>
     <table id="cart-table">
       <thead>
         <tr>
@@ -236,6 +256,26 @@
         </table>
       </div>
     </div>
+  </fieldset>
+  </div>
+
+  <div id="page-component-analyzer" class="page hidden">
+  <fieldset id="component-analyzer-section" class="section-box">
+    <legend class="section-box-legend" data-i18n="component_analyzer.section_title">Component Analyzer</legend>
+    <div class="component-analyzer-toolbar">
+      <button type="button" id="component-analyzer-add-table-btn" data-i18n="component_analyzer.add_table_btn">+ Add Table</button>
+      <button
+        type="button"
+        id="component-analyzer-export-btn"
+        class="component-analyzer-toolbar-right"
+        data-i18n="component_analyzer.export_btn"
+      >Export Component Analyzer Tables</button>
+      <label class="file-input-label">
+        <span data-i18n="component_analyzer.import_btn">Import Component Analyzer Tables</span>
+        <input id="component-analyzer-import-input" type="file" accept="application/json,.json" class="hidden" />
+      </label>
+    </div>
+    <div id="component-analyzer-tables"></div>
   </fieldset>
   </div>
 
@@ -325,16 +365,24 @@
   <div id="equipment-picker-modal-overlay" class="modal-overlay hidden">
     <div class="modal modal-wide">
       <h3 id="equipment-picker-modal-title" data-i18n="equipment_picker_modal.title">Select Equipment</h3>
-      <label class="equipment-picker-apply-all-label">
-        <input type="checkbox" id="equipment-picker-apply-all-checkbox" />
-        <span data-i18n="equipment_picker_modal.apply_all_label">Apply to all matching slots on this ship</span>
-        <span
-          class="equipment-picker-apply-all-hint"
-          title="Applies this choice to every other slot of the same type and size (bonus/surface element shields only apply to other bonus shields, main shields only to other main shields). A slot where this item isn't actually a valid option is left unchanged."
-          data-i18n-title="equipment_picker_modal.apply_all_hint_title"
-          >?</span
-        >
-      </label>
+      <div class="equipment-picker-header-row">
+        <label class="equipment-picker-apply-all-label">
+          <input type="checkbox" id="equipment-picker-apply-all-checkbox" />
+          <span data-i18n="equipment_picker_modal.apply_all_label">Apply to all matching slots on this ship</span>
+          <span
+            class="equipment-picker-apply-all-hint"
+            title="Applies this choice to every other slot of the same type and size (bonus/surface element shields only apply to other bonus shields, main shields only to other main shields). A slot where this item isn't actually a valid option is left unchanged."
+            data-i18n-title="equipment_picker_modal.apply_all_hint_title"
+            >?</span
+          >
+        </label>
+        <button
+          type="button"
+          id="view-equipment-in-analyzer-btn"
+          class="view-in-analyzer-btn"
+          data-i18n="ship_builder.view_in_analyzer_btn"
+        >View in Component Analyzer</button>
+      </div>
       <div id="equipment-picker-modal-status" class="equipment-picker-modal-status hidden"></div>
       <div id="equipment-picker-table-wrapper" class="equipment-picker-table-wrapper">
         <table id="equipment-picker-table">
@@ -345,6 +393,107 @@
       <div class="modal-actions">
         <button type="button" id="equipment-picker-clear-btn" data-i18n="equipment_picker_modal.clear_selection">Clear Selection</button>
         <button type="button" id="equipment-picker-cancel-btn" data-i18n="equipment_picker_modal.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="component-set-picker-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3 id="component-set-picker-modal-title" data-i18n="component_set_picker_modal.title">Select Components</h3>
+      <div class="component-set-picker-search-row">
+        <input
+          id="component-set-picker-search-input"
+          type="text"
+          class="component-set-picker-search-input"
+          placeholder="Search…"
+          data-i18n-placeholder="component_set_picker_modal.search_placeholder"
+        />
+        <button type="button" id="component-set-picker-filters-btn" class="hidden"></button>
+      </div>
+      <div id="component-set-picker-filters-panel" class="hidden">
+        <div id="component-set-picker-filters-grid" class="filter-panel-grid"></div>
+        <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+      </div>
+      <div id="component-set-picker-modal-status" class="equipment-picker-modal-status hidden"></div>
+      <div id="component-set-picker-table-wrapper" class="equipment-picker-table-wrapper">
+        <table id="component-set-picker-table">
+          <thead id="component-set-picker-thead">
+            <tr>
+              <th>
+                <span class="component-set-picker-select-header">
+                  <button type="button" id="component-set-picker-select-all-btn" class="filter-all-btn" data-i18n="filter.all">All</button>
+                  <button type="button" id="component-set-picker-select-none-btn" class="filter-none-btn" data-i18n="filter.none">None</button>
+                </span>
+              </th>
+              <th data-i18n="component_set_picker_modal.table_name_header">Name</th>
+            </tr>
+          </thead>
+          <tbody id="component-set-picker-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="component-set-picker-cancel-btn" data-i18n="component_set_picker_modal.cancel">Cancel</button>
+        <button type="button" id="component-set-picker-done-btn" data-i18n="component_set_picker_modal.done">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stat-select-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3 id="stat-select-modal-title" data-i18n="stat_select_modal.title">Select Stats</h3>
+      <div class="stat-select-modal-body">
+        <div id="stat-select-groups-panel" class="stat-select-groups-panel"></div>
+        <div class="stat-select-selected-panel">
+          <div class="stat-select-selected-header-row">
+            <div class="stat-select-selected-header" data-i18n="stat_select_modal.selected_stats_header">Selected Stats</div>
+            <button type="button" id="stat-select-clear-btn" data-i18n="ship_builder.clear">Clear</button>
+          </div>
+          <div id="stat-select-selected-list" class="stat-select-selected-list"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="stat-select-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+        <button type="button" id="stat-select-save-btn" data-i18n="stat_select_modal.save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mod-lab-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="mod-lab-modal-title">Modifications Lab</h3>
+      <div class="mod-lab-modal-body">
+        <img src="/images/mod_lab_icons/mods_lab.png" alt="" class="mod-lab-modal-icon" />
+        <span data-i18n="mod_lab_modal.under_construction">Under Construction</span>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="mod-lab-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="component-analyzer-export-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 data-i18n="component_analyzer_export_modal.title">Export Component Analyzer Tables</h3>
+      <label class="component-analyzer-export-format-row">
+        <span data-i18n="component_analyzer_export_modal.format_label">Format</span>
+        <select id="component-analyzer-export-format-select">
+          <option value="json" data-i18n="component_analyzer_export_modal.format_json">JSON</option>
+          <option value="csv" data-i18n="component_analyzer_export_modal.format_csv">CSV (zip)</option>
+          <option value="xlsx" data-i18n="component_analyzer_export_modal.format_xlsx">Excel (zip)</option>
+        </select>
+      </label>
+      <div class="component-analyzer-export-tables-header">
+        <span data-i18n="component_analyzer_export_modal.tables_label">Tables to export</span>
+        <div class="filter-actions">
+          <button type="button" id="component-analyzer-export-tables-all-btn" data-i18n="filter.all">All</button>
+          <button type="button" id="component-analyzer-export-tables-none-btn" data-i18n="filter.none">None</button>
+        </div>
+      </div>
+      <div id="component-analyzer-export-tables-list" class="component-analyzer-export-tables-list"></div>
+      <div id="component-analyzer-export-modal-status" class="import-loadouts-status hidden"></div>
+      <div class="modal-actions">
+        <button type="button" id="component-analyzer-export-cancel-btn" data-i18n="component_analyzer_export_modal.cancel">Cancel</button>
+        <button type="button" id="component-analyzer-export-confirm-btn" data-i18n="component_analyzer_export_modal.export">Export</button>
       </div>
     </div>
   </div>
@@ -472,6 +621,10 @@
         <label class="checkbox-label">
           <input type="checkbox" id="share-option-loadouts" />
           <span data-i18n="share_modal.option_loadouts">Ship Loadouts</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="share-option-component_analyzer_tables" />
+          <span data-i18n="share_modal.option_component_analyzer_tables">Component Analyzer Tables</span>
         </label>
       </div>
       <div id="share-modal-status" class="import-loadouts-status hidden"></div>

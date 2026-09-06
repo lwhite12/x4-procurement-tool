@@ -6,6 +6,12 @@ DROP TABLE IF EXISTS maker_races;
 DROP TABLE IF EXISTS crew_roles;
 DROP TABLE IF EXISTS build_methods;
 DROP TABLE IF EXISTS ship_types;
+DROP TABLE IF EXISTS cargo_types;
+DROP TABLE IF EXISTS missile_weapon_systems;
+DROP TABLE IF EXISTS compatibility_types;
+DROP TABLE IF EXISTS ammunition_compatibility_types;
+DROP TABLE IF EXISTS thruster_classes;
+DROP TABLE IF EXISTS deployable_types;
 DROP TABLE IF EXISTS purposes;
 DROP TABLE IF EXISTS races;
 DROP TABLE IF EXISTS factions;
@@ -20,6 +26,7 @@ DROP TABLE IF EXISTS weapons_base;
 DROP TABLE IF EXISTS thrusters_base;
 DROP TABLE IF EXISTS software_base;
 DROP TABLE IF EXISTS missiles_base;
+DROP TABLE IF EXISTS bullets_base;
 DROP TABLE IF EXISTS deployables_base;
 DROP TABLE IF EXISTS drones_base;
 DROP TABLE IF EXISTS countermeasures_base;
@@ -45,8 +52,35 @@ CREATE TABLE ships_base (
     hull INTEGER,
     crew INTEGER,
     traveldrivestability INTEGER,
+    -- Hull-wide multipliers applied on top of whatever's actually mounted --
+    -- confirmed real in-game (not dead data): a ship's own <modifiers>
+    -- <weapon heat="X"/> scales every mounted weapon's own heat generation,
+    -- <shield capacity="X" rechargerate="X" rechargedelay="X"/> scales every
+    -- mounted shield's own numbers. See load_macro_data()'s own docstring.
+    -- Only present on a small minority of ships at all -- absence means an
+    -- implicit, unmodified 1.0, not "unknown", so every ship gets a real
+    -- value here, never NULL.
+    weapon_heat_modifier REAL,
+    shield_capacity_modifier REAL,
+    shield_rechargerate_modifier REAL,
+    shield_rechargedelay_modifier REAL,
     missile_capacity INTEGER,
     drone_capacity INTEGER,
+    -- Ship's own cargo hold, read from its storage_*_macro's <cargo max=""
+    -- tags=""/> (see parse_ship_docks()) -- cargo_type is the raw tags
+    -- string (e.g. "container", "liquid", "solid", "container solid"), 0/""
+    -- for ships with no cargo hold at all (most combat ships).
+    cargo_capacity INTEGER,
+    cargo_type TEXT,
+    -- External docking points and internal ship-storage (hangar) capacity,
+    -- both by docked-ship size -- see parse_ship_docks()'s own docstring
+    -- for the real distinction between the two (a dock is a single visible
+    -- attach point; ship storage is how many ships of that size an L/XL
+    -- ship can carry stored inside it, e.g. a carrier's fighter bay).
+    s_docks INTEGER,
+    m_docks INTEGER,
+    s_ship_storage INTEGER,
+    m_ship_storage INTEGER,
     size TEXT,
     -- The raw class="..." value this ship's own macro carried (e.g.
     -- "ship_l"), before SHIP_CLASS_TO_SIZE_CODE's mapping to `size` above
@@ -63,13 +97,26 @@ CREATE TABLE ships_base (
     shields_bonus_m INTEGER
 );
 
+-- volume/transport are real per-ware cargo stats straight off the <ware>
+-- element (see parse_economy_wares()'s own docstring): `volume` is how
+-- much cargo-hold space one unit takes, `transport` is which hold type it
+-- needs -- "container"/"liquid"/"solid" (matching cargo_types.cargo_type_id)
+-- plus a handful of real "condensate" outliers cargo_types has no row for,
+-- kept as a raw string rather than forced through a join that would drop
+-- them. Deliberately not parsed for any other ware kind (ships/equipment/
+-- missiles/drones/countermeasures/crew) -- they all carry the same
+-- attribute pair in wares.xml too, but it's always a meaningless flat
+-- "volume=1, transport=<its own type name>" placeholder there, confirmed
+-- by inspection, not a real cargo stat.
 CREATE TABLE economy_wares_base (
     ware_id TEXT PRIMARY KEY,
     name TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER,
-    leaf_ware BOOLEAN NOT NULL DEFAULT 0
+    leaf_ware BOOLEAN NOT NULL DEFAULT 0,
+    volume INTEGER,
+    transport TEXT
 );
 
 CREATE TABLE equipment_wares_base (
@@ -77,6 +124,20 @@ CREATE TABLE equipment_wares_base (
     name TEXT,
     equipment_type TEXT NOT NULL,
     missile_launcher BOOLEAN NOT NULL DEFAULT 0,
+    -- Comma-joined faction ids, same real <owner faction="..."/> element
+    -- and same shape as ships_base.owners (see parse_equipment_wares()'s
+    -- own docstring) -- empty for the handful of genuinely faction-
+    -- agnostic wares (every thruster, plus a few EVA-spacesuit items).
+    owners TEXT,
+    -- Same real Universal/Terran/Xenon/Boron/Closed Loop vocabulary as
+    -- ships_base.production_method (page 20206 "Ware Production Methods"),
+    -- taken from this ware's own first <production> block -- genuinely
+    -- meaningful for engine/shield/weapon/turret (confirmed real
+    -- diversity, not always "Universal"); every thruster's own first
+    -- production block is always "Universal" (no real variation), so this
+    -- column is present but not offered as a filter for that type -- see
+    -- app.js's COMPONENT_FILTER_GROUPS.
+    production_method TEXT,
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER
@@ -184,12 +245,17 @@ CREATE TABLE weapons_base (
     FOREIGN KEY (ware_id) REFERENCES equipment_wares_base (ware_id)
 );
 
--- Unlike turrets/engines/shields/weapons, thrusters have no macro/component
--- file to source mk/size/compatibility from -- all three are recovered from
--- the ware_id itself (see parse_thruster_wares). No owners/hull columns
+-- Unlike turrets/engines/shields/weapons, thrusters have no hardpoint-mount
+-- connection to source mk/size/compatibility from -- all three are recovered
+-- from the ware_id itself (see parse_thruster_wares). No owners/hull columns
 -- either: no faction lock, no <properties><hull> block to read. thruster_class
 -- ("allround"/"combat") is a playstyle choice, not a tier -- both are equally
 -- mountable on a given size, unlike compatibility on other equipment types.
+-- thrust_* IS real per-mk macro data (see parse_thruster_macros() and this
+-- module's own "Thrusters" docstring section for how a probe found these
+-- macros living alongside the engine ones despite thrusters having no mount
+-- connection): strafe is lateral/vertical translation thrust, pitch/yaw/roll
+-- are rotation thrust.
 CREATE TABLE thrusters_base (
     ware_id TEXT PRIMARY KEY,
     macro TEXT,
@@ -197,6 +263,10 @@ CREATE TABLE thrusters_base (
     thruster_class TEXT,
     size TEXT,
     compatibility TEXT,
+    thrust_strafe REAL,
+    thrust_pitch REAL,
+    thrust_yaw REAL,
+    thrust_roll REAL,
     FOREIGN KEY (ware_id) REFERENCES equipment_wares_base (ware_id)
 );
 
@@ -251,6 +321,43 @@ CREATE TABLE missiles_base (
     lock_time REAL,
     lock_range REAL,
     compatibility TEXT
+);
+
+-- Weapon/turret projectile definitions -- what weapons_base.bullet_class/
+-- turrets_base.bullet_class actually resolves to (join on bullet_class ==
+-- bullet_class), see parse_bullets()' own docstring for the full picture
+-- (many-to-one from weapon/turret to bullet, one row here per real bullet
+-- macro file, no wares.xml entry/price/name of its own since a bullet
+-- isn't a purchasable ware). damage_value is the main/base damage;
+-- damage_shield/damage_hull are optional type-specific bonuses that
+-- sometimes ride alongside it (never a replacement). reload_rate (shots/
+-- sec) and reload_time (sec/shot) are mutually exclusive per row -- two
+-- different attribute names the game itself uses for the same concept
+-- depending on bullet variant. areadamage_* is only populated for
+-- explosive/AOE bullets (flak etc).
+CREATE TABLE bullets_base (
+    bullet_class TEXT PRIMARY KEY,
+    damage_value REAL,
+    damage_shield REAL,
+    damage_hull REAL,
+    damage_repair REAL,
+    damage_shielddisruption REAL,
+    bullet_speed REAL,
+    bullet_lifetime REAL,
+    bullet_range REAL,
+    bullet_amount INTEGER,
+    bullet_barrelamount INTEGER,
+    reload_rate REAL,
+    reload_time REAL,
+    heat_value REAL,
+    heat_initial REAL,
+    ammunition_value INTEGER,
+    ammunition_reload REAL,
+    weapon_system TEXT,
+    areadamage_value REAL,
+    areadamage_shield REAL,
+    areadamage_shielddisruption REAL,
+    areadamage_lifetime REAL
 );
 
 -- Satellites/resource probes/mines/lasertowers/navbeacon: standalone
@@ -438,6 +545,66 @@ CREATE TABLE purposes (
 CREATE TABLE ship_types (
     ship_type_id TEXT PRIMARY KEY,
     ship_type_name TEXT
+);
+
+-- Every real cargo-type token actually present across ships_base.cargo_type
+-- (space-separated, see that column's own docstring), with a real display
+-- name where one is known -- see parse_cargo_types()/CARGO_TYPE_NAME_REF's
+-- own docstrings (both above, in this same module).
+CREATE TABLE cargo_types (
+    cargo_type_id TEXT PRIMARY KEY,
+    cargo_type_name TEXT
+);
+
+-- Every real weapon_system token actually present across missiles_base.
+-- weapon_system, with a real display name where one is known -- see
+-- parse_missile_weapon_systems()/MISSILE_WEAPON_SYSTEM_NAME_REF's own
+-- docstrings (both above, in this same module).
+CREATE TABLE missile_weapon_systems (
+    weapon_system_id TEXT PRIMARY KEY,
+    weapon_system_name TEXT
+);
+
+-- Every real compatibility tag actually present across engines_base/
+-- shields_base/weapons_base/turrets_base/thrusters_base/missiles_base.
+-- compatibility (each comma-joined, see that column's own docstring),
+-- with a real display name where one is known -- see
+-- parse_compatibility_types()/COMPATIBILITY_NAME_REF's own docstrings
+-- (both above, in this same module).
+CREATE TABLE compatibility_types (
+    compatibility_type_id TEXT PRIMARY KEY,
+    compatibility_type_name TEXT
+);
+
+-- Every real ammunition-compatibility tag actually present across
+-- missiles_base.compatibility and weapons_base/turrets_base.
+-- ammunition_tags (each comma-joined) -- a distinct vocabulary from
+-- compatibility_types above despite the similarly-named source columns,
+-- see parse_ammunition_compatibility_types()/AMMUNITION_TYPE_NAME_REF's
+-- own docstrings (both above, in this same module).
+CREATE TABLE ammunition_compatibility_types (
+    ammunition_compatibility_type_id TEXT PRIMARY KEY,
+    ammunition_compatibility_type_name TEXT
+);
+
+-- Every real thruster_class value actually present across thrusters_base.
+-- thruster_class ("allround"/"combat" -- a player playstyle choice, not a
+-- tier), with a real display name where one is known -- see
+-- parse_thruster_classes()/THRUSTER_CLASS_NAME_REF's own docstrings (both
+-- above, in this same module).
+CREATE TABLE thruster_classes (
+    thruster_class_id TEXT PRIMARY KEY,
+    thruster_class_name TEXT
+);
+
+-- Every real deployable_type value actually present across
+-- deployables_base.deployable_type ("satellite"/"resourceprobe"/"mine"/
+-- "lasertower"/"navbeacon"), with a real display name where one is known
+-- -- see parse_deployable_types()/DEPLOYABLE_TYPE_NAME_REF's own
+-- docstrings (both above, in this same module).
+CREATE TABLE deployable_types (
+    deployable_type_id TEXT PRIMARY KEY,
+    deployable_type_name TEXT
 );
 
 -- Every real production method (see BUILD_METHODS/parse_build_methods()

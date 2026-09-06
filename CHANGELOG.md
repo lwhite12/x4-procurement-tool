@@ -15,7 +15,62 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.5.1] - 2026-08-31 - Production
+## [0.6.0] - 2026-09-06 - Production
+
+### Added
+
+- **New Component Analyzer page**, for building side-by-side comparison tables of any
+  component type, independent from the Fleet Planner/ship-builder flow:
+  - Stat catalogs for all 12 component types: Chassis, Engines, Shields, Weapons, Turrets,
+    Thrusters (including real flight-performance numbers recovered from a
+    previously-unscanned game-data path), Software, Drones, Deployables, Countermeasures,
+    Crew, and Economy Wares.
+  - Any number of independent tables at once, each with its own component-type picker,
+    a searchable/filterable component-selection modal (with select-all/none and per-group
+    filters), a grouped stat selector (with a per-group All/None button), and its own sort
+    column/direction.
+  - Editable table/tab names via a dedicated edit button, instead of live-editable text.
+  - "View in Component Analyzer" button on the ship builder and every equipment picker,
+    opening a new table pre-populated with whatever's currently selected (and closing the
+    picker automatically); the new table gets a contextual title like "<chassis> Chassis
+    Fleet Planner View".
+  - Export to JSON, CSV (a zip of one file per tab), or XLSX (a zip of one workbook per
+    table, one sheet per tab), with a per-table selector, plus a matching Import button.
+  - A new "Component Analyzer Tables" option in the Share tool, with its own cloud save key.
+  - Its own top-nav icon and page, extracted from the game's own "high-tech station" symbol.
+- Real, per-language display names (instead of raw internal codes) for ship type, cargo type,
+  equipment compatibility class, ammunition compatibility, thruster class, and deployable
+  type -- sourced directly from the game's own text.
+- Ship builder now shows a ship's special equipment-compatibility requirements (e.g. "Mining",
+  "Advanced") both in the chassis summary and next to the weapon/turret slots that need them.
+- A half-size Modifications Lab button on every ware in the ware list, scoped to that ware
+  only, alongside the existing "apply to all" button.
+- A new Fleet Statistics panel.
+
+### Changed
+
+- "Production Wares" component table renamed to "Economy Wares", now backed by its own
+  dedicated endpoint instead of the general wares list.
+- The Select Components table keeps its All/None header and component-name column frozen
+  while scrolling, instead of scrolling them out of view.
+- Build method, missile weapon system, and drone purpose stat columns in the Component
+  Analyzer now show real display names instead of raw internal codes.
+- All of the above additions -- the entire Component Analyzer, the Modifications Lab changes,
+  and every new real-name mapping -- are fully translated across all 14 supported languages
+  (~255-262 new keys each).
+
+### Fixed
+
+- DLC ship cargo capacities were missing entirely for several expansions (Boron, Split,
+  Pirate, Timelines, and both mini-DLCs) -- their storage macros live at a path the
+  extraction pipeline never scanned.
+- Share links for Component Analyzer tables were silently broken, since the share-request
+  type only ever allowed an object payload, not the list-shaped one this section needed.
+- Two real cross-table name collisions in the localization data (deployable type "mine" vs.
+  ship purpose "mine"; ammunition "torpedo" vs. missile weapon system "torpedo") were causing
+  one to silently show the other's translation.
+
+## [0.5.1] - 2026-08-31
 
 ### Fixed
 

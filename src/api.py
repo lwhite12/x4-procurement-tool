@@ -64,7 +64,8 @@ Endpoints:
                                              components.py's resolve_ship()/
                                              matching_items())
   GET  /api/missiles                     -- list every missile (ware_id/
-                                             name/compatibility), for the
+                                             name/compatibility/
+                                             weapon_system), for the
                                              frontend to filter client-side
                                              against whichever launchers'
                                              ammunition_tags are currently
@@ -74,6 +75,17 @@ Endpoints:
                                              generate_ships_table.py.
                                              "?lang=de" works the same way
                                              as /api/ships' own
+  GET  /api/missile_weapon_systems        -- weapon_system_id ->
+                                             weapon_system_name for every
+                                             real value missiles_base.
+                                             weapon_system takes (see
+                                             generate_ships_table.py's
+                                             parse_missile_weapon_systems()/
+                                             MISSILE_WEAPON_SYSTEM_NAME_REF),
+                                             for the Component Analyzer's
+                                             missile "Weapon System" filter
+                                             group. "?lang=de" works the same
+                                             way as /api/ship_types' own
   GET  /api/drones                       -- list every drone (ware_id/
                                              name); unlike missiles, no
                                              per-launcher compatibility
@@ -145,6 +157,18 @@ Endpoints:
                                              frontend's per-column editable
                                              build-method-priority list
                                              (defaults to this same list)
+  GET  /api/components/{component_type}   -- flat, ship-agnostic list of
+                                             every real ware of one
+                                             equipment type ("engine"/
+                                             "shield"/"turret"/"thruster"/
+                                             "weapon"/"missile_launcher"/
+                                             "software"), for the Component
+                                             Analyzer's "Select Components"
+                                             picker -- unlike GET
+                                             /api/ships/{id}/groups, not
+                                             scoped to any one ship's own
+                                             hardpoints. See
+                                             COMPONENT_LIST_SPECS
   GET  /api/factions                      -- faction_id -> faction_name/
                                              faction_shortname for every
                                              real faction (factions table --
@@ -187,6 +211,17 @@ Endpoints:
                                              ship picker's Type filter
                                              labels. "?lang=de" works the
                                              same way as /api/ships' own
+  GET  /api/cargo_types                   -- cargo_type_id -> cargo_type_name
+                                             for every distinct cargo-type
+                                             token actually present across
+                                             ships_base.cargo_type
+                                             (cargo_types table -- see
+                                             generate_ships_table.py's
+                                             parse_cargo_types()/
+                                             CARGO_TYPE_NAME_REF), for the
+                                             ship builder's cargo capacity
+                                             summary line. "?lang=de" works
+                                             the same way as /api/ships' own
   GET  /api/build_method_names            -- build_method_name ->
                                              build_method_display_name for
                                              every real build method
@@ -358,10 +393,11 @@ import sqlite3
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from component_export import build_csv_zip, build_xlsx_zip
 from import_loadouts import build_saved_loadout_entry, parse_loadouts_xml
 from query_ship_components import query_ship_groups
 from share_storage import get_share, put_share
@@ -470,20 +506,23 @@ class ImportLoadoutsRequest(BaseModel):
     xml_text: str | None = None
 
 
-# The three independently-shareable slices of frontend state (see app.js's
+# The four independently-shareable slices of frontend state (see app.js's
 # own SHARE_SECTIONS) -- a Literal (not a bare str) so FastAPI 422s on
 # anything else automatically, rather than this module needing to validate
 # it before ever reaching share_storage.py (which has no opinion on what
 # sections exist).
-ShareSection = Literal["fleets", "price_overrides", "loadouts"]
+ShareSection = Literal["fleets", "price_overrides", "loadouts", "component_analyzer_tables"]
 
 
 class ShareCreateRequest(BaseModel):
-    # Deliberately untyped beyond "some JSON object" -- this endpoint has no
+    # Deliberately untyped beyond "some JSON value" -- this endpoint has no
     # opinion on any given section's own shape (fleets/priceOverrides/
-    # importedLoadoutsResult each look completely different), it's just a
-    # blob store. The frontend is the only place that shape is meaningful.
-    data: dict
+    # importedLoadoutsResult are each a dict, componentAnalyzerTables is a
+    # list), it's just a blob store. The frontend is the only place that
+    # shape is meaningful. `dict | list` (not bare `dict`) -- a bare `dict`
+    # here 422'd every real share attempt for the list-shaped
+    # component_analyzer_tables section.
+    data: dict | list
 
 
 class BuildSavedLoadoutRequest(BaseModel):
@@ -532,6 +571,37 @@ def list_ships(lang: str = "en") -> list[dict]:
     as pure English, never a raw {page,id} ref or an error. Sorted by the
     resolved (COALESCEd) name, not always the English one, so a non-English
     ship list is actually alphabetized in that language.
+
+    s_docks/m_docks/s_ship_storage/m_ship_storage are read straight off
+    ships_base (see generate_ships_table.py's parse_ship_docks()) -- the
+    Fleet Lists panel's own per-entry and fleet-wide S/M Ship Capacity
+    totals (shipCapacity() in app.js) are computed client-side from these
+    four, not a separate endpoint, since allShips is already loaded before
+    any fleet list ever renders.
+
+    Also carries every other ships_base stat (hull/crew/traveldrivestability/
+    weapon_heat_modifier/shield_capacity_modifier/shield_rechargerate_modifier/
+    shield_rechargedelay_modifier/missile_capacity/drone_capacity/
+    cargo_capacity/cargo_type/shields/engines/weapons/missile_launchers/
+    turret_<size>/bonus_<size>_weapons/shields_bonus_m/price_min/price_avg/
+    price_max/production_time) plus a LEFT JOIN of every flight_model column
+    (flight_model.ware_id is a real FK to ships_base.ware_id, a clean 1:1 --
+    every ship has exactly one row) -- together these back the Component
+    Analyzer's chassis stat groups (app.js's CHASSIS_STAT_DEFINITIONS:
+    core/components/capacities/modifiers/flight/economy). The four
+    *_modifier columns are real hull-wide multipliers confirmed in-game
+    (verified against a live ship, not just the extracted XML) -- see
+    generate_ships_table.py's load_macro_data() for where they're parsed
+    from each ship macro's own <modifiers><weapon heat="..."/><shield
+    capacity="..." rechargerate="..." rechargedelay="..."/></modifiers>
+    block; absence there means an implicit, unmodified 1.0, not unknown, so
+    every ship always has a real value for all four, never NULL.
+    turret_<size>/bonus_<size>_weapons are the two dynamically-
+    named column families explained in generate_ships_table.py's
+    write_ships_csv() -- only the sizes actually present across this
+    dataset exist as real columns, so this list only names the ones that
+    happen to exist right now (turret_l/turret_m/bonus_l_weapons); a
+    future DLC adding e.g. turret_s would need this SELECT updated too.
     """
     conn = get_connection()
     try:
@@ -545,10 +615,65 @@ def list_ships(lang: str = "en") -> list[dict]:
                 ships_base.purpose AS purpose,
                 ships_base.owners AS owners,
                 ships_base.icon AS icon,
-                ships_base.production_method AS production_method
+                ships_base.production_method AS production_method,
+                ships_base.s_docks AS s_docks,
+                ships_base.m_docks AS m_docks,
+                ships_base.s_ship_storage AS s_ship_storage,
+                ships_base.m_ship_storage AS m_ship_storage,
+                ships_base.hull AS hull,
+                ships_base.crew AS crew,
+                ships_base.traveldrivestability AS traveldrivestability,
+                ships_base.weapon_heat_modifier AS weapon_heat_modifier,
+                ships_base.shield_capacity_modifier AS shield_capacity_modifier,
+                ships_base.shield_rechargerate_modifier AS shield_rechargerate_modifier,
+                ships_base.shield_rechargedelay_modifier AS shield_rechargedelay_modifier,
+                ships_base.missile_capacity AS missile_capacity,
+                ships_base.drone_capacity AS drone_capacity,
+                ships_base.cargo_capacity AS cargo_capacity,
+                ships_base.cargo_type AS cargo_type,
+                ships_base.shields AS shields,
+                ships_base.shields_bonus_m AS shields_bonus_m,
+                ships_base.engines AS engines,
+                ships_base.weapons AS weapons,
+                ships_base.bonus_l_weapons AS bonus_l_weapons,
+                ships_base.missile_launchers AS missile_launchers,
+                ships_base.turret_l AS turret_l,
+                ships_base.turret_m AS turret_m,
+                ships_base.price_min AS price_min,
+                ships_base.price_avg AS price_avg,
+                ships_base.price_max AS price_max,
+                ships_base.production_time AS production_time,
+                flight_model.jerk_angular_value AS jerk_angular_value,
+                flight_model.jerk_forward_accel AS jerk_forward_accel,
+                flight_model.jerk_forward_boost_accel AS jerk_forward_boost_accel,
+                flight_model.jerk_forward_boost_ratio AS jerk_forward_boost_ratio,
+                flight_model.jerk_forward_decel AS jerk_forward_decel,
+                flight_model.jerk_forward_ratio AS jerk_forward_ratio,
+                flight_model.jerk_forward_travel_accel AS jerk_forward_travel_accel,
+                flight_model.jerk_forward_travel_decel AS jerk_forward_travel_decel,
+                flight_model.jerk_forward_travel_ratio AS jerk_forward_travel_ratio,
+                flight_model.jerk_strafe_value AS jerk_strafe_value,
+                flight_model.physics_accfactors_forward AS physics_accfactors_forward,
+                flight_model.physics_accfactors_horizontal AS physics_accfactors_horizontal,
+                flight_model.physics_accfactors_reverse AS physics_accfactors_reverse,
+                flight_model.physics_accfactors_vertical AS physics_accfactors_vertical,
+                flight_model.physics_drag_forward AS physics_drag_forward,
+                flight_model.physics_drag_horizontal AS physics_drag_horizontal,
+                flight_model.physics_drag_pitch AS physics_drag_pitch,
+                flight_model.physics_drag_reverse AS physics_drag_reverse,
+                flight_model.physics_drag_roll AS physics_drag_roll,
+                flight_model.physics_drag_vertical AS physics_drag_vertical,
+                flight_model.physics_drag_yaw AS physics_drag_yaw,
+                flight_model.physics_inertia_pitch AS physics_inertia_pitch,
+                flight_model.physics_inertia_roll AS physics_inertia_roll,
+                flight_model.physics_inertia_yaw AS physics_inertia_yaw,
+                flight_model.physics_mass AS physics_mass,
+                flight_model.steeringcurve AS steeringcurve
             FROM ships_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = ships_base.ware_id AND localized_strings.lang_id = ?
+            LEFT JOIN flight_model
+                ON flight_model.ware_id = ships_base.ware_id
             ORDER BY name
             """,
             (lang,),
@@ -599,20 +724,107 @@ def list_wares(lang: str = "en") -> list[dict]:
         conn.close()
 
 
-@app.get("/api/missiles")
-def list_missiles(lang: str = "en") -> list[dict]:
+# Backs the Component Analyzer's "Economy Wares" component type -- unlike
+# GET /api/wares above (a flat union across every PRICE_WARE_TABLES table,
+# used by the price-override picker), this is economy_wares_base alone:
+# real production-chain materials (raw resources, refined goods, station
+# wares), each with its own real volume/transport cargo stats (see that
+# table's own schema comment in ships_tables.sql) -- not the meaningless
+# flat volume=1 placeholder every other ware kind carries.
+@app.get("/api/economy_wares")
+def list_economy_wares(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
             """
             SELECT
+                economy_wares_base.ware_id AS ware_id,
+                COALESCE(localized_strings.text, economy_wares_base.name) AS name,
+                economy_wares_base.price_min AS price_min,
+                economy_wares_base.price_avg AS price_avg,
+                economy_wares_base.price_max AS price_max,
+                economy_wares_base.volume AS volume,
+                economy_wares_base.transport AS transport,
+                economy_wares_base.leaf_ware AS leaf_ware
+            FROM economy_wares_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = economy_wares_base.ware_id AND localized_strings.lang_id = ?
+            ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+@app.get("/api/missiles")
+def list_missiles(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        # Every missiles_base stat column except its own raw "name" (the
+        # COALESCE below overrides that one with the localized text) --
+        # backs the Component Analyzer's missile stat catalog (app.js's
+        # MISSILE_STAT_DEFINITIONS). Listed explicitly rather than
+        # missiles_base.* -- unlike engines_base/shields_base/weapons_base/
+        # turrets_base/thrusters_base, missiles_base has its own "name"
+        # column, so a blind .* would collide with the aliased one below.
+        rows = conn.execute(
+            """
+            SELECT
                 missiles_base.ware_id AS ware_id,
                 COALESCE(localized_strings.text, missiles_base.name) AS name,
+                missiles_base.macro AS macro,
+                missiles_base.price_min AS price_min,
+                missiles_base.price_avg AS price_avg,
+                missiles_base.price_max AS price_max,
+                missiles_base.ammunition_value AS ammunition_value,
+                missiles_base.ammunition_reload AS ammunition_reload,
+                missiles_base.missile_amount AS missile_amount,
+                missiles_base.missile_barrelamount AS missile_barrelamount,
+                missiles_base.missile_lifetime AS missile_lifetime,
+                missiles_base.missile_range AS missile_range,
+                missiles_base.missile_guided AS missile_guided,
+                missiles_base.explosiondamage_value AS explosiondamage_value,
+                missiles_base.explosiondamage_shielddisruption AS explosiondamage_shielddisruption,
+                missiles_base.reload_time AS reload_time,
+                missiles_base.hull AS hull,
+                missiles_base.weapon_system AS weapon_system,
+                missiles_base.countermeasure_resilience AS countermeasure_resilience,
+                missiles_base.physics_mass AS physics_mass,
+                missiles_base.lock_time AS lock_time,
+                missiles_base.lock_range AS lock_range,
                 missiles_base.compatibility AS compatibility
             FROM missiles_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = missiles_base.ware_id AND localized_strings.lang_id = ?
             ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# weapon_system_id -> real display name (e.g. "torpedo" -> "Torpedos") for
+# every real value missiles_base.weapon_system actually takes -- see
+# generate_ships_table.py's parse_missile_weapon_systems()/
+# MISSILE_WEAPON_SYSTEM_NAME_REF. Powers the Component Analyzer's missile
+# "Weapon System" filter group (app.js). "lang" works exactly like GET
+# /api/ship_types' own.
+@app.get("/api/missile_weapon_systems")
+def list_missile_weapon_systems(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                missile_weapon_systems.weapon_system_id AS weapon_system_id,
+                COALESCE(localized_strings.text, missile_weapon_systems.weapon_system_name) AS weapon_system_name
+            FROM missile_weapon_systems
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = missile_weapon_systems.weapon_system_id AND localized_strings.lang_id = ?
             """,
             (lang,),
         ).fetchall()
@@ -631,11 +843,26 @@ def list_drones(lang: str = "en") -> list[dict]:
         # "ship_gen_" ones (fighting/mining/building/cargo/repair) --
         # drones_base itself still has all 13 rows, this only narrows what
         # the UI shows as addable.
+        #
+        # Every drones_base stat column except its own raw "name" (the
+        # COALESCE below overrides that one with the localized text) --
+        # backs the Component Analyzer's drone stat catalog (app.js's
+        # DRONE_STAT_DEFINITIONS). Listed explicitly rather than
+        # drones_base.* -- like missiles_base, drones_base has its own
+        # "name" column, so a blind .* would collide with the aliased one.
         rows = conn.execute(
             """
             SELECT
                 drones_base.ware_id AS ware_id,
-                COALESCE(localized_strings.text, drones_base.name) AS name
+                COALESCE(localized_strings.text, drones_base.name) AS name,
+                drones_base.macro AS macro,
+                drones_base.price_min AS price_min,
+                drones_base.price_avg AS price_avg,
+                drones_base.price_max AS price_max,
+                drones_base.ship_type AS ship_type,
+                drones_base.purpose AS purpose,
+                drones_base.hull AS hull,
+                drones_base.physics_mass AS physics_mass
             FROM drones_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = drones_base.ware_id AND localized_strings.lang_id = ?
@@ -653,12 +880,28 @@ def list_drones(lang: str = "en") -> list[dict]:
 def list_deployables(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
+        # Every deployables_base stat column except its own raw "name" (the
+        # COALESCE below overrides that one with the localized text) --
+        # backs the Component Analyzer's deployable stat catalog (app.js's
+        # DEPLOYABLE_STAT_DEFINITIONS). Listed explicitly rather than
+        # deployables_base.* -- like missiles_base/drones_base,
+        # deployables_base has its own "name" column, so a blind .* would
+        # collide with the aliased one below.
         rows = conn.execute(
             """
             SELECT
                 deployables_base.ware_id AS ware_id,
                 COALESCE(localized_strings.text, deployables_base.name) AS name,
-                deployables_base.deployable_type AS deployable_type
+                deployables_base.deployable_type AS deployable_type,
+                deployables_base.price_min AS price_min,
+                deployables_base.price_avg AS price_avg,
+                deployables_base.price_max AS price_max,
+                deployables_base.hull AS hull,
+                deployables_base.radar_range AS radar_range,
+                deployables_base.explosion_strength AS explosion_strength,
+                deployables_base.explosion_damage AS explosion_damage,
+                deployables_base.trigger_oncollision AS trigger_oncollision,
+                deployables_base.physics_mass AS physics_mass
             FROM deployables_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = deployables_base.ware_id AND localized_strings.lang_id = ?
@@ -675,11 +918,18 @@ def list_deployables(lang: str = "en") -> list[dict]:
 def list_countermeasures(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
+        # countermeasures_base has no stat column beyond price (see its own
+        # schema in ships_tables.sql) -- price_min/avg/max back the
+        # Component Analyzer's countermeasure stat catalog (app.js's
+        # COUNTERMEASURE_STAT_DEFINITIONS), economy group only.
         rows = conn.execute(
             """
             SELECT
                 countermeasures_base.ware_id AS ware_id,
-                COALESCE(localized_strings.text, countermeasures_base.name) AS name
+                COALESCE(localized_strings.text, countermeasures_base.name) AS name,
+                countermeasures_base.price_min AS price_min,
+                countermeasures_base.price_avg AS price_avg,
+                countermeasures_base.price_max AS price_max
             FROM countermeasures_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = countermeasures_base.ware_id AND localized_strings.lang_id = ?
@@ -696,11 +946,18 @@ def list_countermeasures(lang: str = "en") -> list[dict]:
 def list_crew(lang: str = "en") -> list[dict]:
     conn = get_connection()
     try:
+        # crew_base has no stat column beyond price either (see
+        # countermeasures_base's own comment just above) -- backs the
+        # Component Analyzer's crew stat catalog (app.js's
+        # CREW_STAT_DEFINITIONS), economy group only.
         rows = conn.execute(
             """
             SELECT
                 crew_base.ware_id AS ware_id,
-                COALESCE(localized_strings.text, crew_base.name) AS name
+                COALESCE(localized_strings.text, crew_base.name) AS name,
+                crew_base.price_min AS price_min,
+                crew_base.price_avg AS price_avg,
+                crew_base.price_max AS price_max
             FROM crew_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = crew_base.ware_id AND localized_strings.lang_id = ?
@@ -737,6 +994,124 @@ def list_crew_roles(lang: str = "en") -> list[dict]:
             (lang,),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# Component Analyzer's "Select Components" picker -- a flat, ship-agnostic
+# list of every real ware of one equipment type, unlike GET
+# /api/ships/{id}/groups' per-slot options (query_ship_groups(), scoped to
+# one ship's own hardpoints). "weapon" vs "missile_launcher" are both
+# backed by weapons_base (see query_ship_components.py's own
+# COMPONENT_TYPE_TABLES, which this mirrors) and split by
+# equipment_wares_base.missile_launcher, exactly like query_ship_groups()
+# splits them for its own per-ship "weapons"/"missile_launchers" buckets.
+COMPONENT_LIST_SPECS = {
+    "engine": {"table": "engines_base", "extra_where": None},
+    "shield": {"table": "shields_base", "extra_where": None},
+    "turret": {"table": "turrets_base", "extra_where": None},
+    "thruster": {"table": "thrusters_base", "extra_where": None},
+    "weapon": {"table": "weapons_base", "extra_where": "equipment_wares_base.missile_launcher = 0"},
+    "missile_launcher": {"table": "weapons_base", "extra_where": "equipment_wares_base.missile_launcher = 1"},
+}
+
+
+@app.get("/api/components/{component_type}")
+def list_components(component_type: str, lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        if component_type == "software":
+            # software_base has no equipment_wares_base parent row (see
+            # that table's own docstring in ships_tables.sql) -- name/price
+            # live directly on it.
+            rows = conn.execute(
+                """
+                SELECT
+                    software_base.ware_id AS ware_id,
+                    COALESCE(localized_strings.text, software_base.name) AS name,
+                    software_base.category AS category,
+                    software_base.mk AS mk,
+                    software_base.price_min AS price_min,
+                    software_base.price_avg AS price_avg,
+                    software_base.price_max AS price_max
+                FROM software_base
+                LEFT JOIN localized_strings
+                    ON localized_strings.ware_id = software_base.ware_id AND localized_strings.lang_id = ?
+                ORDER BY name
+                """,
+                (lang,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        spec = COMPONENT_LIST_SPECS.get(component_type)
+        if spec is None:
+            raise HTTPException(status_code=404, detail=f"Unknown component type '{component_type}'")
+
+        where_clause = f"WHERE {spec['extra_where']}" if spec["extra_where"] else ""
+        # weapons_base/turrets_base only -- LEFT JOIN (not JOIN) since not
+        # every weapon/turret's own bullet_class resolves to a real bullets_base
+        # row: 8 values point to a missile macro instead (dumbfire/torpedo-
+        # style "weapons" -- see bullets_base's own schema comment in
+        # ships_tables.sql), already covered by missiles_base, not this join.
+        # bullets_base.* rather than an explicit column list, same reasoning
+        # as {spec["table"]}.* below -- its own bullet_class column is a
+        # harmless duplicate of {spec["table"]}.bullet_class (identical
+        # value when the join hits, absent when it doesn't).
+        needs_bullets_join = spec["table"] in ("weapons_base", "turrets_base")
+        bullets_select = ", bullets_base.*" if needs_bullets_join else ""
+        bullets_join = (
+            f"LEFT JOIN bullets_base ON bullets_base.bullet_class = {spec['table']}.bullet_class"
+            if needs_bullets_join
+            else ""
+        )
+        # {spec["table"]}.* -- every type-specific stat column (mk/hull/size/
+        # compatibility plus whichever of bullet_class/heat_*/rotation_*/
+        # weapon_angle/ammunition_*/boost_*/travel_*/thrust_*/recharge_*/
+        # thruster_class that type's own table has) -- backs the Component
+        # Analyzer's per-type stat catalogs (app.js's ENGINE_STAT_DEFINITIONS/
+        # SHIELD_STAT_DEFINITIONS/WEAPON_STAT_DEFINITIONS/TURRET_STAT_DEFINITIONS/
+        # THRUSTER_STAT_DEFINITIONS). No column-name collision with the
+        # explicitly-aliased ones below -- none of these five tables has its
+        # own "name"/"owners"/"production_method"/"price_*" column (those
+        # only live on equipment_wares_base, joined in separately).
+        rows = conn.execute(
+            f"""
+            SELECT
+                {spec["table"]}.*{bullets_select},
+                COALESCE(localized_strings.text, equipment_wares_base.name) AS name,
+                equipment_wares_base.owners AS owners,
+                equipment_wares_base.production_method AS production_method,
+                equipment_wares_base.price_min AS price_min,
+                equipment_wares_base.price_avg AS price_avg,
+                equipment_wares_base.price_max AS price_max
+            FROM {spec["table"]}
+            JOIN equipment_wares_base ON equipment_wares_base.ware_id = {spec["table"]}.ware_id
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = {spec["table"]}.ware_id AND localized_strings.lang_id = ?
+            {bullets_join}
+            {where_clause}
+            ORDER BY name
+            """,
+            (lang,),
+        ).fetchall()
+        components = [dict(row) for row in rows]
+
+        # Real design race(s) -- same maker_races table/shape GET /api/ships
+        # merges in for ship.maker_races (see that endpoint's own comment).
+        # Not every component type has one (thrusters/missiles/software/
+        # deployables carry no makerrace concept in the game data at all --
+        # see load_maker_races()'s own docstring in query_ship_components.py),
+        # so components of those types simply end up with an empty list.
+        maker_race_rows = conn.execute(
+            "SELECT ware_id, race_id FROM maker_races ORDER BY ware_id, ordinal"
+        ).fetchall()
+        maker_races_by_ware_id: dict[str, list[str]] = {}
+        for row in maker_race_rows:
+            maker_races_by_ware_id.setdefault(row["ware_id"], []).append(row["race_id"])
+        for component in components:
+            component["maker_races"] = maker_races_by_ware_id.get(component["ware_id"], [])
+
+        return components
     finally:
         conn.close()
 
@@ -917,6 +1292,162 @@ def list_ship_types(lang: str = "en") -> list[dict]:
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = ship_types.ship_type_id AND localized_strings.lang_id = ?
             ORDER BY ship_type_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# cargo_type_id -> real display name (e.g. "liquid" -> "Liquid") for every
+# distinct cargo-type token actually present across ships_base.cargo_type
+# (cargo_types table -- see generate_ships_table.py's parse_cargo_types()/
+# CARGO_TYPE_NAME_REF). Powers the ship builder's cargo capacity summary
+# line -- a ship's own cargo_type can hold more than one space-separated
+# token (e.g. "container solid"), so a caller splits it and looks up each
+# token here. "lang" works exactly like GET /api/purposes' own.
+@app.get("/api/cargo_types")
+def list_cargo_types(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                cargo_types.cargo_type_id AS cargo_type_id,
+                COALESCE(localized_strings.text, cargo_types.cargo_type_name) AS cargo_type_name
+            FROM cargo_types
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = cargo_types.cargo_type_id AND localized_strings.lang_id = ?
+            ORDER BY cargo_type_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# "?lang=de" works the same way as GET /api/ship_types' own, with one
+# known gap: the handful of compatibility tags that are really race ids
+# under the hood ("khaak" -- see parse_compatibility_types()'s own
+# docstring for why "boron"/"khaak" resolve through the races table rather
+# than duplicating COMPATIBILITY_NAME_REF) only ever show their English
+# race_name here, never a real per-language one, since that resolution
+# happens once, in English, at generate time -- compatibility_types itself
+# carries no {page,id} ref for these to give localized_strings anything to
+# resolve. Real per-language race names already exist in
+# localized_race_names; revisit by joining against that table too if this
+# gap ever actually matters (today it's one real token, "khaak").
+@app.get("/api/compatibility_types")
+def list_compatibility_types(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                compatibility_types.compatibility_type_id AS compatibility_type_id,
+                COALESCE(localized_strings.text, compatibility_types.compatibility_type_name) AS compatibility_type_name
+            FROM compatibility_types
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = compatibility_types.compatibility_type_id AND localized_strings.lang_id = ?
+            ORDER BY compatibility_type_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# "?lang=de" works the same way as GET /api/compatibility_types' own, with
+# two wrinkles. First: a bare tag (dumbfire/guided/torpedo) gets its
+# localized_strings row the normal way (a real name_ref, resolved by
+# parse_localized_strings()), but a size-prefixed compound tag (e.g.
+# "largedumbfire") gets its own row from a dedicated composer,
+# parse_ammunition_compatibility_localized_strings() -- see that function's
+# own docstring in generate_ships_table.py for why (no single {page,id}
+# ref exists for the whole compound phrase, only for its two pieces).
+# Second: the join condition prepends "ammunition_compatibility_type_" to
+# this table's own id before comparing against localized_strings.ware_id
+# -- a real collision, "torpedo" is also missile_weapon_systems' own real
+# id (see parse_ammunition_compatibility_types()'s own docstring), so this
+# table's own passenger key needs namespacing to avoid silently inheriting
+# missile_weapon_systems' own (differently-worded, e.g. plural "Torpedos")
+# translation instead. Either way COALESCE still falls back to the base
+# English name for a hull-lock tag (e.g. "ship_ter_l_flagship_01"), which
+# never has any real ref at all.
+@app.get("/api/ammunition_compatibility_types")
+def list_ammunition_compatibility_types(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                ammunition_compatibility_types.ammunition_compatibility_type_id AS ammunition_compatibility_type_id,
+                COALESCE(localized_strings.text, ammunition_compatibility_types.ammunition_compatibility_type_name)
+                    AS ammunition_compatibility_type_name
+            FROM ammunition_compatibility_types
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = 'ammunition_compatibility_type_' ||
+                    ammunition_compatibility_types.ammunition_compatibility_type_id
+                    AND localized_strings.lang_id = ?
+            ORDER BY ammunition_compatibility_type_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# "?lang=de" works the same way as GET /api/ship_types' own -- see
+# parse_thruster_classes()/THRUSTER_CLASS_NAME_REF's own docstrings in
+# generate_ships_table.py for where the two real refs (page 20107) come
+# from.
+@app.get("/api/thruster_classes")
+def list_thruster_classes(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                thruster_classes.thruster_class_id AS thruster_class_id,
+                COALESCE(localized_strings.text, thruster_classes.thruster_class_name) AS thruster_class_name
+            FROM thruster_classes
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = thruster_classes.thruster_class_id AND localized_strings.lang_id = ?
+            ORDER BY thruster_class_name
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# "?lang=de" works the same way as GET /api/ship_types' own, with one
+# wrinkle: the join condition prepends "deployable_type_" to this table's
+# own id before comparing against localized_strings.ware_id -- see
+# parse_deployable_types()'s own docstring in generate_ships_table.py for
+# why (a real collision: "mine" is both a deployable_type and a purpose
+# id, and the shared localized_strings keyspace needs this table's own
+# passenger key namespaced to avoid silently inheriting the *purpose*'s
+# own translation).
+@app.get("/api/deployable_types")
+def list_deployable_types(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                deployable_types.deployable_type_id AS deployable_type_id,
+                COALESCE(localized_strings.text, deployable_types.deployable_type_name) AS deployable_type_name
+            FROM deployable_types
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = 'deployable_type_' || deployable_types.deployable_type_id
+                    AND localized_strings.lang_id = ?
+            ORDER BY deployable_type_name
             """,
             (lang,),
         ).fetchall()
@@ -1208,6 +1739,43 @@ def read_share_endpoint(section: ShareSection, share_uuid: str) -> dict:
     if data is None:
         return {"error": "This share link doesn't exist (it may be mistyped, or the share may have been removed)."}
     return {"data": data}
+
+
+# One row per Component Analyzer stat-set tab the user chose to export --
+# the frontend has already resolved every cell to a plain string
+# (formatStatValue(), the same formatting the on-screen table itself uses)
+# before this ever reaches component_export.py, which has no opinion on
+# what the data means (see that module's own docstring).
+class ComponentAnalyzerExportSheet(BaseModel):
+    table_name: str
+    tab_name: str
+    headers: list[str]
+    rows: list[list[str]]
+
+
+class ComponentAnalyzerExportRequest(BaseModel):
+    format: Literal["csv", "xlsx"]
+    sheets: list[ComponentAnalyzerExportSheet]
+
+
+# The Component Analyzer's own "Export" modal's csv/xlsx paths (its json
+# path needs no server round trip at all -- see app.js's own export click
+# handler) -- see component_export.py's own docstring for the CSV-vs-XLSX
+# file/zip shape.
+@app.post("/api/export_component_analyzer")
+def export_component_analyzer(request: ComponentAnalyzerExportRequest) -> Response:
+    sheets = [sheet.model_dump() for sheet in request.sheets]
+    if request.format == "csv":
+        content = build_csv_zip(sheets)
+        filename = "component_analyzer_export_csv.zip"
+    else:
+        content = build_xlsx_zip(sheets)
+        filename = "component_analyzer_export_xlsx.zip"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # Ship-class symbol PNGs (see generate_ship_icons.py) -- served under
