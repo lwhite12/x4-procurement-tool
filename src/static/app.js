@@ -17,6 +17,15 @@ let selectedShipWareId = "";
 // open when editCartEntry() was called -- see setActiveFleet()/deleteFleet().
 let editingIndex = null;
 
+// Non-null only while the Ship Trial Builder modal (Proving Grounds) is
+// open -- {trial, instanceId}, instanceId null meaning "adding a brand
+// new ship". Declared this early (rather than down with the rest of the
+// Ship Trials feature, where it's actually set/read) purely so
+// setAddToCartBtnLabel() below, called from plenty of code that runs long
+// before that section of the file, never risks hitting it mid-temporal-
+// dead-zone.
+let shipTrialBuilderContext = null;
+
 // One fleet list: {name, cart, buildMethodPriority, wareCostList, dirty}.
 // buildMethodPriority is an ordered list of build method names (tried in
 // order, first available match wins per ware -- see resolve_method() in
@@ -49,6 +58,15 @@ function activeFleet() {
   return fleets[activeFleetIndex];
 }
 
+// Which fleet's own column the Ware Cost List currently diffs every other
+// column against -- null for "no comparison, plain values only". A
+// completely independent concept from activeFleetIndex above (which fleet
+// is being edited elsewhere in the app) -- user call: clicking a column's
+// own focus control (see renderWareCostListHead()) sets/clears THIS, never
+// setActiveFleet(), so focusing a column for comparison has no effect on
+// which fleet the cart/build-method editing targets, and vice versa.
+let wareCostListFocusedFleetIndex = null;
+
 // Full, unfiltered ship list fetched once from GET /api/ships.
 let allShips = [];
 
@@ -80,11 +98,6 @@ let allDeployables = [];
 // amount. Same lifecycle as missileAmounts/droneAmounts.
 let deployableAmounts = {};
 
-// The game data has no per-ship deployable capacity stat anywhere (unlike
-// missile_capacity/drone_capacity, both real ships_base columns) -- these
-// are assumed defaults by ship size, given explicitly rather than derived.
-const DEPLOYABLE_CAPACITY_BY_SIZE = { s: 50, m: 100, l: 250, xl: 450 };
-
 // Full countermeasure catalog fetched once from GET /api/countermeasures --
 // just "Flares" in the base game. Same "shared pool, no per-selection
 // compatibility" shape as drones/deployables.
@@ -94,12 +107,6 @@ let allCountermeasures = [];
 // amount. Same lifecycle as missileAmounts/droneAmounts/deployableAmounts.
 let countermeasureAmounts = {};
 
-// Like DEPLOYABLE_CAPACITY_BY_SIZE: no ship macro anywhere specifies a real
-// per-ship flare capacity (only ever an explicit "0" to disable flares on
-// drones/Kha'ak/other non-player-flyable hulls -- see the "Countermeasures
-// and crew" docstring section in generate_ships_table.py) -- an assumed
-// default by ship size instead.
-const COUNTERMEASURE_CAPACITY_BY_SIZE = { s: 4, m: 8, l: 20, xl: 40 };
 
 // X4 has no separate "marine"/"service crew" *ware* -- GET /api/crew always
 // returns exactly one real ware (confirmed against the game's own
@@ -140,6 +147,158 @@ let allCrew = [];
 // totalSelectedCrew(), unchanged: it already just sums every value
 // regardless of how many keys exist).
 let crewAmounts = {};
+
+// The ship currently being configured's own applied mods, one slot per
+// mod picker the real Ship Builder shows (see renderShipDetail()'s own
+// mod-button calls) -- keyed "chassis", "engine" (combined engine +
+// thruster, user call -- there's no separate thruster mod in the real
+// game either), "shield" (combined, every MAIN shield slot), or
+// `bonus_shield::<group_name>`/`turret::<group_name>`/`weapon::<group_name>`
+// (one independent slot per such group -- a bonus shield, turret, or
+// weapon/missile launcher each gets its own mod, same as the real game).
+// Each slot's own `component` is a stable {type:"component_ref", wareId,
+// appliedMods, blockGlobalMod} object reused across re-renders of the
+// SAME loaded ship (so a mod chosen mid-session survives e.g. swapping a
+// different weapon into the same slot) -- buildModLabButton()/
+// openModLabModal() already know how to read/write exactly this shape
+// (see openModLabModal()'s own comment: "a full-component mock's own
+// {type: 'component_ref', wareId, ...} entry"), so this reuses that
+// mechanism as-is rather than inventing a parallel one. Reset to {} (see
+// resetShipModLabSlots()) at the same points missileAmounts/etc. reset --
+// a NEW ship/loadout must never inherit the PREVIOUS one's mods just
+// because they happen to share a slot key like "chassis".
+let shipModLabSlots = {};
+
+// Set by resetShipModLabSlots() right before a loadout populates the
+// builder (loadImportedGameLoadout()/editCartEntry()) -- shipModLabSlot()
+// consults this ONLY the first time it creates a given key's slot this
+// render pass, hydrating that slot's own component.appliedMods.standard
+// from the loadout's own saved selection (loadout.appliedMods[key]) so
+// reopening an already-modded ship/Trial ship shows what's already
+// applied, the same "reopen shows what's already set" UX
+// hydrateModLabLoaded() already gives the Mod Lab modal itself.
+let pendingShipAppliedMods = {};
+
+// Called everywhere missileAmounts/droneAmounts/etc. already get reset to
+// a fresh {} for a newly loaded ship/loadout (loadShipBtn's handler,
+// loadImportedGameLoadout(), editCartEntry(), resetShipPicker()) --
+// `initialAppliedMods` is that loadout's own saved appliedMods when
+// there is one (null/undefined/{} otherwise, a blank ship/loadout with
+// nothing to hydrate).
+function resetShipModLabSlots(initialAppliedMods) {
+  shipModLabSlots = {};
+  pendingShipAppliedMods = initialAppliedMods ?? {};
+}
+
+// Returns (creating on first call this render pass) the stable slot
+// object for `key` -- called from renderShipDetail()'s own mod-button
+// builders every time groupsContainer gets rebuilt, so an ALREADY-
+// existing slot (same ship, just re-rendering) keeps its own component
+// (and whatever mod is applied to it) untouched, only refreshing the
+// metadata (wareId changes e.g. when a different engine gets picked, so
+// the Mod Lab modal's own title/mod list stay accurate).
+function shipModLabSlot(key, componentType, wareId, wareName) {
+  let slot = shipModLabSlots[key];
+  if (!slot) {
+    const component = { type: "component_ref", wareId, appliedMods: {}, blockGlobalMod: {} };
+    const saved = pendingShipAppliedMods[key];
+    if (saved) component.appliedMods.standard = saved;
+    slot = shipModLabSlots[key] = { componentType, wareId, wareName, component };
+  } else {
+    slot.componentType = componentType;
+    slot.wareId = wareId;
+    slot.wareName = wareName;
+    slot.component.wareId = wareId;
+  }
+  return slot;
+}
+
+// Builds one of the real Ship Builder's own mod-picker buttons -- reuses
+// buildModLabButton() wholesale (same icon-by-tier logic, same modal) by
+// pointing it at this slot's own stable component object instead of a
+// real Component Analyzer row. `.ship-mod-lab-btn` is this function's own
+// marker class, read back by refreshShipModLabButtons() (there's no
+// table-wide rerender this can hook into the way Component Analyzer's own
+// mod buttons do, see that function's own comment).
+function buildShipModLabButton(key, componentType, wareId, wareName) {
+  const slot = shipModLabSlot(key, componentType, wareId, wareName);
+  const btn = buildModLabButton(wareName, componentType, wareId, null, slot.component);
+  btn.classList.add("ship-mod-lab-btn");
+  btn.dataset.modSlotKey = key;
+  return btn;
+}
+
+// Called once at the end of saveModLabAppliedMods() (alongside its own
+// renderComponentAnalyzerTables()/renderStatLabMocksView()/
+// renderStatLabMissingMocksSummary() calls), unconditionally -- a cheap
+// no-op via the empty NodeList when no ship-builder mod button is even in
+// the DOM right now. Can't just re-render the whole ship builder here the
+// way those other three re-render their own panels wholesale: a full
+// renderShipDetail() would rebuild #groups-container from the chassis's
+// own default options, silently discarding any component swap the user
+// hasn't saved yet (same reasoning as renderShipLoadoutNameField()'s own
+// comment) -- so this only ever touches the mod buttons themselves,
+// rebuilding each one fresh (picking up its own slot's just-saved
+// appliedMods) and swapping it in for the stale one.
+function refreshShipModLabButtons() {
+  for (const oldBtn of document.querySelectorAll(".ship-mod-lab-btn")) {
+    const key = oldBtn.dataset.modSlotKey;
+    const slot = shipModLabSlots[key];
+    if (!slot) continue;
+    const newBtn = buildShipModLabButton(key, slot.componentType, slot.wareId, slot.wareName);
+    oldBtn.replaceWith(newBtn);
+  }
+  // The Chassis Mod specifically (none of the other 5 slots touch any of
+  // these 4 capacities) can change missile_capacity_post_mod/
+  // drone_capacity_post_mod/deployable_capacity_post_mod/
+  // countermeasure_capacity_post_mod -- live-refreshes the Ammunition/
+  // Drones/Deployables/Countermeasures sections' own capacity numbers
+  // either way, and downgrades any now-over-capacity selection (see
+  // reclampCapacityLimitedAmounts()'s own comment). Cheap enough to just
+  // always run rather than checking which slot actually changed -- a
+  // no-op whenever the chassis mod wasn't touched, since the capacity
+  // numbers it reads won't have changed.
+  reclampCapacityLimitedAmounts();
+}
+
+// User call, 2026-11-01: a Chassis Mod that raises one of these 4
+// capacities lets the matching section show/offer more than the ship's
+// own BASE capacity (see totalMissileCapacity()/totalDroneCapacity()/
+// totalDeployableCapacity()/totalCountermeasureCapacity(), all now
+// reading shipLiveCapacity() -- the *_post_mod stat, not the bare base
+// column) -- conversely, removing or swapping to a weaker mod can drop
+// the live capacity back down below whatever the user already had
+// selected while the stronger mod was active. This re-clamps each of the
+// 4 amount maps down to fit, then unconditionally re-renders all 4
+// sections (even when nothing needed clamping) so their own capacity
+// numbers/visibility -- a section with 0 capacity renders nothing at
+// all, see renderDroneSection()'s own early return -- stay live no
+// matter which direction the capacity just moved.
+function clampAmountsToCapacity(amounts, capacity) {
+  const total = Object.values(amounts).reduce((sum, n) => sum + n, 0);
+  if (total <= capacity) return false;
+  let excess = total - capacity;
+  for (const key of Object.keys(amounts)) {
+    if (excess <= 0) break;
+    const reduceBy = Math.min(amounts[key], excess);
+    amounts[key] -= reduceBy;
+    excess -= reduceBy;
+    if (amounts[key] <= 0) delete amounts[key];
+  }
+  return true;
+}
+
+function reclampCapacityLimitedAmounts() {
+  if (!currentShip) return;
+  clampAmountsToCapacity(missileAmounts, totalMissileCapacity());
+  clampAmountsToCapacity(droneAmounts, totalDroneCapacity());
+  clampAmountsToCapacity(deployableAmounts, totalDeployableCapacity());
+  clampAmountsToCapacity(countermeasureAmounts, totalCountermeasureCapacity());
+  renderAmmunitionSection();
+  renderDroneSection();
+  renderDeployableSection();
+  renderCountermeasureSection();
+}
 
 // The Ware Cost List always shows two fixed depths side by side rather
 // than one user-configurable search_depth -- these mirror the same two
@@ -336,6 +495,17 @@ const selectChassisLoadoutBtn = document.getElementById("select-chassis-loadout-
 const shipHighPresetBtn = document.getElementById("ship-high-preset-btn");
 const shipMinimumPresetBtn = document.getElementById("ship-minimum-preset-btn");
 const shipDetail = document.getElementById("ship-detail");
+const pickerSection = document.getElementById("picker-section");
+// Captured once, while #picker-section is still sitting in its original
+// spot on the Fleet Planner page -- openShipTrialBuilderModal() below
+// temporarily relocates this same node (chassis picker/filters/Loadout
+// Manager AND #ship-detail, its own last child) into a modal over the
+// Proving Grounds page (reusing every bit of the Fleet Planner's own
+// ship-builder picking/rendering/editing code as-is, rather than building
+// a second copy of it) and closeShipTrialBuilderModal() puts it back here
+// afterward via these two references.
+const pickerSectionHomeParent = pickerSection.parentNode;
+const pickerSectionHomeNextSibling = pickerSection.nextSibling;
 const shipNameEl = document.getElementById("ship-name");
 const importedLoadoutWarningsEl = document.getElementById("imported-loadout-warnings");
 const shipSummaryEl = document.getElementById("ship-summary");
@@ -347,6 +517,7 @@ const droneContainer = document.getElementById("drone-container");
 const deployableContainer = document.getElementById("deployable-container");
 const crewContainer = document.getElementById("crew-container");
 const shipNoteInput = document.getElementById("ship-note-input");
+const shipLoadoutNameRow = document.getElementById("ship-loadout-name-row");
 const addToCartBtn = document.getElementById("add-to-cart-btn");
 // Same action as addToCartBtn, next to Select Loadout at the top of the
 // builder -- see setAddToCartBtnLabel()/addSelectedShipToCart() below,
@@ -357,10 +528,23 @@ const addToCartBtnTop = document.getElementById("add-to-cart-btn-top");
 // every other call site sets the label through this instead of touching
 // addToCartBtn/addToCartBtnTop directly, so neither copy can drift out of
 // sync with the other (e.g. one still reading "Add To Fleet List" while
-// editCartEntry() has switched the other to "Update Fleet List").
+// editCartEntry() has switched the other to "Update Fleet List"). While
+// the Ship Trial Builder modal is open (shipTrialBuilderContext set, see
+// its own comment above), this same button is repurposed as that modal's
+// own save action (see handleAddToCartBtnClick()/saveShipTrialBuilderChanges())
+// instead, so every call site's own "Add To Fleet List"/"Update Fleet
+// List" text gets overridden here with the Trial-flavored equivalent --
+// decided from shipTrialBuilderContext.instanceId directly (editing an
+// existing Trial ship vs. adding a new one) rather than from whichever
+// text the call site happened to pass, since e.g. loadImportedGameLoadout()
+// (how an Edit click populates this modal) always passes the "Add"
+// wording, which would be wrong here for an edit-update.
 function setAddToCartBtnLabel(text) {
-  addToCartBtn.textContent = text;
-  addToCartBtnTop.textContent = text;
+  const displayText = shipTrialBuilderContext
+    ? t(shipTrialBuilderContext.instanceId !== null ? "proving_grounds.update_trial_btn" : "proving_grounds.add_to_trial_btn")
+    : text;
+  addToCartBtn.textContent = displayText;
+  addToCartBtnTop.textContent = displayText;
 }
 
 const addToSavedLoadoutsBtn = document.getElementById("add-to-saved-loadouts-btn");
@@ -432,6 +616,12 @@ const exportLoadoutsBtn = document.getElementById("export-loadouts-btn");
 const clearLoadoutsBtn = document.getElementById("clear-loadouts-btn");
 const selectGameLoadoutModalOverlay = document.getElementById("select-game-loadout-modal-overlay");
 const selectGameLoadoutModalTitle = document.getElementById("select-game-loadout-modal-title");
+const selectGameLoadoutChassisSearch = document.getElementById("select-game-loadout-chassis-search");
+const selectGameLoadoutNameSearch = document.getElementById("select-game-loadout-name-search");
+const selectGameLoadoutFiltersRow = document.getElementById("select-game-loadout-filters-row");
+const selectGameLoadoutFiltersBtn = document.getElementById("select-game-loadout-filters-btn");
+const selectGameLoadoutFiltersPanel = document.getElementById("select-game-loadout-filters-panel");
+const selectGameLoadoutFiltersGrid = document.getElementById("select-game-loadout-filters-grid");
 const selectGameLoadoutList = document.getElementById("select-game-loadout-list");
 const selectGameLoadoutCancelBtn = document.getElementById("select-game-loadout-cancel-btn");
 
@@ -551,6 +741,78 @@ const thrusterClassNames = {};
 // stat column. A code with no entry yet falls back to that same raw code,
 // same spirit as shipTypeNames' own fallback.
 const deployableTypeNames = {};
+
+// mod_level (1/2/3) -> real display name ("Basic Quality"/"Enhanced
+// Quality"/"Exceptional Quality"), fetched once from GET
+// /api/mod_qualities (see generate_ships_table.py's parse_mod_qualities()/
+// MOD_QUALITY_NAME_REF) -- backs the Modifications Lab's own tab labels.
+const modQualityNames = {};
+
+// Every real in-game equipment mod plus every synthetic ship-chassis
+// "Integrated Changes" mod, each with its own nested "stats" array --
+// fetched once from GET /api/equipment_mods (see that endpoint's own
+// docstring in api.py). NOT Steam Workshop/user-created mods. A small,
+// fixed dataset (a few tens of KB) -- loaded whole and filtered/grouped
+// in JS (modsForComponentType() below), same "load everything up front"
+// pattern as every other lookup table in this file. The synthetic
+// chassis-integrated rows ride along in this same fetch but are never
+// surfaced in the Mod Lab UI (modsForComponentType() filters every
+// is_chassis_mod row out outright) -- that selection feature was removed,
+// see this function's own comment.
+let allEquipmentMods = [];
+
+// The mod system's own real (component_type, target_stat) -> real column
+// mapping, fetched once directly from the static JSON file (NOT an API
+// endpoint -- it isn't derived from the database at all, see that file's
+// own comment) -- not yet consumed anywhere (the Modifications Lab is
+// display-only for now, no "apply this mod" logic exists yet), but loaded
+// alongside allEquipmentMods since the two will always be used together
+// once that logic is built.
+let equipmentModTargetMappings = {};
+
+// Component Analyzer's own componentType (e.g. "chassis"/"turret"/
+// "thruster") -> the mod system's own component_type vocabulary
+// (weapon/engine/shield/ship -- equipmentmods.xml's own <weapon>/
+// <engine>/<shield>/<ship> categories, see parse_equipment_mods()'s own
+// docstring in generate_ships_table.py). "turret" maps to "weapon" and
+// "thruster" maps to "engine" because both share their real stats with
+// that other table (bullets_base for turret/weapon, thrusters_base for
+// thruster/engine -- see EQUIPMENT_MOD_TARGET_MAPPING's own
+// cross-component entries for exactly this reasoning). Every other
+// componentType (missile/software/drone/deployable/countermeasure/crew/
+// economy_ware) has no entry at all -- equipmentmods.xml has no matching
+// category for any of them, so the Modifications Lab correctly shows no
+// mods rather than guessing.
+const MOD_LAB_COMPONENT_TYPE_MAP = {
+  chassis: "ship",
+  weapon: "weapon",
+  turret: "weapon",
+  engine: "engine",
+  thruster: "engine",
+  shield: "shield",
+};
+
+// Real in-game colors, not app-invented -- libraries/colors.xml's own
+// <mapping id="equipmentmod_quality_basic" ref="green_bright"/>,
+// id="equipmentmod_quality_advanced" ref="azure_bright"/>,
+// id="equipmentmod_quality_exceptional" ref="magenta_dark"/>, each
+// resolved to that ref's own base <color r="" g="" b=""/> -- same source
+// generate_mod_lab_icons.py's own MOD_QUALITY_COLORS already uses to tint
+// the per-tier grade-circle icons (kept here as plain hex instead of
+// reusing an image, since this colors text, not a badge).
+const MOD_QUALITY_COLORS = { 1: "#4dff4d", 2: "#4db5ff", 3: "#b300b3" };
+
+// mod_level -> that tier's own plain-white icon (see
+// generate_mod_lab_icons.py's own *_white.png outputs) -- used for each
+// mod row's icon in the Modifications Lab list, so the row's own shape
+// (chevron count) shows its tier while staying visually neutral (the
+// name text alongside it already carries the tier color, see
+// MOD_QUALITY_COLORS above).
+const MOD_QUALITY_ICONS = {
+  1: "/images/mod_lab_icons/mods_grade_circle_01_white.png",
+  2: "/images/mod_lab_icons/mods_grade_circle_02_white.png",
+  3: "/images/mod_lab_icons/mods_grade_circle_03_white.png",
+};
 
 // weapon_system_id -> real display name (e.g. "torpedo" -> "Torpedos"),
 // fetched once from GET /api/missile_weapon_systems (see
@@ -907,6 +1169,56 @@ async function loadDeployableTypeNames() {
   }
 }
 
+// ?lang=<i18next.language>, same convention as loadThrusterClassNames() --
+// see api.py's /api/mod_qualities docstring.
+async function loadModQualityNames() {
+  const response = await fetch(`/api/mod_qualities?lang=${i18next.language}`);
+  const modQualities = await response.json();
+  for (const { mod_level, mod_quality_name } of modQualities) {
+    modQualityNames[mod_level] = mod_quality_name;
+  }
+}
+
+// See allEquipmentMods' own comment -- loaded whole, once, filtered/grouped
+// client-side. "?lang=<i18next.language>" resolves every real mod's own
+// mod_name; a chassis mod's own name is already fully resolved server-side
+// too now (see parse_chassis_mod_localized_strings() in
+// generate_ships_table.py), so no special client-side handling is needed
+// for those despite is_chassis_mod still being present on each row.
+async function loadEquipmentMods() {
+  const response = await fetch(`/api/equipment_mods?lang=${i18next.language}`);
+  allEquipmentMods = await response.json();
+}
+
+// See equipmentModTargetMappings' own comment -- a static file, not an API
+// endpoint, fetched the same way src/static/i18n/*.json already is.
+async function loadEquipmentModTargetMappings() {
+  const response = await fetch("/equipment_mod_target_mappings.json");
+  equipmentModTargetMappings = await response.json();
+}
+
+// Every real (non-chassis) mod whose own mod_components includes
+// `modComponentType` (the mod system's own vocabulary -- see
+// MOD_LAB_COMPONENT_TYPE_MAP's own comment for how a Component Analyzer
+// componentType maps onto it), grouped by mod_level (1/2/3) so the
+// Modifications Lab can render one list per tab.
+function modsForComponentType(modComponentType) {
+  const byLevel = { 1: [], 2: [], 3: [] };
+  for (const mod of allEquipmentMods) {
+    // Chassis-integrated "mods" (is_chassis_mod) are never offered in the
+    // Mod Lab picker at all -- that selection feature was removed (see
+    // [[project-mod-modified-stats-architecture]]'s own "lean into real
+    // chassis mocking" note): the Chassis Modifier stats now read a
+    // ship's own real ships_base column directly via a cross-component
+    // mock, so there's nothing left for a chassis-slot pick to do.
+    if (mod.is_chassis_mod) continue;
+    if (!modComponentType) continue;
+    if (!mod.mod_components.split(",").includes(modComponentType)) continue;
+    byLevel[mod.mod_level]?.push(mod);
+  }
+  return byLevel;
+}
+
 // ?lang=<i18next.language>, same convention as loadCargoTypeNames() -- see
 // api.py's /api/missile_weapon_systems docstring.
 async function loadMissileWeaponSystemNames() {
@@ -1063,7 +1375,16 @@ async function loadWareNames() {
 // component list instead -- every entity here just needs a `.size` field,
 // ships and engine/shield/weapon/turret/thruster components alike.
 function buildSizeFilterEntries(list = allShips) {
+  // A null size is real (not a parsing gap): a handful of real equipment
+  // wares have no size at all -- e.g. turret_par_m_mining_01_mk1 (GitHub
+  // issue #26 phase-5), whose own real mount connection tag in the game's
+  // own data genuinely carries no size keyword, and the personal spacesuit
+  // engines, which aren't ship-mountable at all. Such a component can
+  // never match a real ship slot either way, so it's excluded here rather
+  // than crashing the whole picker on `null.toUpperCase()` (a real
+  // regression this filter hit the moment that turret got parsed at all).
   return [...new Set(list.map((entity) => entity.size))]
+    .filter((size) => size != null)
     .sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b))
     .map((size) => ({ value: size, label: size.toUpperCase() }));
 }
@@ -1520,6 +1841,7 @@ loadShipBtn.addEventListener("click", async () => {
   droneAmounts = {};
   deployableAmounts = {};
   crewAmounts = {};
+  resetShipModLabSlots();
   importedLoadoutWarningsEl.classList.add("hidden");
   renderShipDetail(data);
 });
@@ -1679,9 +2001,10 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
   if (sectionType) row.dataset.sectionType = sectionType;
 
   const label = document.createElement("label");
-  label.textContent = isLinkedShield
+  const labelText = isLinkedShield
     ? t("ship_builder.bonus_m_shield_label", { count: group.slot_count })
     : `${group.group_name} (${group.component_type}, ${group.size}, x${group.slot_count})`;
+  label.textContent = labelText;
 
   const requiredLabel = requiredGroupLabel(group);
   if (requiredLabel) {
@@ -1711,6 +2034,22 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
     label.appendChild(compatBadge);
   }
   row.appendChild(label);
+
+  // A bonus shield's own mod -- user call: right next to its "Bonus M
+  // Shield" name (a row sibling right after `label`, not nested inside
+  // it -- `label` is inline by default and only 220px wide, no room for a
+  // 40px circle without wrapping weirdly; `row` itself is the flex
+  // container buildModLabButton()'s own margin-left: auto expects), not
+  // trailing the row like turret/weapon below, since there's no single
+  // wider row it could trail (each bonus shield is its own independent
+  // group). A MAIN shield (not isLinkedShield) gets no row-level button
+  // at all -- it's covered by the Shields section's own combined one
+  // instead (see renderShipDetail()'s own heading-row button).
+  if (isLinkedShield) {
+    const modBtn = buildShipModLabButton(`bonus_shield::${group.group_name}`, "shield", null, labelText);
+    modBtn.classList.add("component-analyzer-mod-lab-btn-row", "group-row-bonus-shield-mod-btn");
+    row.appendChild(modBtn);
+  }
 
   const select = document.createElement("select");
   select.className = "group-select";
@@ -1761,6 +2100,24 @@ function buildGroupRow(group, { isLinkedShield = false, sectionType } = {}) {
   pickerBtn.addEventListener("click", () => openEquipmentPickerModal(row, group));
   row.appendChild(pickerBtn);
   syncGroupSelectButtonLabel(row);
+
+  // A turret or weapon/missile launcher group's own mod -- one per group
+  // (user call), trailing the row same as Component Analyzer's own
+  // per-row Mod Lab launcher (reuses that exact convention, including
+  // leaving margin-left: auto alone so it pushes itself to the row's far
+  // end). Both weapon AND missile_launcher use the "weapon" mod category
+  // -- there's no separate missile-launcher mod in-game either, same
+  // SHIP_GROUP_TYPE_TO_MOCK_TYPE reasoning that already folds the launcher
+  // itself into "weapon" for stat-formula purposes.
+  if (group.component_type === "turret") {
+    const modBtn = buildShipModLabButton(`turret::${group.group_name}`, "turret", null, labelText);
+    modBtn.classList.add("component-analyzer-mod-lab-btn-row");
+    row.appendChild(modBtn);
+  } else if (group.component_type === "weapon" || group.component_type === "missile_launcher") {
+    const modBtn = buildShipModLabButton(`weapon::${group.group_name}`, "weapon", null, labelText);
+    modBtn.classList.add("component-analyzer-mod-lab-btn-row");
+    row.appendChild(modBtn);
+  }
 
   return row;
 }
@@ -2276,6 +2633,70 @@ function bundleSectionType(entries) {
   return nonShield ? nonShield.component_type : "shield";
 }
 
+// A pencil-edit field for the loadout's own name (shipNoteInput's value --
+// the same "Loadout Name" the bottom-of-page input already edits, and
+// what "Add To Saved Loadouts"/the Trial Builder's own "Add to Trial"
+// both save under) shown right under the ship's own name, so it's visible
+// without scrolling past the whole groups/ammo/drone/etc. section first.
+// Deliberately NOT built on top of buildEditableNameField()'s own default
+// rerender (renderComponentAnalyzerTables) -- that'd have to be
+// renderShipDetail() here instead, which rebuilds #groups-container from
+// the chassis's own default options, silently discarding any component
+// swap the user hasn't saved yet (selections only ever live in the live
+// <select> elements, see captureCurrentGroupSelections()'s own comment).
+// This re-renders only itself.
+function renderShipLoadoutNameField() {
+  shipLoadoutNameRow.innerHTML = "";
+  const wrap = document.createElement("span");
+  wrap.className = "ship-loadout-name-field";
+
+  const showDisplay = () => {
+    wrap.replaceChildren();
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "editable-name-edit-btn";
+    editBtn.textContent = "✎";
+    editBtn.title = t("component_analyzer.rename_tooltip");
+    editBtn.addEventListener("click", showInput);
+
+    const nameText = document.createElement("span");
+    nameText.className = "editable-name-text";
+    nameText.textContent = shipNoteInput.value.trim() || t("ship_builder.loadout_name_placeholder");
+
+    wrap.append(editBtn, nameText);
+  };
+
+  const showInput = () => {
+    wrap.replaceChildren();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "editable-name-input";
+    input.placeholder = t("ship_builder.loadout_name_placeholder");
+    input.value = shipNoteInput.value;
+
+    const commit = () => {
+      shipNoteInput.value = input.value;
+      showDisplay();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      } else if (event.key === "Escape") {
+        input.removeEventListener("blur", commit);
+        showDisplay();
+      }
+    });
+
+    wrap.appendChild(input);
+    input.focus();
+    input.select();
+  };
+
+  showDisplay();
+  shipLoadoutNameRow.appendChild(wrap);
+}
+
 function renderShipDetail(data) {
   shipDetail.classList.remove("hidden");
   shipNameEl.innerHTML = "";
@@ -2286,8 +2707,23 @@ function renderShipDetail(data) {
   updateSelectChassisLoadoutBtnState();
   addToSavedLoadoutsStatus.classList.add("hidden");
   renderShipSummary(data);
+  renderShipLoadoutNameField();
 
   groupsContainer.innerHTML = "";
+
+  // "Chassis Mod" -- the one ship-wide mod that isn't tied to any
+  // equipped group at all (a real hull/chassis mod in-game), so it's its
+  // own row above every section rather than living in one of their
+  // heading rows -- user call: top right, above the Engines section,
+  // labeled "Chassis Mod" next to the button.
+  const chassisModRow = document.createElement("div");
+  chassisModRow.className = "ship-chassis-mod-row";
+  const chassisModLabel = document.createElement("span");
+  chassisModLabel.className = "ship-chassis-mod-label";
+  chassisModLabel.textContent = t("ship_builder.chassis_mod_label");
+  chassisModRow.appendChild(chassisModLabel);
+  chassisModRow.appendChild(buildShipModLabButton("chassis", "chassis", data.ware_id, data.name));
+  groupsContainer.appendChild(chassisModRow);
 
   // Group every entry by its (possibly shared) group_name first. A
   // group_name used by more than one component_type means one of them is a
@@ -2344,6 +2780,32 @@ function renderShipDetail(data) {
     minBtn.addEventListener("click", () => applyMinimumPreset(sectionType));
     headingRow.appendChild(minBtn);
 
+    // One combined mod for the whole section -- user call: back on the
+    // right (trailing the High/Minimum Preset buttons), with every OTHER
+    // section reserving the same blank space via an invisible placeholder
+    // so every section's own High/Minimum Preset pair still lines up at
+    // the same x position either way. Engines (section "engine",
+    // COMPONENT_TYPE_ORDER's first entry) covers BOTH the engine and
+    // thruster groups together (there's no separate thruster mod category
+    // in-game either, see MOD_LAB_COMPONENT_TYPE_MAP's own engine/thruster
+    // -> "engine" mapping), and Shields covers every MAIN shield slot
+    // together -- a BONUS shield nested under another section gets its
+    // own separate mod instead (see buildGroupRow()'s own isLinkedShield
+    // branch below), so this never renders for the Shields section's own
+    // nested bonus-shield rows, only the section heading itself.
+    if (sectionType === "engine") {
+      headingRow.appendChild(buildShipModLabButton("engine", "engine", null, componentTypeLabel("engine")));
+    } else if (sectionType === "shield") {
+      headingRow.appendChild(buildShipModLabButton("shield", "shield", null, componentTypeLabel("shield")));
+    } else {
+      // No section-wide mod button here (Thrusters/Weapons/Missile
+      // Launchers/Turrets/Software) -- an invisible same-size placeholder
+      // still reserves its exact spot.
+      const modBtnSpacer = document.createElement("span");
+      modBtnSpacer.className = "ship-mod-lab-btn-spacer";
+      headingRow.appendChild(modBtnSpacer);
+    }
+
     section.appendChild(headingRow);
 
     for (const entries of bundles) {
@@ -2378,21 +2840,46 @@ function renderShipDetail(data) {
   renderCrewSection();
 }
 
-// Total missile capacity = the ship's own base missile_capacity (an
-// independent contribution -- not derived from any launcher, see
-// ships_base.missile_capacity) PLUS ammunition_capacity (per-unit, from a
-// missile-capable turret's/weapon's own selected option -- see
-// query_ship_components.py's matching_items() docstring) summed across
-// every currently-selected group, scaled by that group's own slot_count
-// (a group with slot_count 2 mounts two of whatever's selected, so it
-// contributes double the capacity). Entirely client-side, no API call
-// needed since every option's ammunition_capacity and the ship's own
-// missile_capacity already arrived with the initial
-// GET /api/ships/{id}/groups response.
+// The chassis's own base `baseKey` column (missile_capacity/drone_capacity/
+// deployable_capacity/countermeasure_capacity), live-adjusted for a
+// currently-applied Chassis Mod via that same stat's own *_post_mod
+// formula (missile_capacity_post_mod/etc. -- CHASSIS_STAT_DEFINITIONS,
+// same modifierModStatDef()/postModStatDef() pattern every other
+// moddable stat already uses) -- see refreshShipModLabButtons()'s own
+// comment for when this needs re-reading. Falls back to the real chassis
+// row's own base value if the Post Mod formula can't resolve for any
+// reason (componentListCache not warm yet, etc.) -- never worse than the
+// pre-mod-aware behavior this replaces.
+function shipLiveCapacity(baseKey, postModKey) {
+  if (!currentShip) return 0;
+  const chassisRow = statSourceForComponentType("chassis").get(currentShip.ware_id);
+  if (!chassisRow) return currentShip.summary[baseKey] ?? 0;
+  const def = lookupStatDef("chassis", postModKey);
+  if (!def) return chassisRow[baseKey] ?? 0;
+  const value = resolveStatValue(def, chassisRow, {
+    componentType: "chassis",
+    table: null,
+    component: shipModLabSlots.chassis?.component ?? null,
+    resolving: new Set(),
+  });
+  return typeof value === "number" ? value : (chassisRow[baseKey] ?? 0);
+}
+
+// Total missile capacity = the ship's own live (mod-adjusted, see
+// shipLiveCapacity()) missile_capacity (an independent contribution --
+// not derived from any launcher, see ships_base.missile_capacity) PLUS
+// ammunition_capacity (per-unit, from a missile-capable turret's/
+// weapon's own selected option -- see query_ship_components.py's
+// matching_items() docstring) summed across every currently-selected
+// group, scaled by that group's own slot_count (a group with slot_count
+// 2 mounts two of whatever's selected, so it contributes double the
+// capacity). Entirely client-side, no API call needed since every
+// option's ammunition_capacity and the ship's own missile_capacity
+// already arrived with the initial GET /api/ships/{id}/groups response.
 function totalMissileCapacity() {
   if (!currentShip) return 0;
 
-  let total = currentShip.summary.missile_capacity ?? 0;
+  let total = shipLiveCapacity("missile_capacity", "missile_capacity_post_mod");
   for (const row of groupsContainer.querySelectorAll(".group-row")) {
     const select = row.querySelector(".group-select");
     const selectedOption = select.options[select.selectedIndex];
@@ -2591,12 +3078,13 @@ function totalSelectedDrones() {
   return Object.values(droneAmounts).reduce((sum, amount) => sum + amount, 0);
 }
 
-// Unlike missile capacity, this is purely the ship's own base
-// drone_capacity (ships_base.drone_capacity, e.g. builders ~100-250,
-// carriers ~20) -- no per-launcher contribution to add, since drones
-// aren't tied to any equipped weapon/turret the way missiles are.
+// Unlike missile capacity, this is purely the ship's own live (mod-
+// adjusted, see shipLiveCapacity()) drone_capacity (ships_base.drone_capacity,
+// e.g. builders ~100-250, carriers ~20) -- no per-launcher contribution
+// to add, since drones aren't tied to any equipped weapon/turret the way
+// missiles are.
 function totalDroneCapacity() {
-  return currentShip ? currentShip.summary.drone_capacity ?? 0 : 0;
+  return shipLiveCapacity("drone_capacity", "drone_capacity_post_mod");
 }
 
 // One row: drone name + a qty stepper, same control as buildAmmoRow().
@@ -2717,12 +3205,14 @@ function totalSelectedDeployables() {
   return Object.values(deployableAmounts).reduce((sum, amount) => sum + amount, 0);
 }
 
-// The game data has no per-ship deployable capacity stat at all (unlike
-// missile_capacity/drone_capacity) -- this is an assumed default keyed by
-// the ship's own size, not derived from anything in ships_base.
+// The game data has no per-ship BASE deployable capacity stat at all
+// (unlike missile_capacity/drone_capacity) -- ships_base.deployable_capacity
+// is itself just an assumed default keyed by the ship's own size
+// (DEPLOYABLE_CAPACITY_BY_SIZE in generate_ships_table.py), computed
+// server-side. A real mod CAN still raise it from there though (see
+// shipLiveCapacity()), same as the other 3.
 function totalDeployableCapacity() {
-  if (!currentShip) return 0;
-  return DEPLOYABLE_CAPACITY_BY_SIZE[currentShip.summary.size] ?? 0;
+  return shipLiveCapacity("deployable_capacity", "deployable_capacity_post_mod");
 }
 
 // One row: deployable name + a qty stepper, same control as buildAmmoRow()/buildDroneRow().
@@ -2842,10 +3332,10 @@ function totalSelectedCountermeasures() {
 }
 
 // Same "no real per-ship data, assumed default by size" situation as
-// totalDeployableCapacity() -- see COUNTERMEASURE_CAPACITY_BY_SIZE above.
+// totalDeployableCapacity() -- computed server-side now (see
+// ships_base.countermeasure_capacity in generate_ships_table.py).
 function totalCountermeasureCapacity() {
-  if (!currentShip) return 0;
-  return COUNTERMEASURE_CAPACITY_BY_SIZE[currentShip.summary.size] ?? 0;
+  return shipLiveCapacity("countermeasure_capacity", "countermeasure_capacity_post_mod");
 }
 
 // One row: countermeasure name + a qty stepper, same control as buildDeployableRow().
@@ -3300,6 +3790,7 @@ function resetShipPicker() {
   droneAmounts = {};
   deployableAmounts = {};
   crewAmounts = {};
+  resetShipModLabSlots();
   applyShipSelection("");
   updatePlayerLocationMarker(null);
   loadShipBtn.disabled = true;
@@ -3312,6 +3803,7 @@ function resetShipPicker() {
   droneContainer.innerHTML = "";
   deployableContainer.innerHTML = "";
   crewContainer.innerHTML = "";
+  shipLoadoutNameRow.innerHTML = "";
   shipNoteInput.value = "";
   setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
   importedLoadoutWarningsEl.classList.add("hidden");
@@ -3326,8 +3818,17 @@ clearShipBtnBottom.addEventListener("click", resetShipPicker);
 
 // Shared by both Add To Fleet List buttons (top, next to Select Loadout;
 // bottom, next to Add To Saved Loadouts/Clear -- see addToCartBtnTop).
-function addSelectedShipToCart() {
-  if (!currentShip) return;
+// Everything addSelectedShipToCart() and saveShipTrialBuilderChanges()
+// both need: the capacity validations (identical for a real Fleet List
+// entry or a Trial ship -- a ship's missile/drone/deployable/
+// countermeasure/crew capacity doesn't care which one it's headed for),
+// then the wares_list/displayItems/selections/amount-snapshots gathered
+// from the live builder DOM (see captureCurrentGroupSelections()'s own
+// comment on why that has to mean reading the DOM, not some JS object).
+// Returns null (after alerting) if a capacity check fails, or if nothing
+// is loaded at all -- either way, the caller should just stop.
+function gatherCurrentShipLoadoutData() {
+  if (!currentShip) return null;
 
   // No longer a hard block -- collected here and carried onto the cart
   // entry (see missingRequiredComponents below) so renderCart() can show an
@@ -3345,7 +3846,7 @@ function addSelectedShipToCart() {
       `Selected ammunition (${selectedMissiles}) exceeds this ship's total missile capacity (${missileCapacity}). ` +
         "Please reduce the ammunition quantities before adding this ship.",
     );
-    return;
+    return null;
   }
 
   const selectedDrones = totalSelectedDrones();
@@ -3355,7 +3856,7 @@ function addSelectedShipToCart() {
       `Selected drones (${selectedDrones}) exceed this ship's drone capacity (${droneCapacity}). ` +
         "Please reduce the drone quantities before adding this ship.",
     );
-    return;
+    return null;
   }
 
   const selectedDeployables = totalSelectedDeployables();
@@ -3365,7 +3866,7 @@ function addSelectedShipToCart() {
       `Selected deployables (${selectedDeployables}) exceed this ship's deployable capacity (${deployableCapacity}). ` +
         "Please reduce the deployable quantities before adding this ship.",
     );
-    return;
+    return null;
   }
 
   const selectedCountermeasures = totalSelectedCountermeasures();
@@ -3375,7 +3876,7 @@ function addSelectedShipToCart() {
       `Selected countermeasures (${selectedCountermeasures}) exceed this ship's countermeasure capacity (${countermeasureCapacity}). ` +
         "Please reduce the countermeasure quantities before adding this ship.",
     );
-    return;
+    return null;
   }
 
   const selectedCrew = totalSelectedCrew();
@@ -3385,7 +3886,7 @@ function addSelectedShipToCart() {
       `Selected crew (${selectedCrew}) exceed this ship's crew capacity (${crewCapacity}). ` +
         "Please reduce the crew quantity before adding this ship.",
     );
-    return;
+    return null;
   }
 
   const waresList = [{ ware_id: currentShip.ware_id, amount: 1 }];
@@ -3465,6 +3966,50 @@ function addSelectedShipToCart() {
   // to /api/summarize or /api/price_summary, so there's nothing to validate.
   const note = shipNoteInput.value.trim();
 
+  // Flattens shipModLabSlots (see that global's own comment) down to a
+  // plain {slotKey: {mod_id, values, selectedAdditional}} map -- the
+  // shape loadout.appliedMods/the cart entry's own appliedMods field are
+  // expected to be (appliedModsForGroup() in buildShipMocksFromLoadout()
+  // reads it back this same shape). Slots with nothing actually applied
+  // are left out entirely rather than written as null/undefined.
+  const appliedMods = {};
+  for (const [key, slot] of Object.entries(shipModLabSlots)) {
+    const saved = slot.component.appliedMods?.standard;
+    if (saved) appliedMods[key] = saved;
+  }
+
+  return {
+    missingRequired,
+    selections,
+    waresList,
+    displayItems,
+    note,
+    missileAmountsSnapshot,
+    droneAmountsSnapshot,
+    deployableAmountsSnapshot,
+    countermeasureAmountsSnapshot,
+    crewAmountsSnapshot,
+    appliedMods,
+  };
+}
+
+function addSelectedShipToCart() {
+  const data = gatherCurrentShipLoadoutData();
+  if (!data) return;
+  const {
+    missingRequired,
+    selections,
+    waresList,
+    displayItems,
+    note,
+    missileAmountsSnapshot,
+    droneAmountsSnapshot,
+    deployableAmountsSnapshot,
+    countermeasureAmountsSnapshot,
+    crewAmountsSnapshot,
+    appliedMods,
+  } = data;
+
   if (editingIndex !== null) {
     activeFleet().cart[editingIndex] = {
       ...activeFleet().cart[editingIndex],
@@ -3479,6 +4024,7 @@ function addSelectedShipToCart() {
       deployableAmounts: deployableAmountsSnapshot,
       countermeasureAmounts: countermeasureAmountsSnapshot,
       crewAmounts: crewAmountsSnapshot,
+      appliedMods,
       wares_list: waresList,
       displayItems,
     };
@@ -3514,6 +4060,7 @@ function addSelectedShipToCart() {
       deployableAmounts: deployableAmountsSnapshot,
       countermeasureAmounts: countermeasureAmountsSnapshot,
       crewAmounts: crewAmountsSnapshot,
+      appliedMods,
       wares_list: waresList,
       displayItems,
     });
@@ -3531,8 +4078,21 @@ function addSelectedShipToCart() {
   renderCart();
 }
 
-addToCartBtn.addEventListener("click", addSelectedShipToCart);
-addToCartBtnTop.addEventListener("click", addSelectedShipToCart);
+// saveShipTrialBuilderChanges() is defined alongside the rest of the Ship
+// Trials feature further down -- this dispatcher just has to exist AFTER
+// that function is in scope, which function hoisting already guarantees
+// regardless of source order, so it's declared here next to the buttons
+// it wires up rather than moved.
+function handleAddToCartBtnClick() {
+  if (shipTrialBuilderContext) {
+    saveShipTrialBuilderChanges();
+  } else {
+    addSelectedShipToCart();
+  }
+}
+
+addToCartBtn.addEventListener("click", handleAddToCartBtnClick);
+addToCartBtnTop.addEventListener("click", handleAddToCartBtnClick);
 
 // Order-independent deep-equal for the plain flat {string: primitive}
 // maps this app builds (selections, missileAmounts, droneAmounts, etc.) --
@@ -3542,6 +4102,28 @@ function stableStringify(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   const keys = Object.keys(value).sort();
   return `{${keys.map((k) => JSON.stringify(k) + ":" + stableStringify(value[k])).join(",")}}`;
+}
+
+// The subset of a loadout's own fields that actually mean something for
+// "has this Trial ship's equipment/name changed since it was added" (see
+// updateShipInTrial()'s own "edited" marking) -- deliberately excludes
+// shipName/shipIcon (pure lookups off shipWareId, never independently
+// meaningful) and warnings/rawXml (import-parse artifacts that
+// saveShipTrialBuilderChanges() always resets to []/"" regardless of
+// whether anything was actually edited, so comparing them would mark
+// EVERY Update Trial as "edited" even when nothing changed).
+function loadoutEquipmentSignature(loadout) {
+  return stableStringify({
+    name: loadout.name ?? "",
+    shipWareId: loadout.shipWareId,
+    selections: loadout.selections ?? {},
+    missileAmounts: loadout.missileAmounts ?? {},
+    droneAmounts: loadout.droneAmounts ?? {},
+    deployableAmounts: loadout.deployableAmounts ?? {},
+    countermeasureAmounts: loadout.countermeasureAmounts ?? {},
+    crewAmounts: loadout.crewAmounts ?? {},
+    appliedMods: loadout.appliedMods ?? {},
+  });
 }
 
 // Same group-row gathering addToCartBtn's handler does above, factored out
@@ -3657,9 +4239,21 @@ addToSavedLoadoutsBtnTop.addEventListener("click", addToSavedLoadouts);
 // directly by the toggle button's own click handler rather than going
 // through a full renderCart() (which would also needlessly re-run
 // runCalculation()).
-function renderLoadoutCell(loadoutTd, entry) {
+//
+// getMinimized/setMinimized default to reading/writing entry.loadoutMinimized
+// itself (the real cart table's own behavior, every existing call site
+// unaffected) -- overridden by the read-only Add Fleet List Ship picker
+// (see showShipTrialFleetShipShipList()) with a closure-local variable
+// instead, so expanding/collapsing a loadout there can never write back
+// onto the real fleet's own cart entry (user call: that picker must never
+// touch a fleet's own data).
+function renderLoadoutCell(
+  loadoutTd,
+  entry,
+  { getMinimized = () => !!entry.loadoutMinimized, setMinimized = (value) => (entry.loadoutMinimized = value) } = {},
+) {
   loadoutTd.innerHTML = "";
-  const minimized = !!entry.loadoutMinimized;
+  const minimized = getMinimized();
 
   const byCategory = new Map();
   for (const item of entry.displayItems) {
@@ -3689,8 +4283,8 @@ function renderLoadoutCell(loadoutTd, entry) {
       toggleBtn.textContent = minimized ? "+" : "−";
       toggleBtn.title = minimized ? "Show loadout details" : "Hide loadout details";
       toggleBtn.addEventListener("click", () => {
-        entry.loadoutMinimized = !minimized;
-        renderLoadoutCell(loadoutTd, entry);
+        setMinimized(!minimized);
+        renderLoadoutCell(loadoutTd, entry, { getMinimized, setMinimized });
       });
       headerRow.appendChild(toggleBtn);
     }
@@ -4000,6 +4594,7 @@ async function editCartEntry(index) {
   renderShipOptions();
   applyShipSelection(entry.shipWareId);
   editingIndex = index; // renderShipOptions() resets this; restore it
+  resetShipModLabSlots(entry.appliedMods);
   renderShipDetail(data);
   applyGroupSelections(entry.selections);
   // Restored only after the launchers are actually selected above --
@@ -4021,6 +4616,11 @@ async function editCartEntry(index) {
   crewAmounts = { ...(entry.crewAmounts ?? {}) };
   renderCrewSection();
   shipNoteInput.value = entry.note ?? "";
+  // renderShipDetail() above already drew the name field once, before this
+  // note was restored -- see renderShipLoadoutNameField()'s own comment on
+  // why it isn't just folded into renderShipDetail() reading the final
+  // value itself.
+  renderShipLoadoutNameField();
   setAddToCartBtnLabel(t("ship_builder.update_fleet_list"));
   importedLoadoutWarningsEl.classList.add("hidden");
   shipDetail.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -4264,11 +4864,24 @@ importRawXmlLoadoutBtn.addEventListener("click", openImportRawXmlLoadoutModal);
 importRawXmlLoadoutCancelBtn.addEventListener("click", closeImportRawXmlLoadoutModal);
 importRawXmlLoadoutConfirmBtn.addEventListener("click", runImportRawXmlLoadout);
 
-// Shared by both the "Select Filter Loadout" button (every imported ship)
-// and the "Select chassis loadout" button next to the loaded ship's name
-// (only loadouts whose shipWareId matches the currently loaded ship) --
-// chassisWareId is omitted for the former, passed for the latter.
-function openSelectGameLoadoutModal(chassisWareId) {
+// Current modal target -- undefined/omitted for the generic "Select Filter
+// Loadout" button (every imported ship, filter panel shown), a real
+// chassisWareId for the "Select chassis loadout" button next to the loaded
+// ship's name (only loadouts whose shipWareId matches it, no filter panel --
+// already narrowed to one ship, so filtering by ship would be a no-op and
+// an out-of-filter ship's own loadouts would otherwise go unreachable from
+// its own button). Set fresh by openSelectGameLoadoutModal() on every open.
+let selectGameLoadoutChassisWareId;
+
+// Shared by both the "Select Filter Loadout" button and the "Select
+// chassis loadout" button -- rebuilds the row list from the current
+// filter-panel selection (generic mode) or the fixed chassisWareId
+// (ship-specific mode), AND-combined with the two free-text searches
+// (chassis name, loadout name) available in both modes. Called by
+// openSelectGameLoadoutModal() and again by the filter panel's own
+// onChange/the search inputs' own oninput on every change.
+function renderSelectGameLoadoutList() {
+  const chassisWareId = selectGameLoadoutChassisWareId;
   if (!importedLoadoutsResult) return;
   let entries = chassisWareId
     ? importedLoadoutsResult.ships.filter((s) => s.shipWareId === chassisWareId)
@@ -4280,18 +4893,12 @@ function openSelectGameLoadoutModal(chassisWareId) {
   // its shipName as plain text, not the icon symbol allShips already has.
   const shipByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
 
-  // The generic "Select Filter Loadout" button (chassisWareId omitted)
-  // applies the exact same Size/Purpose/Type filters and ship-list
-  // ordering as the picker above it -- a ship-specific "Select <Ship>
-  // Loadout" button (chassisWareId given) is already narrowed to one
-  // ship, so filtering/sorting by ship would be a no-op there anyway,
-  // and skipping it means an out-of-filter ship's own loadouts still stay
-  // reachable from its own button.
+  const allEntries = entries;
   if (!chassisWareId) {
     entries = entries
       .filter((entry) => {
         const ship = shipByWareId.get(entry.shipWareId);
-        return ship ? shipPassesCurrentFilters(ship) : true;
+        return ship ? shipPassesCurrentFilters(ship, selectGameLoadoutFiltersGrid) : true;
       })
       .slice()
       .sort((a, b) => {
@@ -4302,16 +4909,20 @@ function openSelectGameLoadoutModal(chassisWareId) {
       });
   }
 
-  selectGameLoadoutModalTitle.textContent = chassisWareId
-    ? t("ship_builder.select_named_loadout", { name: currentShip.name })
-    : t("select_game_loadout_modal.title");
+  const chassisQuery = selectGameLoadoutChassisSearch.value.trim().toLowerCase();
+  const nameQuery = selectGameLoadoutNameSearch.value.trim().toLowerCase();
+  if (chassisQuery) entries = entries.filter((entry) => (entry.shipName ?? "").toLowerCase().includes(chassisQuery));
+  if (nameQuery) entries = entries.filter((entry) => (entry.name ?? "").toLowerCase().includes(nameQuery));
+
   selectGameLoadoutList.innerHTML = "";
 
   if (entries.length === 0) {
     const empty = document.createElement("p");
     empty.textContent = chassisWareId
-      ? "No imported loadouts for this ship."
-      : "No imported loadouts match the current filters.";
+      ? t("select_game_loadout_modal.no_ship_loadouts")
+      : allEntries.length === 0
+        ? t("select_game_loadout_modal.no_loadouts")
+        : t("select_game_loadout_modal.no_match_filters");
     selectGameLoadoutList.appendChild(empty);
   }
 
@@ -4321,7 +4932,7 @@ function openSelectGameLoadoutModal(chassisWareId) {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "select-game-loadout-row-name";
-    nameSpan.textContent = entry.name || "(unnamed)";
+    nameSpan.textContent = entry.name || t("proving_grounds.unnamed_loadout");
     row.appendChild(nameSpan);
 
     // Redundant when already filtered to one chassis, but harmless to
@@ -4337,19 +4948,49 @@ function openSelectGameLoadoutModal(chassisWareId) {
     if (entry.warnings.length > 0) {
       const warnSpan = document.createElement("span");
       warnSpan.className = "select-game-loadout-row-warning-count";
-      warnSpan.textContent = `${entry.warnings.length} warning(s)`;
+      warnSpan.textContent = t("select_game_loadout_modal.warning_count", { count: entry.warnings.length });
       row.appendChild(warnSpan);
     }
 
     row.addEventListener("click", () => loadImportedGameLoadout(entry));
     selectGameLoadoutList.appendChild(row);
   }
+}
+
+function openSelectGameLoadoutModal(chassisWareId) {
+  if (!importedLoadoutsResult) return;
+  selectGameLoadoutChassisWareId = chassisWareId;
+
+  selectGameLoadoutModalTitle.textContent = chassisWareId
+    ? t("ship_builder.select_named_loadout", { name: currentShip.name })
+    : t("select_game_loadout_modal.title");
+
+  selectGameLoadoutChassisSearch.value = "";
+  selectGameLoadoutNameSearch.value = "";
+  selectGameLoadoutChassisSearch.oninput = renderSelectGameLoadoutList;
+  selectGameLoadoutNameSearch.oninput = renderSelectGameLoadoutList;
+
+  // Ship-specific mode has no filter panel at all -- see
+  // renderSelectGameLoadoutList()'s own comment on why filtering by ship
+  // would be a no-op there.
+  selectGameLoadoutFiltersRow.classList.toggle("hidden", !!chassisWareId);
+  selectGameLoadoutFiltersPanel.classList.add("hidden"); // always starts collapsed
+  selectGameLoadoutFiltersGrid.innerHTML = "";
+  if (!chassisWareId) {
+    buildChassisFilterPanel(selectGameLoadoutFiltersGrid, renderSelectGameLoadoutList);
+  }
+
+  renderSelectGameLoadoutList();
   selectGameLoadoutModalOverlay.classList.remove("hidden");
 }
 
 function closeSelectGameLoadoutModal() {
   selectGameLoadoutModalOverlay.classList.add("hidden");
 }
+
+selectGameLoadoutFiltersBtn.addEventListener("click", () => {
+  selectGameLoadoutFiltersPanel.classList.toggle("hidden");
+});
 
 // Enabled once loadouts have been imported AND at least one of them
 // targets the currently loaded ship's exact chassis (ware_id) -- called
@@ -4383,6 +5024,7 @@ async function loadImportedGameLoadout(entry) {
   // on the identical choice.
   renderShipOptions();
   applyShipSelection(entry.shipWareId);
+  resetShipModLabSlots(entry.appliedMods);
   renderShipDetail(data);
   applyGroupSelections(entry.selections);
   missileAmounts = { ...entry.missileAmounts };
@@ -4396,6 +5038,7 @@ async function loadImportedGameLoadout(entry) {
   crewAmounts = { ...entry.crewAmounts };
   renderCrewSection();
   shipNoteInput.value = entry.name ?? "";
+  renderShipLoadoutNameField();
   setAddToCartBtnLabel(t("ship_builder.add_to_fleet_list"));
 
   importedLoadoutWarningsEl.innerHTML = "";
@@ -4435,15 +5078,12 @@ let calculationToken = 0;
 // renderWareCostList()), never a new request.
 let activeWareCostListTab = "total";
 
-// Whether the current render has a baseline column to compare every other
-// fleet against -- set once per renderWareCostList() call and read by
-// appendComparisonCell() below, rather than threading a parameter through
-// every rendering function in the tier -> method -> [category] -> row
-// chain. wareCostListColumns() always sorts the active fleet into column 0,
-// and `fleets` is never empty, so this is unconditionally true today -- kept
-// as its own flag (rather than inlined) since the diff-rendering functions
-// already read it by name.
-let wareCostListHasBaseline = true;
+// Whether the current render has a focused column to compare every other
+// fleet against -- set once per renderWareCostList() call (from
+// wareCostListFocusedFleetIndex) and read by appendComparisonCell() below,
+// rather than threading a parameter through every rendering function in
+// the tier -> method -> [category] -> row chain.
+let wareCostListHasBaseline = false;
 
 // Resolves to the parsed JSON body, or throws (with the response's own
 // error text) on a non-ok response -- lets recomputeDirtyFleets() below fire
@@ -4751,26 +5391,32 @@ function round2(value) {
 // Appends one <td> for a single comparison cell: `value` formatted via
 // `formatValue` (a column/row with no reading at all is treated as, and
 // displayed as, 0 -- not blank -- since "this build strategy doesn't need
-// this ware" and "needs zero of this ware" are the same fact), plus --
-// only when `showDiff` is true (this column isn't the baseline itself,
-// and the table currently has a baseline at all; see
-// wareCostListHasBaseline) -- a trailing "(raw diff, percent diff)"
-// annotation against `baselineValue`, the Active List's own value in this
-// same row (likewise treated as 0 when absent). Green for an increase,
-// red for a decrease, the default text color for no change; the
-// percentage alone falls back to "N/A" when the (possibly zero-resolved)
-// baseline is exactly 0, since dividing by it isn't meaningful even
-// though the raw diff still is.
+// this ware" and "needs zero of this ware" are the same fact), plus a
+// second line reserved for a trailing "(raw diff, percent diff)"
+// annotation against `baselineValue`, the focused column's own value in
+// this same row (likewise treated as 0 when absent) -- shown for real only
+// when `showDiff` is true (this column isn't the focused one itself, and
+// the table currently has a focused column at all; see
+// wareCostListHasBaseline), otherwise an invisible placeholder of the same
+// line height. Every cell gets this second line unconditionally (not just
+// when showDiff is true) so a row's own height never changes when a column
+// is focused/defocused -- without it, every row would grow or shrink on
+// every click, the same jump Ship Trials' own comparison needed fixing for
+// (see appendStatComparisonDiff()). Green for an increase, red for a
+// decrease, the default text color for no change; the percentage alone
+// falls back to "N/A" when the (possibly zero-resolved) baseline is
+// exactly 0, since dividing by it isn't meaningful even though the raw
+// diff still is.
 function appendComparisonCell(tr, value, baselineValue, showDiff, formatValue) {
   const td = document.createElement("td");
   const resolvedValue = value === undefined ? 0 : value;
   td.textContent = formatValue(resolvedValue);
 
+  const diffSpan = document.createElement("span");
+  diffSpan.className = "ware-cost-list-diff";
+
   if (showDiff) {
     const resolvedBaseline = baselineValue === undefined ? 0 : baselineValue;
-    const diffSpan = document.createElement("span");
-    diffSpan.className = "ware-cost-list-diff";
-
     const rawDiff = round2(resolvedValue - resolvedBaseline);
     const sign = rawDiff > 0 ? "+" : "";
     const rawText = `${sign}${formatValue(rawDiff)}`;
@@ -4780,8 +5426,11 @@ function appendComparisonCell(tr, value, baselineValue, showDiff, formatValue) {
       rawDiff > 0 ? "ware-cost-list-diff-up" : rawDiff < 0 ? "ware-cost-list-diff-down" : "ware-cost-list-diff-none",
     );
     diffSpan.textContent = `(${rawText}, ${pctText})`;
-    td.appendChild(diffSpan);
+  } else {
+    diffSpan.classList.add("ware-cost-list-diff-placeholder");
+    diffSpan.textContent = " ";
   }
+  td.appendChild(diffSpan);
 
   tr.appendChild(td);
 }
@@ -4812,11 +5461,11 @@ function appendWarePartRows(partsByColumn) {
     wareTd.textContent = wareNames[wareId] ?? wareId;
     tr.appendChild(wareTd);
 
-    const baselineValue = wareCostListHasBaseline ? partsByColumn[0]?.[wareId] : undefined;
+    const baselineValue = wareCostListHasBaseline ? partsByColumn[wareCostListFocusedFleetIndex]?.[wareId] : undefined;
 
     partsByColumn.forEach((parts, index) => {
       const value = parts ? parts[wareId] : undefined;
-      const showDiff = wareCostListHasBaseline && index !== 0;
+      const showDiff = wareCostListHasBaseline && index !== wareCostListFocusedFleetIndex;
       appendComparisonCell(tr, value, baselineValue, showDiff, String);
     });
 
@@ -4955,13 +5604,15 @@ function appendWareCostListTier(tierKey, heading, columns) {
   }
 }
 
-// One column per fleet in `fleets`, active fleet always sorted first (see
-// module comment on wareCostListHasBaseline for why: the diff/highlight
-// machinery elsewhere hardcodes "column 0 is the baseline", so sorting here
-// is simpler than teaching that machinery about activeFleetIndex directly).
+// One column per fleet, in `fleets`' own natural order -- no longer sorts
+// the active (or focused) fleet to column 0 (user call: a fleet's own
+// column should stay exactly where it is in the fleet list regardless of
+// which one, if any, is currently focused for comparison -- see
+// wareCostListFocusedFleetIndex). The diff/highlight machinery
+// (appendComparisonCell() and friends) reads that index directly now
+// instead of assuming "column 0 is the baseline".
 function wareCostListColumns() {
-  const order = [activeFleetIndex, ...fleets.map((_, i) => i).filter((i) => i !== activeFleetIndex)];
-  return order.map((fleetIndex) => ({ data: fleets[fleetIndex].wareCostList, fleetIndex }));
+  return fleets.map((fleet, fleetIndex) => ({ data: fleet.wareCostList, fleetIndex }));
 }
 
 // The two-row <thead>: a "List Name" row with one column per fleet, each
@@ -4983,7 +5634,23 @@ function renderWareCostListHead(columns) {
   nameRow.appendChild(nameLabelTh);
   for (const column of columns) {
     const th = document.createElement("th");
+    const isFocused = column.fleetIndex === wareCostListFocusedFleetIndex;
+    th.className = isFocused ? "ware-cost-list-focused-column" : "";
     th.appendChild(buildFleetTabButton(fleets[column.fleetIndex], column.fleetIndex, { showBuildPriority: true }));
+
+    // Independent of buildFleetTabButton()'s own click-to-setActiveFleet()
+    // above -- this sets/clears wareCostListFocusedFleetIndex only, never
+    // touches activeFleetIndex (see that variable's own comment). Clicking
+    // the already-focused column's own button clears it back to no
+    // comparison at all, rather than a separate "Clear" control.
+    const focusBtn = document.createElement("button");
+    focusBtn.type = "button";
+    focusBtn.className = "ware-cost-list-focus-btn";
+    focusBtn.textContent = t(isFocused ? "ware_cost_list.focused_label" : "ware_cost_list.focus_btn");
+    focusBtn.title = t(isFocused ? "ware_cost_list.clear_focus_tooltip" : "ware_cost_list.set_focus_tooltip");
+    focusBtn.addEventListener("click", () => setWareCostListFocusedFleet(isFocused ? null : column.fleetIndex));
+    th.appendChild(focusBtn);
+
     nameRow.appendChild(th);
   }
   wareCostListThead.appendChild(nameRow);
@@ -5030,11 +5697,11 @@ function appendPriceRows(priceDataByColumn) {
     labelTd.textContent = t(labelKey);
     tr.appendChild(labelTd);
 
-    const baselineValue = wareCostListHasBaseline ? priceDataByColumn[0]?.[key] : undefined;
+    const baselineValue = wareCostListHasBaseline ? priceDataByColumn[wareCostListFocusedFleetIndex]?.[key] : undefined;
 
     priceDataByColumn.forEach((priceData, index) => {
       const value = priceData ? priceData[key] : undefined;
-      const showDiff = wareCostListHasBaseline && index !== 0;
+      const showDiff = wareCostListHasBaseline && index !== wareCostListFocusedFleetIndex;
       appendComparisonCell(tr, value, baselineValue, showDiff, formatPriceValue);
     });
 
@@ -5227,6 +5894,7 @@ function renderWareCostList() {
   // the tab bar in sync on every fleet mutation/switch; calling it again
   // here would just be redundant work on every recompute.
   const columns = wareCostListColumns(); // always >= 1 -- `fleets` is never empty
+  wareCostListHasBaseline = wareCostListFocusedFleetIndex !== null;
   wareCostListSection.classList.remove("hidden");
 
   renderWareCostListHead(columns);
@@ -5272,6 +5940,15 @@ function setActiveFleet(fleetIndex) {
   renderWareCostList();
 }
 
+// Sets (fleetIndex) or clears (null) wareCostListFocusedFleetIndex -- see
+// that variable's own comment. A pure re-render, unlike setActiveFleet()
+// above: no cart/ship-picker state depends on which column (if any) is
+// currently focused for comparison.
+function setWareCostListFocusedFleet(fleetIndex) {
+  wareCostListFocusedFleetIndex = fleetIndex;
+  renderWareCostList();
+}
+
 // Deletes a fleet outright -- real data loss, unlike switching, so this
 // keeps a confirm() (same category as clearImportedLoadouts()'s). Reachable
 // both from the tab bar and the Ware Cost List's own column header.
@@ -5286,6 +5963,14 @@ function deleteFleet(fleetIndex) {
     resetShipPicker();
   } else if (fleetIndex < activeFleetIndex) {
     activeFleetIndex -= 1;
+  }
+  // A removed fleet can't go on being the comparison focus either -- same
+  // "clear rather than reassign" reasoning as removeShipFromTrial()'s own
+  // baselineInstanceId handling.
+  if (fleetIndex === wareCostListFocusedFleetIndex) {
+    wareCostListFocusedFleetIndex = null;
+  } else if (wareCostListFocusedFleetIndex !== null && fleetIndex < wareCostListFocusedFleetIndex) {
+    wareCostListFocusedFleetIndex -= 1;
   }
   renderCart();
   renderWareCostList();
@@ -5725,6 +6410,14 @@ shareModalCopyBtn.addEventListener("click", async () => {
 // real current data, not empty defaults. Strips the params from the URL
 // afterward either way (applied, declined, or failed) so reloading the
 // page doesn't re-prompt every time.
+//
+// Always sends ?lang=<current UI language>, the same pattern loadShips()
+// already uses for ship/ware names -- harmless for a real user's own
+// share (the backend only ever acts on it for the Load Prebuilt Tables
+// band's own known table keys, see api.py's read_share_endpoint), but
+// needed so a prebuilt table's title/tab names come back already
+// localized (see prebuilt_table_titles.py) instead of the English text
+// baked into the table when it was originally built.
 async function applyShareLinksFromUrl() {
   const params = new URLSearchParams(location.search);
   const present = SHARE_SECTIONS.filter((entry) => params.has(`share_${entry.section}`));
@@ -5734,7 +6427,7 @@ async function applyShareLinksFromUrl() {
   for (const entry of present) {
     const shareUuid = params.get(`share_${entry.section}`);
     try {
-      const response = await fetch(`/api/share/${entry.section}/${shareUuid}`);
+      const response = await fetch(`/api/share/${entry.section}/${shareUuid}?lang=${i18next.language}`);
       const result = await response.json();
       if (result.error) {
         alert(t("share_modal.could_not_load_shared", { label: shareSectionLabel(entry), error: result.error }));
@@ -6109,7 +6802,40 @@ function updatePlayerLocationMarker(iconName) {
 // encoded curve string, e.g. "1.01:1.0,1.2:0.9,...") -- displayed as a
 // plain string for now, same as every other stat here, since no per-stat
 // formatting/rendering exists yet at all.
-const CHASSIS_STAT_GROUPS = ["core", "components", "capacities", "modifiers", "flight", "economy"];
+// componentType -> that type's own primary raw-data table -- purely the
+// informational `table` field every hand-written stat def already carries
+// (never read by resolveStatValue() itself -- see statDef()'s own
+// comment). Shared by both the built-in cross-component flight stats
+// (CROSS_COMPONENT_FLIGHT_STATS below) and every user-created stat
+// family's own generated definitions (statDefFromFamily(), see
+// customStatFamilies' own comment) -- declared up here, ahead of every
+// catalog, since CROSS_COMPONENT_FLIGHT_STATS' own generation loop runs
+// as soon as it's defined (a handful of catalogs down), not lazily.
+const COMPONENT_TYPE_PRIMARY_TABLE = {
+  chassis: "ships_base",
+  engine: "engines_base",
+  shield: "shields_base",
+  weapon: "weapons_base",
+  turret: "turrets_base",
+  thruster: "thrusters_base",
+  missile: "missiles_base",
+  software: "software_base",
+  drone: "drones_base",
+  deployable: "deployables_base",
+  countermeasure: "countermeasures_base",
+  crew: "crew_base",
+  economy_ware: "economy_wares_base",
+};
+
+const CHASSIS_STAT_GROUPS = [
+  statGroup("core"),
+  statGroup("components"),
+  statGroup("capacities"),
+  statGroup("modifiers"),
+  statGroup("flight"),
+  statGroup("combat"),
+  statGroup("economy"),
+];
 
 const CHASSIS_STAT_DEFINITIONS = [
   // core
@@ -6130,6 +6856,30 @@ const CHASSIS_STAT_DEFINITIONS = [
     group: "core",
     labelKey: "component_analyzer.stat_labels.traveldrivestability",
   },
+  // The raw score behind the game's own bucketed "Prestige" category
+  // (e.g. "Low") -- only the number is extracted, since the real
+  // bucket thresholds the game's UI uses to pick that label aren't
+  // present anywhere in this data (same "expose the real number, not a
+  // guessed category" choice weapon_heat_modifier already makes for its
+  // own "Normal"/"+40%" display). Blank (not 0) on the 221 of 255 ships
+  // with no <ship prestige="..."/> attribute at all -- the game shows
+  // "None" for those, not a prestige of zero.
+  { key: "prestige", table: "ships_base", group: "core", labelKey: "component_analyzer.stat_labels.prestige" },
+  { key: "radar_range", table: "ships_base", group: "core", labelKey: "component_analyzer.stat_labels.radar_range" },
+  // radar_cloak/region_damage_immune: no ship has either trait in the base
+  // game (always 1.0/False) -- real columns exist purely so the in-game
+  // equipment-mod system has something to apply a radarcloak/regiondamage
+  // mod's own effect onto (see generate_ships_table.py's own comments on
+  // each column). boolean: true on region_damage_immune renders True/False
+  // instead of a bare 0/1 -- see formatStatValue()'s own comment.
+  { key: "radar_cloak", table: "ships_base", group: "core", labelKey: "component_analyzer.stat_labels.radar_cloak" },
+  {
+    key: "region_damage_immune",
+    table: "ships_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.region_damage_immune",
+    boolean: true,
+  },
 
   // components (hardpoint slot counts)
   { key: "shields", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.shields" },
@@ -6138,6 +6888,22 @@ const CHASSIS_STAT_DEFINITIONS = [
     table: "ships_base",
     group: "components",
     labelKey: "component_analyzer.stat_labels.shields_bonus_m",
+  },
+  {
+    key: "shield_bonus_groups",
+    table: "ships_base",
+    group: "components",
+    labelKey: "component_analyzer.stat_labels.shield_bonus_groups",
+    descriptionKey: "component_analyzer.stat_descriptions.shield_bonus_groups",
+    // How many distinct hardpoint GROUPS this chassis's own bonus
+    // shields are spread across -- not a slot count (shields_bonus_m
+    // above, e.g. the Raptor's 49) but a GROUP count (the Raptor's own
+    // 20), what avg_group_shield_mj_test/avg_group_shield_recharge_rate_test
+    // actually divide their sum by. Real column, straight off
+    // ship_component_groups (see generate_ships_table.py's own
+    // summarize_slots() comment on the "hittable" tag classification) --
+    // replaces the hand-set test_shield_group_count mock those two stats
+    // used to need.
   },
   { key: "engines", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.engines" },
   { key: "weapons", table: "ships_base", group: "components", labelKey: "component_analyzer.stat_labels.weapons" },
@@ -6200,6 +6966,32 @@ const CHASSIS_STAT_DEFINITIONS = [
     group: "capacities",
     labelKey: "component_analyzer.stat_labels.m_ship_storage",
   },
+  {
+    key: "countermeasure_capacity",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.countermeasure_capacity",
+  },
+  {
+    key: "deployable_capacity",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.deployable_capacity",
+  },
+  // illegal_cargo_concealed: no ship has this trait in the base game
+  // (always False) -- a real column exists purely so the in-game
+  // equipment-mod system has something to apply a hidecargochance mod's
+  // own effect onto (see generate_ships_table.py's own comment). boolean:
+  // true renders True/False instead of a bare 0/1 -- see
+  // formatStatValue()'s own comment. radar_range/radar_cloak/
+  // region_damage_immune live in the "core" group above instead.
+  {
+    key: "illegal_cargo_concealed",
+    table: "ships_base",
+    group: "capacities",
+    labelKey: "component_analyzer.stat_labels.illegal_cargo_concealed",
+    boolean: true,
+  },
 
   // modifiers -- hull-wide multipliers applied on top of whatever's
   // actually mounted (confirmed real in-game, not dead data -- see
@@ -6230,6 +7022,286 @@ const CHASSIS_STAT_DEFINITIONS = [
     group: "modifiers",
     labelKey: "component_analyzer.stat_labels.shield_rechargedelay_modifier",
   },
+
+  // Mod-modified siblings for the ship-level "ship" category target_stats
+  // in equipment_mod_target_mappings.json (missilecapacity/unitcapacity/
+  // countermeasurecapacity/deployablecapacity/radarcloak/radarrange/mass/
+  // drag) -- see SHIELD_STAT_DEFINITIONS' own "worked example" comment
+  // and modifierModStatDef()/postModStatDef()'s own comments for the
+  // shared architecture. None of these have a real chassis-integrated
+  // equivalent, so only Mod Modifier + Post Mod are generated (no
+  // Chassis Modifier). The 5 capacity/radarcloak stats are relabeled
+  // "... Base" below (each is exclusive to this one labelKey, confirmed
+  // -- no other component type reuses "Missile Capacity"/"Drone
+  // Capacity"/etc.); radar_range/physics_mass/physics_drag_* are NOT
+  // relabeled -- radar_range's own labelKey is also used by
+  // deployables_base's unrelated detection-range stat, and physics_mass/
+  // physics_drag_* are shared with missiles_base's own copies (missiles
+  // have no mod concept at all) -- renaming either would misleadingly
+  // imply a "Base"/"Post Mod" split on a table that has none.
+  // region_damage_immune/illegal_cargo_concealed (ship.regiondamage/
+  // hidecargochance, both "add_ceiling_bool") have no siblings here --
+  // deliberately skipped: both are already-niche booleans with no real
+  // non-default baseline in the base game (see their own comments above),
+  // and "add_ceiling_bool"'s all-or-nothing semantics (any touch forces
+  // True) don't produce a meaningful 3-stat breakdown the way a numeric
+  // ratio/delta does.
+  modifierModStatDef(
+    "missile_capacity_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.missile_capacity_modifier_mod",
+    "missile_capacity",
+    0,
+  ),
+  postModStatDef(
+    "missile_capacity_post_mod",
+    "ships_base",
+    "capacities",
+    "component_analyzer.stat_labels.missile_capacity_post_mod",
+    "chassis",
+    "missile_capacity",
+    ["missile_capacity_modifier_mod"],
+    "add",
+  ),
+  modifierModStatDef(
+    "drone_capacity_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.drone_capacity_modifier_mod",
+    "drone_capacity",
+    0,
+  ),
+  postModStatDef(
+    "drone_capacity_post_mod",
+    "ships_base",
+    "capacities",
+    "component_analyzer.stat_labels.drone_capacity_post_mod",
+    "chassis",
+    "drone_capacity",
+    ["drone_capacity_modifier_mod"],
+    "add",
+  ),
+  modifierModStatDef(
+    "countermeasure_capacity_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.countermeasure_capacity_modifier_mod",
+    "countermeasure_capacity",
+    0,
+  ),
+  postModStatDef(
+    "countermeasure_capacity_post_mod",
+    "ships_base",
+    "capacities",
+    "component_analyzer.stat_labels.countermeasure_capacity_post_mod",
+    "chassis",
+    "countermeasure_capacity",
+    ["countermeasure_capacity_modifier_mod"],
+    "add",
+  ),
+  modifierModStatDef(
+    "deployable_capacity_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.deployable_capacity_modifier_mod",
+    "deployable_capacity",
+    0,
+  ),
+  postModStatDef(
+    "deployable_capacity_post_mod",
+    "ships_base",
+    "capacities",
+    "component_analyzer.stat_labels.deployable_capacity_post_mod",
+    "chassis",
+    "deployable_capacity",
+    ["deployable_capacity_modifier_mod"],
+    "add",
+  ),
+  modifierModStatDef(
+    "radar_cloak_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.radar_cloak_modifier_mod",
+    "radar_cloak",
+    0,
+  ),
+  postModStatDef(
+    "radar_cloak_post_mod",
+    "ships_base",
+    "core",
+    "component_analyzer.stat_labels.radar_cloak_post_mod",
+    "chassis",
+    "radar_cloak",
+    ["radar_cloak_modifier_mod"],
+    "add",
+  ),
+  modifierModStatDef(
+    "radar_range_modifier_mod",
+    "ships_base",
+    "modifiers",
+    "component_analyzer.stat_labels.radar_range_modifier_mod",
+    "radar_range",
+    1,
+  ),
+  postModStatDef(
+    "radar_range_post_mod",
+    "ships_base",
+    "core",
+    "component_analyzer.stat_labels.radar_range_post_mod",
+    "chassis",
+    "radar_range",
+    ["radar_range_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_mass_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_mass_modifier_mod",
+    "physics_mass",
+    1,
+  ),
+  postModStatDef(
+    "physics_mass_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_mass_post_mod",
+    "chassis",
+    "physics_mass",
+    ["physics_mass_modifier_mod"],
+    "multiply",
+  ),
+  // drag: one real mod multiplies all 7 directional columns uniformly
+  // (see equipment_mod_target_mappings.json's own "ship"/"drag" note) --
+  // each still gets its own independent Mod Modifier/Post Mod pair here
+  // since they're 7 separately-browsable stats, not one combined value.
+  modifierModStatDef(
+    "physics_drag_forward_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_forward_modifier_mod",
+    "physics_drag_forward",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_forward_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_forward_post_mod",
+    "chassis",
+    "physics_drag_forward",
+    ["physics_drag_forward_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_reverse_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_reverse_modifier_mod",
+    "physics_drag_reverse",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_reverse_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_reverse_post_mod",
+    "chassis",
+    "physics_drag_reverse",
+    ["physics_drag_reverse_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_horizontal_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_horizontal_modifier_mod",
+    "physics_drag_horizontal",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_horizontal_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_horizontal_post_mod",
+    "chassis",
+    "physics_drag_horizontal",
+    ["physics_drag_horizontal_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_vertical_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_vertical_modifier_mod",
+    "physics_drag_vertical",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_vertical_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_vertical_post_mod",
+    "chassis",
+    "physics_drag_vertical",
+    ["physics_drag_vertical_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_pitch_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_pitch_modifier_mod",
+    "physics_drag_pitch",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_pitch_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_pitch_post_mod",
+    "chassis",
+    "physics_drag_pitch",
+    ["physics_drag_pitch_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_yaw_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_yaw_modifier_mod",
+    "physics_drag_yaw",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_yaw_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_yaw_post_mod",
+    "chassis",
+    "physics_drag_yaw",
+    ["physics_drag_yaw_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "physics_drag_roll_modifier_mod",
+    "flight_model",
+    "modifiers",
+    "component_analyzer.stat_labels.physics_drag_roll_modifier_mod",
+    "physics_drag_roll",
+    1,
+  ),
+  postModStatDef(
+    "physics_drag_roll_post_mod",
+    "flight_model",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_roll_post_mod",
+    "chassis",
+    "physics_drag_roll",
+    ["physics_drag_roll_modifier_mod"],
+    "multiply",
+  ),
 
   // flight (flight_model)
   {
@@ -6414,8 +7486,102 @@ const CHASSIS_STAT_DEFINITIONS = [
 // own docstring above for what each field means. Used for every catalog
 // below (chassis's own predates this helper and is left in its original,
 // more verbose form rather than churned for no functional change).
-function statDef(key, table, group, labelKey) {
-  return { key, table, group, labelKey };
+//
+// `kind` is NOT set here -- every stat definition in every *_STAT_DEFINITIONS
+// array below, whether built via this helper (or one of its boolStatDef()/
+// cargoTypeStatDef()/etc. wrappers just below) or written as a raw object
+// literal (chassis's own, and a handful of others), is stamped
+// kind: "fundamental" in one single pass right after STAT_CATALOG_BY_TYPE
+// is assembled -- see that pass's own comment for why a blanket
+// post-processing step, not a per-definition field, is the actual source
+// of truth here. This is the Statistics Lab's own first tag (see GitHub
+// issue #26): a "fundamental" stat reads straight from a real database
+// column (table+key above) and, unlike a future "pre-derived"/"derived"
+// stat (backed by a formula instead), can never be edited, moved, or
+// deleted by a user.
+function statDef(key, table, group, labelKey, descriptionKey) {
+  return { key, table, group, labelKey, descriptionKey };
+}
+
+// ---- Mod-modified stat siblings (GitHub issue #26) -- see
+// SHIELD_STAT_DEFINITIONS' own "worked example" comment and
+// resolveFormulaVariable()'s own mod_modifier_ref comment for the full
+// architecture. Three small factory helpers, one per sibling kind, so
+// every one of the ~20 moddable stats this applies to (shield/engine/
+// chassis/weapon) builds its own siblings identically instead of hand-
+// rolling the same {kind, formula} shape N times -- this is ordinary
+// code reuse at DEFINITION time (the same role statDef()/compatibilityStatDef()/
+// buildMethodStatDef() already play), not the "generalized, runtime-
+// inferred" mechanism the user explicitly rejected: every call site below
+// is still its own explicit, named, independently-browsable stat.
+
+// The real player-INSTALLED mod's own effect alone, exposed as its own
+// stat -- via the mod_modifier_ref formula variable (see
+// resolveFormulaVariable()'s own comment), reading the Mod Lab's
+// "standard" slot only against `realColumn` on THIS row.
+// `neutralValue` is this stat's own confirmed
+// equipment_mod_target_mappings.json `operation`'s neutral "no effect"
+// value -- 1 for "multiply" (the common case), 0 for "add".
+//
+// kind: "mod" -- its own dedicated tag (see STAT_TAG_LABEL_KEYS), not
+// "pre-derived": unlike every other app-authored formula, THIS one reads
+// genuinely live, client-side-only state (whatever the player currently
+// has loaded in the Mod Lab) rather than anything that was ever extracted
+// from the game's own files. It's also the one and only kind of stat the
+// Mod Lab's own column highlight (modAffectedStatColumnKeysForSelection())
+// ever starts a highlight chain FROM -- see that function's own comment.
+function modifierModStatDef(key, table, group, labelKey, realColumn, neutralValue) {
+  return {
+    key,
+    table,
+    group,
+    labelKey,
+    kind: "mod",
+    formula: {
+      expression: "modifier_mod",
+      variables: { modifier_mod: { type: "mod_modifier_ref", realColumn, neutralValue } },
+    },
+  };
+}
+
+// The base stat combined with 1 or 2 of its own modifier siblings above
+// (`modifierKeys`, same componentType, same row) -- MULTIPLIED together
+// for a "multiply"-operation stat (confirmed in-game: chassis and mod
+// modifiers both combine multiplicatively, not additively -- see
+// [[project-mod-modified-stats-architecture]]), ADDED for an "add"-
+// operation stat (the raw integer-count capacity stats). `operation` is
+// that stat's own equipment_mod_target_mappings.json value.
+function postModStatDef(key, table, group, labelKey, componentType, baseKey, modifierKeys, operation) {
+  const varNames = [baseKey, ...modifierKeys];
+  const variables = {};
+  for (const name of varNames) {
+    variables[name] = { type: "stat_ref", componentType, statId: name };
+  }
+  return {
+    key,
+    table,
+    group,
+    labelKey,
+    kind: "pre-derived",
+    formula: { expression: varNames.join(operation === "add" ? " + " : " * "), variables },
+  };
+}
+
+// A stat GROUP's own {id, kind} pair -- separate from a stat's own `kind`
+// above, this is the Statistics Lab's other first tag: kind: "static"
+// (every group any *_STAT_GROUPS array below declares today) can't be
+// renamed/deleted/reordered by a user; kind: "dynamic" (not used by
+// anything yet -- reserved for a future user-created group) can be
+// freely edited. `id` is exactly the plain string every group was
+// identified by before this tag existed (matched against a stat's own
+// `group` field, and used as the "component_analyzer.stat_groups.<id>"
+// i18n key) -- wrapping it in {id, kind} here, instead of introducing a
+// parallel lookup table keyed by the bare string, means a group's own
+// identity and its tag travel together as one value everywhere a group is
+// already passed around (renderStatSelectGroupsPanel(),
+// createFleetPlannerViewTable()).
+function statGroup(id, kind = "static") {
+  return { id, kind };
 }
 
 // Same shape as statDef(), plus `boolean: true` -- a handful of real
@@ -6549,7 +7715,20 @@ function formatStatValue(def, value) {
   // DEPLOYABLE_TYPE_NAME_REF's own comment in generate_ships_table.py) via
   // deployableTypeNames.
   if (def.deployableType) return deployableTypeNames[value] ?? value;
+  // A formula-backed (pre-derived/derived) stat shows TRUNCATED to 1
+  // decimal, matching the game's own display -- a raw database column
+  // ("fundamental") keeps showing exactly what was extracted.
+  if (typeof value === "number" && def.kind && def.kind !== "fundamental") {
+    return String(truncateStatDisplayNumber(value));
+  }
   return String(value);
+}
+
+// Truncates (toward zero, not rounded) to 1 decimal -- rounds to 6 places
+// first so float noise on a value that's really an exact tenth (e.g.
+// 0.7999999999999999) doesn't truncate one tick too low.
+function truncateStatDisplayNumber(value) {
+  return Math.trunc(Math.round(value * 1e6) / 1e5) / 10;
 }
 
 // engines_base -- see GET /api/components' own docstring in api.py for
@@ -6558,11 +7737,24 @@ function formatStatValue(def, value) {
 // (every boost_*/travel_* jerk-adjacent stat, split by flight mode), economy
 // (price + build method, joined from equipment_wares_base -- engines_base
 // itself has no price/production concept of its own).
-const ENGINE_STAT_GROUPS = ["core", "boost", "travel", "economy"];
+const ENGINE_STAT_GROUPS = [
+  statGroup("core"),
+  statGroup("boost"),
+  statGroup("travel"),
+  statGroup("modifiers"),
+  statGroup("economy"),
+];
 const ENGINE_STAT_DEFINITIONS = [
   statDef("mk", "engines_base", "core", "component_analyzer.stat_labels.mk"),
   statDef("hull", "engines_base", "core", "component_analyzer.stat_labels.hull"),
   statDef("size", "engines_base", "core", "component_analyzer.stat_labels.size"),
+  // thrust_forward: NOT relabeled "... Base" despite having its own mod-
+  // modified siblings below (see the "modifiers" group) -- this exact
+  // labelKey is also shared verbatim by missiles_base's own
+  // thrust_forward (missiles have no mod concept at all, see
+  // equipment_mod_target_mappings.json's own component_type vocabulary:
+  // weapon/engine/ship/shield only), so renaming it here would wrongly
+  // imply a "Base"/"Post Mod" distinction on the missile table too.
   statDef("thrust_forward", "engines_base", "core", "component_analyzer.stat_labels.thrust_forward"),
   statDef("thrust_reverse", "engines_base", "core", "component_analyzer.stat_labels.thrust_reverse"),
   compatibilityStatDef("compatibility", "engines_base", "core", "component_analyzer.stat_labels.compatibility"),
@@ -6577,6 +7769,152 @@ const ENGINE_STAT_DEFINITIONS = [
   statDef("travel_thrust", "engines_base", "travel", "component_analyzer.stat_labels.travel_thrust"),
   statDef("travel_attack", "engines_base", "travel", "component_analyzer.stat_labels.travel_attack"),
   statDef("travel_release", "engines_base", "travel", "component_analyzer.stat_labels.travel_release"),
+  // modifiers -- none of these 7 have a real chassis-integrated
+  // equivalent at all, so only Mod Modifier + Post Mod are generated --
+  // no chassis-side term in Post Mod's own formula either (unlike
+  // shield's capacity/rechargerate/rechargedelay or weapon's heat
+  // generation, which each mock_ref a REAL chassis column directly
+  // inside their own Post Mod formula -- see SHIELD_STAT_DEFINITIONS' own
+  // comment -- since one genuinely exists for those; it would just
+  // always read a pointless constant 1 here, so it's skipped).
+  // travelstartthrust (engine.travelstartthrust in
+  // equipment_mod_target_mappings.json) has no sibling set here at all
+  // -- per that mapping's own note, it never appears as its own primary
+  // mod, only ever as a bonus candidate alongside the others already
+  // covered below, so there's no real standalone "this mod's own effect"
+  // to expose. rotationthrust/strafethrust/strafeacc are ALSO not here
+  // despite being real engine-category target_stats -- they modify the
+  // ship's own separately-browsable THRUSTER component's columns, not
+  // anything on engines_base itself (see rotationthrust's own mapping
+  // note), which mod_modifier_ref can't resolve today since it always
+  // reads the mod applied to THIS row, not some other component's row --
+  // deferred, needs its own cross-component design, not a hack here.
+  modifierModStatDef(
+    "boost_acceleration_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.boost_acceleration_modifier_mod",
+    "boost_acceleration",
+    1,
+  ),
+  postModStatDef(
+    "boost_acceleration_post_mod",
+    "engines_base",
+    "boost",
+    "component_analyzer.stat_labels.boost_acceleration_post_mod",
+    "engine",
+    "boost_acceleration",
+    ["boost_acceleration_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "boost_duration_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.boost_duration_modifier_mod",
+    "boost_duration",
+    1,
+  ),
+  postModStatDef(
+    "boost_duration_post_mod",
+    "engines_base",
+    "boost",
+    "component_analyzer.stat_labels.boost_duration_post_mod",
+    "engine",
+    "boost_duration",
+    ["boost_duration_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "boost_thrust_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.boost_thrust_modifier_mod",
+    "boost_thrust",
+    1,
+  ),
+  postModStatDef(
+    "boost_thrust_post_mod",
+    "engines_base",
+    "boost",
+    "component_analyzer.stat_labels.boost_thrust_post_mod",
+    "engine",
+    "boost_thrust",
+    ["boost_thrust_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "travel_attack_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.travel_attack_modifier_mod",
+    "travel_attack",
+    1,
+  ),
+  postModStatDef(
+    "travel_attack_post_mod",
+    "engines_base",
+    "travel",
+    "component_analyzer.stat_labels.travel_attack_post_mod",
+    "engine",
+    "travel_attack",
+    ["travel_attack_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "travel_charge_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.travel_charge_modifier_mod",
+    "travel_charge",
+    1,
+  ),
+  postModStatDef(
+    "travel_charge_post_mod",
+    "engines_base",
+    "travel",
+    "component_analyzer.stat_labels.travel_charge_post_mod",
+    "engine",
+    "travel_charge",
+    ["travel_charge_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "travel_thrust_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.travel_thrust_modifier_mod",
+    "travel_thrust",
+    1,
+  ),
+  postModStatDef(
+    "travel_thrust_post_mod",
+    "engines_base",
+    "travel",
+    "component_analyzer.stat_labels.travel_thrust_post_mod",
+    "engine",
+    "travel_thrust",
+    ["travel_thrust_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "thrust_forward_modifier_mod",
+    "engines_base",
+    "modifiers",
+    "component_analyzer.stat_labels.thrust_forward_modifier_mod",
+    "thrust_forward",
+    1,
+  ),
+  postModStatDef(
+    "thrust_forward_post_mod",
+    "engines_base",
+    "core",
+    "component_analyzer.stat_labels.thrust_forward_post_mod",
+    "engine",
+    "thrust_forward",
+    ["thrust_forward_modifier_mod"],
+    "multiply",
+  ),
   statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
@@ -6585,10 +7923,17 @@ const ENGINE_STAT_DEFINITIONS = [
 
 // shields_base -- every real column ("all stats besides macro, ware_id",
 // per the user's own spec) in one core group, plus the same economy group
-// every equipment type gets (joined from equipment_wares_base).
-const SHIELD_STAT_GROUPS = ["core", "economy"];
+// every equipment type gets (joined from equipment_wares_base), plus a
+// modifiers group (recharge_max's own mod-adjusted stats -- see its own
+// comment just below).
+const SHIELD_STAT_GROUPS = [statGroup("core"), statGroup("modifiers"), statGroup("economy")];
 const SHIELD_STAT_DEFINITIONS = [
   statDef("mk", "shields_base", "core", "component_analyzer.stat_labels.mk"),
+  // Renamed from "Max Shield Capacity" ("recharge_max_base" i18n key
+  // variant deliberately NOT used -- the stat KEY stays recharge_max,
+  // unchanged, since every mod/formula/CSV/URL already refers to it that
+  // way; only the LABEL text changes) now that recharge_max_post_mod
+  // exists as the "with mods applied" sibling -- see its own comment.
   statDef("recharge_max", "shields_base", "core", "component_analyzer.stat_labels.recharge_max"),
   statDef("recharge_rate", "shields_base", "core", "component_analyzer.stat_labels.recharge_rate"),
   statDef("recharge_delay", "shields_base", "core", "component_analyzer.stat_labels.recharge_delay"),
@@ -6601,6 +7946,133 @@ const SHIELD_STAT_DEFINITIONS = [
   statDef("hull", "shields_base", "core", "component_analyzer.stat_labels.hull"),
   statDef("size", "shields_base", "core", "component_analyzer.stat_labels.size"),
   compatibilityStatDef("compatibility", "shields_base", "core", "component_analyzer.stat_labels.compatibility"),
+  // Worked example (GitHub issue #26) for exposing a mod's real effect on
+  // a base stat as its own explicit, browsable stats rather than a hidden
+  // transformation of recharge_max itself. Two stats per base stat, not
+  // three -- there is NO separate "Modifier Chassis" stat living on
+  // shield (an earlier version of this had one; removed -- see below):
+  //   - recharge_max_modifier_mod: the real player-INSTALLED "capacity"
+  //     mod's own effect alone (via the mod_modifier_ref formula variable
+  //     type -- see resolveFormulaVariable()'s own comment), reading the
+  //     Mod Lab's own "standard" slot only, through the exact same
+  //     modEffectValueForColumn()/equipmentModTargetMappings machinery
+  //     the Mod Lab's table cells already use to highlight a modified
+  //     value, just run against a neutral 1 instead of recharge_max's own
+  //     real value so the ratio itself is what's exposed. Defaults to 1
+  //     (no mod applied).
+  //   - recharge_max_post_mod: combines the real chassis-integrated
+  //     multiplier (ships_base.shield_capacity_modifier, read via a
+  //     DIRECT mock_ref to chassis right here in this formula, not
+  //     through an intermediate shield-side stat) with recharge_max and
+  //     recharge_max_modifier_mod above -- all three MULTIPLIED together
+  //     (not added -- see equipment_mod_target_mappings.json's own
+  //     shield.capacity entry: operation "multiply", and this function's
+  //     own git history for why an earlier additive version of this exact
+  //     formula was wrong: with both modifiers defaulting to their own
+  //     neutral "no effect" value, 1, addition would double the stat
+  //     (1+1=2) even with nothing applied at all).
+  //
+  // An earlier version of this also had a "recharge_max_modifier_chassis"
+  // stat living HERE on shield, itself just a mock_ref to
+  // "chassis:shield_capacity_modifier" wrapped in a `? : 1` default --
+  // explicit user call to remove it: it was a pure DUPLICATE of
+  // information the real ships_base.shield_capacity_modifier column
+  // already exposes directly, as its own genuinely fundamental stat, on
+  // the chassis type itself (see CHASSIS_STAT_DEFINITIONS' own
+  // "modifiers" group) -- nothing about a shield-side copy of that same
+  // number added anything a user couldn't already see on the chassis
+  // table. recharge_max_post_mod now mock_refs "chassis:
+  // shield_capacity_modifier" directly instead, one fewer layer of
+  // indirection for the exact same real value. This also means
+  // recharge_max_post_mod now genuinely needs an EXPLICITLY configured
+  // "chassis" mock wherever it's evaluated away from a real chassis row
+  // (e.g. read through a full-component shield mock elsewhere) --
+  // by design, per the user's own explicit call: no "ambient"/implicit
+  // chassis-detection shortcut, a real mock is the one source of truth
+  // here. `optional: true` on that mock_ref means an unconfigured one
+  // still defaults cleanly to 1 (most ships have no real modifier at
+  // all) rather than reporting a missing mock.
+  {
+    key: "recharge_max_modifier_mod",
+    table: "shields_base",
+    group: "modifiers",
+    labelKey: "component_analyzer.stat_labels.recharge_max_modifier_mod",
+    // "mod", not "pre-derived" -- see modifierModStatDef()'s own comment
+    // (this stat predates that helper, hand-written in the same shape).
+    kind: "mod",
+    formula: {
+      expression: "modifier_mod",
+      variables: {
+        modifier_mod: { type: "mod_modifier_ref", realColumn: "recharge_max", neutralValue: 1 },
+      },
+    },
+  },
+  {
+    key: "recharge_max_post_mod",
+    table: "shields_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.recharge_max_post_mod",
+    kind: "pre-derived",
+    formula: {
+      expression: "recharge_max * (chassis_modifier ? chassis_modifier : 1) * recharge_max_modifier_mod",
+      variables: {
+        recharge_max: { type: "stat_ref", componentType: "shield", statId: "recharge_max" },
+        chassis_modifier: { type: "mock_ref", mockId: "chassis:shield_capacity_modifier", optional: true },
+        recharge_max_modifier_mod: { type: "stat_ref", componentType: "shield", statId: "recharge_max_modifier_mod" },
+      },
+    },
+  },
+  // Same pattern as recharge_max above -- these two also have a real
+  // chassis-integrated equivalent (shield_rechargerate_modifier/
+  // shield_rechargedelay_modifier, both real ships_base columns alongside
+  // shield_capacity_modifier), mock_ref'd directly here too, no
+  // intermediate shield-side "Modifier Chassis" stat for either.
+  modifierModStatDef(
+    "recharge_rate_modifier_mod",
+    "shields_base",
+    "modifiers",
+    "component_analyzer.stat_labels.recharge_rate_modifier_mod",
+    "recharge_rate",
+    1,
+  ),
+  {
+    key: "recharge_rate_post_mod",
+    table: "shields_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.recharge_rate_post_mod",
+    kind: "pre-derived",
+    formula: {
+      expression: "recharge_rate * (chassis_modifier ? chassis_modifier : 1) * recharge_rate_modifier_mod",
+      variables: {
+        recharge_rate: { type: "stat_ref", componentType: "shield", statId: "recharge_rate" },
+        chassis_modifier: { type: "mock_ref", mockId: "chassis:shield_rechargerate_modifier", optional: true },
+        recharge_rate_modifier_mod: { type: "stat_ref", componentType: "shield", statId: "recharge_rate_modifier_mod" },
+      },
+    },
+  },
+  modifierModStatDef(
+    "recharge_delay_modifier_mod",
+    "shields_base",
+    "modifiers",
+    "component_analyzer.stat_labels.recharge_delay_modifier_mod",
+    "recharge_delay",
+    1,
+  ),
+  {
+    key: "recharge_delay_post_mod",
+    table: "shields_base",
+    group: "core",
+    labelKey: "component_analyzer.stat_labels.recharge_delay_post_mod",
+    kind: "pre-derived",
+    formula: {
+      expression: "recharge_delay * (chassis_modifier ? chassis_modifier : 1) * recharge_delay_modifier_mod",
+      variables: {
+        recharge_delay: { type: "stat_ref", componentType: "shield", statId: "recharge_delay" },
+        chassis_modifier: { type: "mock_ref", mockId: "chassis:shield_rechargedelay_modifier", optional: true },
+        recharge_delay_modifier_mod: { type: "stat_ref", componentType: "shield", statId: "recharge_delay_modifier_mod" },
+      },
+    },
+  },
   statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
@@ -6621,6 +8093,7 @@ function bulletDamageStatDefs(table) {
     statDef("damage_value", table, "damage", "component_analyzer.stat_labels.damage_value"),
     statDef("damage_shield", table, "damage", "component_analyzer.stat_labels.damage_shield"),
     statDef("damage_hull", table, "damage", "component_analyzer.stat_labels.damage_hull"),
+    statDef("damage_noshield", table, "damage", "component_analyzer.stat_labels.damage_noshield"),
     statDef("damage_repair", table, "damage", "component_analyzer.stat_labels.damage_repair"),
     statDef("damage_shielddisruption", table, "damage", "component_analyzer.stat_labels.damage_shielddisruption"),
     statDef("bullet_speed", table, "damage", "component_analyzer.stat_labels.bullet_speed"),
@@ -6628,6 +8101,29 @@ function bulletDamageStatDefs(table) {
     statDef("bullet_range", table, "damage", "component_analyzer.stat_labels.bullet_range"),
     statDef("bullet_amount", table, "damage", "component_analyzer.stat_labels.bullet_amount"),
     statDef("bullet_barrelamount", table, "damage", "component_analyzer.stat_labels.bullet_barrelamount"),
+    // charge_time/stick_time/mining_damage_multiplier/
+    // surfaceelement_damage_multiplier: only real on a small minority of
+    // bullets (charge beams, Split sticky/charge projectiles, mining
+    // lasers, anti-turret bonus-damage bullets respectively) -- blank for
+    // everything else, same missing-stat handling as any other sparse
+    // column here. Added specifically so the equipment-mod system's own
+    // chargetime/sticktime/mining/surfaceelement weapon mods have a real
+    // column to apply their effect onto -- see
+    // equipment_mod_target_mappings.json.
+    statDef("charge_time", table, "damage", "component_analyzer.stat_labels.charge_time"),
+    statDef("stick_time", table, "damage", "component_analyzer.stat_labels.stick_time"),
+    statDef(
+      "mining_damage_multiplier",
+      table,
+      "damage",
+      "component_analyzer.stat_labels.mining_damage_multiplier",
+    ),
+    statDef(
+      "surfaceelement_damage_multiplier",
+      table,
+      "damage",
+      "component_analyzer.stat_labels.surfaceelement_damage_multiplier",
+    ),
     statDef("reload_rate", table, "damage", "component_analyzer.stat_labels.reload_rate"),
     statDef("reload_time", table, "damage", "component_analyzer.stat_labels.reload_time"),
     statDef("heat_value", table, "damage", "component_analyzer.stat_labels.heat_value"),
@@ -6654,7 +8150,14 @@ function bulletDamageStatDefs(table) {
 // overheat/cooldown mechanics), damage (every real per-shot stat, LEFT
 // JOINed from bullets_base -- see GET /api/components' own comment),
 // economy.
-const WEAPON_STAT_GROUPS = ["core", "ammunition", "heat", "damage", "economy"];
+const WEAPON_STAT_GROUPS = [
+  statGroup("core"),
+  statGroup("ammunition"),
+  statGroup("heat"),
+  statGroup("damage"),
+  statGroup("modifiers"),
+  statGroup("economy"),
+];
 const WEAPON_STAT_DEFINITIONS = [
   statDef("mk", "weapons_base", "core", "component_analyzer.stat_labels.mk"),
   statDef("hull", "weapons_base", "core", "component_analyzer.stat_labels.hull"),
@@ -6682,6 +8185,275 @@ const WEAPON_STAT_DEFINITIONS = [
     "component_analyzer.stat_labels.heat_overheatcooldelay",
   ),
   ...bulletDamageStatDefs("bullets_base"),
+  // Mod-modified siblings for every real "weapon" category target_stat
+  // in equipment_mod_target_mappings.json -- see SHIELD_STAT_DEFINITIONS'
+  // own "worked example" comment for the shared architecture.
+  // Deliberately WEAPON-ONLY, never added to TURRET_STAT_DEFINITIONS
+  // (which also calls bulletDamageStatDefs() against the exact same
+  // bullets_base columns) -- no real mod's own mod_components value is
+  // ever "turret" (see equipment_mod_target_mappings.json's own
+  // component_type vocabulary: weapon/engine/ship/shield only, confirmed
+  // against modsForComponentType()'s own matching logic), so a turret
+  // can never actually have one of these applied -- and the base
+  // stats below (damage_value/bullet_lifetime/etc.) are NOT relabeled
+  // "... Base" for the same reason as thrust_forward above: their
+  // labelKey is the exact same one bulletDamageStatDefs() also hands to
+  // TURRET_STAT_DEFINITIONS, so renaming here would misleadingly imply a
+  // "Post Mod" distinction that doesn't exist for turrets at all.
+  // heat_coolrate is the one exception -- it's declared directly above
+  // (table weapons_base, NOT via bulletDamageStatDefs), confirmed
+  // genuinely weapon-exclusive (turrets_base has no heat_coolrate column
+  // at all -- see heat_per_second's own comment), so IS safely relabeled.
+  modifierModStatDef(
+    "heat_coolrate_modifier_mod",
+    "weapons_base",
+    "modifiers",
+    "component_analyzer.stat_labels.heat_coolrate_modifier_mod",
+    "heat_coolrate",
+    1,
+  ),
+  postModStatDef(
+    "heat_coolrate_post_mod",
+    "weapons_base",
+    "heat",
+    "component_analyzer.stat_labels.heat_coolrate_post_mod",
+    "weapon",
+    "heat_coolrate",
+    ["heat_coolrate_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "damage_value_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.damage_value_modifier_mod",
+    "damage_value",
+    1,
+  ),
+  postModStatDef(
+    "damage_value_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_value_post_mod",
+    "weapon",
+    "damage_value",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_lifetime_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_lifetime_modifier_mod",
+    "bullet_lifetime",
+    1,
+  ),
+  postModStatDef(
+    "bullet_lifetime_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_lifetime_post_mod",
+    "weapon",
+    "bullet_lifetime",
+    ["bullet_lifetime_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "rotation_speed_modifier_mod",
+    "weapons_base",
+    "modifiers",
+    "component_analyzer.stat_labels.rotation_speed_modifier_mod",
+    "rotation_speed",
+    1,
+  ),
+  postModStatDef(
+    "rotation_speed_post_mod",
+    "weapons_base",
+    "core",
+    "component_analyzer.stat_labels.rotation_speed_post_mod",
+    "weapon",
+    "rotation_speed",
+    ["rotation_speed_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_speed_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_speed_modifier_mod",
+    "bullet_speed",
+    1,
+  ),
+  postModStatDef(
+    "bullet_speed_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_speed_post_mod",
+    "weapon",
+    "bullet_speed",
+    ["bullet_speed_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_range_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_range_modifier_mod",
+    "bullet_range",
+    1,
+  ),
+  postModStatDef(
+    "bullet_range_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_range_post_mod",
+    "weapon",
+    "bullet_range",
+    ["bullet_range_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "reload_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.reload_time_modifier_mod",
+    "reload_time",
+    1,
+  ),
+  postModStatDef(
+    "reload_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.reload_time_post_mod",
+    "weapon",
+    "reload_time",
+    ["reload_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "charge_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.charge_time_modifier_mod",
+    "charge_time",
+    1,
+  ),
+  postModStatDef(
+    "charge_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.charge_time_post_mod",
+    "weapon",
+    "charge_time",
+    ["charge_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "stick_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.stick_time_modifier_mod",
+    "stick_time",
+    1,
+  ),
+  postModStatDef(
+    "stick_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.stick_time_post_mod",
+    "weapon",
+    "stick_time",
+    ["stick_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "mining_damage_multiplier_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.mining_damage_multiplier_modifier_mod",
+    "mining_damage_multiplier",
+    1,
+  ),
+  postModStatDef(
+    "mining_damage_multiplier_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.mining_damage_multiplier_post_mod",
+    "weapon",
+    "mining_damage_multiplier",
+    ["mining_damage_multiplier_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "surfaceelement_damage_multiplier_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.surfaceelement_damage_multiplier_modifier_mod",
+    "surfaceelement_damage_multiplier",
+    1,
+  ),
+  postModStatDef(
+    "surfaceelement_damage_multiplier_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.surfaceelement_damage_multiplier_post_mod",
+    "weapon",
+    "surfaceelement_damage_multiplier",
+    ["surfaceelement_damage_multiplier_modifier_mod"],
+    "multiply",
+  ),
+  // heat_initial/heat_value: the OTHER direction from every stat above --
+  // a real chassis-integrated equivalent exists (weapon_heat_modifier,
+  // the same chassis mock heat_per_second's own formula already uses)
+  // but there's no real PLAYER-installed mod for either (confirmed: no
+  // "heatgeneration" target_stat exists anywhere in equipmentmods.xml's
+  // own real vocabulary -- only the invented synthetic one
+  // parse_chassis_integrated_mods() uses for the chassis-integrated case,
+  // which always lands in the "chassis" slot, never "standard" -- see
+  // that function's own docstring in generate_ships_table.py). So these
+  // two skip Mod Modifier entirely (it would always read a pointless
+  // constant 1) and mock_ref "chassis:weapon_heat_modifier" DIRECTLY
+  // inside their own Post Mod formula -- no intermediate "Chassis
+  // Modifier" stat on weapon for either, same cleanup and same reasoning
+  // already applied to shield's own capacity/rate/delay modifiers (see
+  // SHIELD_STAT_DEFINITIONS' own comment, and
+  // [[project-nested-chassis-context-gap]] in memory): a separate
+  // weapon-side copy of weapon_heat_modifier would just duplicate
+  // information the chassis type already exposes directly as its own
+  // genuinely fundamental stat. Requires an EXPLICITLY configured
+  // "chassis" mock wherever this is evaluated away from a real chassis
+  // row, by the same explicit design choice -- no ambient/implicit
+  // chassis detection. `optional: true` means an unconfigured one still
+  // defaults cleanly to 1 (most ships have no real modifier at all)
+  // rather than reporting a missing mock.
+  {
+    key: "heat_initial_post_mod",
+    table: "bullets_base",
+    group: "damage",
+    labelKey: "component_analyzer.stat_labels.heat_initial_post_mod",
+    kind: "pre-derived",
+    formula: {
+      expression: "heat_initial * (chassis_modifier ? chassis_modifier : 1)",
+      variables: {
+        heat_initial: { type: "stat_ref", componentType: "weapon", statId: "heat_initial" },
+        chassis_modifier: { type: "mock_ref", mockId: "chassis:weapon_heat_modifier", optional: true },
+      },
+    },
+  },
+  {
+    key: "heat_value_post_mod",
+    table: "bullets_base",
+    group: "damage",
+    labelKey: "component_analyzer.stat_labels.heat_value_post_mod",
+    kind: "pre-derived",
+    formula: {
+      expression: "heat_value * (chassis_modifier ? chassis_modifier : 1)",
+      variables: {
+        heat_value: { type: "stat_ref", componentType: "weapon", statId: "heat_value" },
+        chassis_modifier: { type: "mock_ref", mockId: "chassis:weapon_heat_modifier", optional: true },
+      },
+    },
+  },
   statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
@@ -6691,7 +8463,7 @@ const WEAPON_STAT_DEFINITIONS = [
 // turrets_base -- core (identity/mount + aim), attack (rotation + both
 // ammunition_* mount-compatibility columns), damage (every real per-shot
 // stat, LEFT JOINed from bullets_base), economy.
-const TURRET_STAT_GROUPS = ["core", "attack", "damage", "economy"];
+const TURRET_STAT_GROUPS = [statGroup("core"), statGroup("attack"), statGroup("damage"), statGroup("economy")];
 const TURRET_STAT_DEFINITIONS = [
   statDef("mk", "turrets_base", "core", "component_analyzer.stat_labels.mk"),
   statDef("bullet_class", "turrets_base", "core", "component_analyzer.stat_labels.bullet_class"),
@@ -6721,21 +8493,1810 @@ const TURRET_STAT_DEFINITIONS = [
 // found via parse_thruster_macros() despite the above; see this session's
 // own probe that debunked the earlier "thrusters have no macro data at
 // all" assumption), economy.
-const THRUSTER_STAT_GROUPS = ["core", "flight", "economy"];
+const THRUSTER_STAT_GROUPS = [statGroup("core"), statGroup("flight"), statGroup("modifiers"), statGroup("economy")];
 const THRUSTER_STAT_DEFINITIONS = [
   statDef("mk", "thrusters_base", "core", "component_analyzer.stat_labels.mk"),
   thrusterClassStatDef("thruster_class", "thrusters_base", "core", "component_analyzer.stat_labels.thruster_class"),
   statDef("size", "thrusters_base", "core", "component_analyzer.stat_labels.size"),
   compatibilityStatDef("compatibility", "thrusters_base", "core", "component_analyzer.stat_labels.compatibility"),
+  // thrust_strafe/pitch/yaw/roll: NOT relabeled "... Base" despite having
+  // their own mod-modified siblings below, same reasoning as engine's own
+  // thrust_forward (see ENGINE_STAT_DEFINITIONS' own comment).
   statDef("thrust_strafe", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_strafe"),
   statDef("thrust_pitch", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_pitch"),
   statDef("thrust_yaw", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_yaw"),
   statDef("thrust_roll", "thrusters_base", "flight", "component_analyzer.stat_labels.thrust_roll"),
+  // Mod Lab support for a thruster row applies an ENGINE-category mod (see
+  // MOD_LAB_COMPONENT_TYPE_MAP's own comment: "thrust_class" maps to
+  // "engine" since both share equipmentmods.xml's single <engine> category
+  // -- there's no separate <thruster> category in the game's own mod
+  // data). That mod's own rotationthrust/strafethrust/strafeacc effects
+  // target exactly these 4 columns (see
+  // equipment_mod_target_mappings.json's own engine.rotationthrust/
+  // strafethrust/strafeacc entries) -- modEffectValueForColumn() matches
+  // purely on `real_column` text, with no awareness of which table a
+  // modifierModStatDef happens to be declared on, so registering these
+  // here (on thrusters_base, reading THIS row's own applied "standard"
+  // mod via mod_modifier_ref) resolves correctly with no cross-component
+  // lookup needed at all -- the mod really is applied directly to this
+  // same thruster row, the game's own data model just happens to call
+  // that row's underlying macro class "engine". Previously missing
+  // entirely, which is why neither a mod's rotation/strafe effect nor any
+  // Post Mod value ever showed up on a thruster row, and why yaw_rate/
+  // pitch_rate/roll_rate/vertical_strafe_speed/horizontal_strafe_speed
+  // (CROSS_COMPONENT_FLIGHT_STATS below) never reflected one either.
+  modifierModStatDef(
+    "thrust_strafe_modifier_mod",
+    "thrusters_base",
+    "modifiers",
+    "component_analyzer.stat_labels.thrust_strafe_modifier_mod",
+    "thrust_strafe",
+    1,
+  ),
+  postModStatDef(
+    "thrust_strafe_post_mod",
+    "thrusters_base",
+    "flight",
+    "component_analyzer.stat_labels.thrust_strafe_post_mod",
+    "thruster",
+    "thrust_strafe",
+    ["thrust_strafe_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "thrust_pitch_modifier_mod",
+    "thrusters_base",
+    "modifiers",
+    "component_analyzer.stat_labels.thrust_pitch_modifier_mod",
+    "thrust_pitch",
+    1,
+  ),
+  postModStatDef(
+    "thrust_pitch_post_mod",
+    "thrusters_base",
+    "flight",
+    "component_analyzer.stat_labels.thrust_pitch_post_mod",
+    "thruster",
+    "thrust_pitch",
+    ["thrust_pitch_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "thrust_yaw_modifier_mod",
+    "thrusters_base",
+    "modifiers",
+    "component_analyzer.stat_labels.thrust_yaw_modifier_mod",
+    "thrust_yaw",
+    1,
+  ),
+  postModStatDef(
+    "thrust_yaw_post_mod",
+    "thrusters_base",
+    "flight",
+    "component_analyzer.stat_labels.thrust_yaw_post_mod",
+    "thruster",
+    "thrust_yaw",
+    ["thrust_yaw_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "thrust_roll_modifier_mod",
+    "thrusters_base",
+    "modifiers",
+    "component_analyzer.stat_labels.thrust_roll_modifier_mod",
+    "thrust_roll",
+    1,
+  ),
+  postModStatDef(
+    "thrust_roll_post_mod",
+    "thrusters_base",
+    "flight",
+    "component_analyzer.stat_labels.thrust_roll_post_mod",
+    "thruster",
+    "thrust_roll",
+    ["thrust_roll_modifier_mod"],
+    "multiply",
+  ),
   statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
   buildMethodStatDef("production_method", "equipment_wares_base", "economy", "component_analyzer.stat_labels.production_method"),
 ];
+
+// ---- Statistics Lab: cross-component flight-performance stats (GitHub
+// issue #26) ----
+// Reverse-engineered from the game's own UI code, not guessed:
+// ui/addons/ego_detailmonitor/menu_encyclopedia.lua's "Ships" page computes
+// exactly these numbers (as a best-compatible-component estimate for a
+// ship with no fixed loadout yet) via this same arithmetic -- speed =
+// thrust/drag (a terminal-velocity model: steady speed where drag force
+// cancels thrust), acceleration = thrust/mass (plain F = ma), turn rate =
+// thrust/drag converted rad->deg (math.js's own `pi` constant, not a
+// variable -- no source needed for it). The live in-game number for an
+// actual owned ship instead comes from an opaque native call
+// (GetLoadoutStatistics5) this app has no way to inspect, but every input
+// below is a column this app already extracts, and this is EGOSOFT's own
+// formula, not an approximation of one.
+//
+// None of these belongs to just one component type -- max_speed is a
+// property of a (chassis, engine) PAIR (drag/mass live on the ship,
+// thrust lives on the engine), not of either one alone, and the same is
+// true of the turn-rate/strafe stats for a (chassis, thruster) pair. So
+// each one below is registered on EVERY component type that actually
+// contributes an input to it (see each entry's own `appliesTo`), not just
+// chassis -- selecting it from an Engines table answers "how fast would a
+// ship with this engine go", exactly as selecting it from a Ships table
+// answers "how fast would this ship go with a given engine". This is the
+// app-authored (kind: "pre-derived", locked) counterpart to a user-created
+// family (customStatFamilies, see its own comment above) -- same
+// crossComponentFormula()/statDefFromFamily() shape, just baked directly
+// into each catalog's own definitions array at load time instead of
+// generated live through statCatalogForComponentType().
+// UPDATE (2026-10-25, user call): every reference below to a stat that
+// now has its own Post Mod sibling (see SHIELD_STAT_DEFINITIONS' own
+// "worked example" comment and [[project-mod-modified-stats-architecture]]
+// in memory) was repointed to that Post Mod stat instead of the plain
+// base one -- this is what makes a real/mocked engine's own Mass Mod,
+// Drag Mod, etc. actually show up in Max Speed/Max Acceleration/turn
+// rates/etc., not just on the base stat's own column. Deliberately NOT
+// touched: `engines`/`shields` (plain mount-slot counts, never moddable).
+//
+// UPDATE (2026-10-28): `thrust_yaw`/`thrust_pitch`/`thrust_roll`/
+// `thrust_strafe` (thruster's own columns) NOW have real Post Mod
+// siblings too (see THRUSTER_STAT_DEFINITIONS) and yaw_rate/pitch_rate/
+// roll_rate/vertical_strafe_speed/horizontal_strafe_speed/
+// strafe_acceleration below were repointed to them, same as every other
+// Post Mod sweep above. This turned out NOT to need the cross-component
+// mod lookup [[project-nested-chassis-context-gap]] once worried about --
+// MOD_LAB_COMPONENT_TYPE_MAP already lets a THRUSTER row itself take an
+// "engine"-category mod (the game's own data has no separate <thruster>
+// mod category -- every thruster macro's own class is literally
+// "engine"), so the mod really is applied directly to the thruster's own
+// row, not some other component's; modEffectValueForColumn() matches
+// purely on `real_column` text with no awareness of which table declared
+// the modifierModStatDef, so thrust_yaw_modifier_mod etc. reading THIS
+// row's own applied mod (via the ordinary same-row mod_modifier_ref path)
+// just works.
+const CROSS_COMPONENT_FLIGHT_STATS = [
+  {
+    key: "max_speed",
+    labelKey: "component_analyzer.stat_labels.max_speed",
+    expression: "thrust_forward_post_mod * engines / physics_drag_forward_post_mod",
+    variables: {
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_drag_forward_post_mod: { componentType: "chassis", statId: "physics_drag_forward_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "core" },
+  },
+  {
+    key: "boost_speed",
+    labelKey: "component_analyzer.stat_labels.boost_speed",
+    // boost_thrust is a multiplier factor on thrust_forward, not an
+    // absolute thrust value on its own -- see menu_encyclopedia.lua's own
+    // "multiply_thrust" handling.
+    expression: "boost_thrust_post_mod * thrust_forward_post_mod * engines / physics_drag_forward_post_mod",
+    variables: {
+      boost_thrust_post_mod: { componentType: "engine", statId: "boost_thrust_post_mod" },
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_drag_forward_post_mod: { componentType: "chassis", statId: "physics_drag_forward_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "boost" },
+  },
+  {
+    key: "travel_speed",
+    labelKey: "component_analyzer.stat_labels.travel_speed",
+    expression: "travel_thrust_post_mod * thrust_forward_post_mod * engines / physics_drag_forward_post_mod",
+    variables: {
+      travel_thrust_post_mod: { componentType: "engine", statId: "travel_thrust_post_mod" },
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_drag_forward_post_mod: { componentType: "chassis", statId: "physics_drag_forward_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "travel" },
+  },
+  {
+    key: "max_acceleration",
+    labelKey: "component_analyzer.stat_labels.max_acceleration",
+    // Divided by mass, not drag -- plain F = ma, unlike the three speed
+    // stats above (each a terminal-velocity thrust/drag ratio instead).
+    // Two genuinely different physical quantities that happen to share
+    // the same thrust_forward/engines inputs.
+    expression: "thrust_forward_post_mod * engines / physics_mass_post_mod",
+    variables: {
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_mass_post_mod: { componentType: "chassis", statId: "physics_mass_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "core" },
+  },
+  {
+    key: "yaw_rate",
+    labelKey: "component_analyzer.stat_labels.yaw_rate",
+    // CONFIRMED 2026-10-27 against 12 real in-game ship-builder screenshots
+    // (Irukandji + Gladius, all 6 S thruster types each -- 36 yaw/pitch/roll
+    // data points) -- thrust/drag alone matches the real Yaw/Pitch/Roll
+    // Speed shown in the loadout editor to within 0.1 deg/s. The formula
+    // previously also multiplied by 180/pi (a radians-to-degrees
+    // conversion), which inflated every prediction by ~57x and was never
+    // actually confirmed against real data -- that factor is wrong and has
+    // been removed.
+    expression: "thrust_yaw_post_mod / physics_drag_yaw_post_mod",
+    variables: {
+      thrust_yaw_post_mod: { componentType: "thruster", statId: "thrust_yaw_post_mod" },
+      physics_drag_yaw_post_mod: { componentType: "chassis", statId: "physics_drag_yaw_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  {
+    key: "pitch_rate",
+    labelKey: "component_analyzer.stat_labels.pitch_rate",
+    // CONFIRMED 2026-10-27 -- see yaw_rate's comment just above (same
+    // verification pass, same fix: dropped the wrong *180/pi factor).
+    expression: "thrust_pitch_post_mod / physics_drag_pitch_post_mod",
+    variables: {
+      thrust_pitch_post_mod: { componentType: "thruster", statId: "thrust_pitch_post_mod" },
+      physics_drag_pitch_post_mod: { componentType: "chassis", statId: "physics_drag_pitch_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  {
+    key: "roll_rate",
+    labelKey: "component_analyzer.stat_labels.roll_rate",
+    // menu_encyclopedia.lua's own "Ships" page never actually displays a
+    // roll rate (only yaw/pitch) -- this extrapolates the identical
+    // thrust/drag pattern onto the roll axis. CONFIRMED 2026-10-27 against
+    // real in-game Roll Speed values in the ship-builder's loadout editor
+    // (see yaw_rate's comment) -- same thrust/drag formula, same dropped
+    // *180/pi factor, matches to within 0.1 deg/s across both ships and all
+    // 6 S thruster types.
+    expression: "thrust_roll_post_mod / physics_drag_roll_post_mod",
+    variables: {
+      thrust_roll_post_mod: { componentType: "thruster", statId: "thrust_roll_post_mod" },
+      physics_drag_roll_post_mod: { componentType: "chassis", statId: "physics_drag_roll_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  {
+    key: "vertical_strafe_speed",
+    labelKey: "component_analyzer.stat_labels.vertical_strafe_speed",
+    // Both strafe axes share the thruster's own single thrust_strafe_post_mod
+    // value -- only the chassis's own drag divisor differs per axis,
+    // matching menu_encyclopedia.lua's own two separate dragproperty
+    // entries (drag_vertical/drag_horizontal) for what is, on the
+    // thruster side, the exact same thrust_strafe input both times.
+    expression: "thrust_strafe_post_mod / physics_drag_vertical_post_mod",
+    variables: {
+      thrust_strafe_post_mod: { componentType: "thruster", statId: "thrust_strafe_post_mod" },
+      physics_drag_vertical_post_mod: { componentType: "chassis", statId: "physics_drag_vertical_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  {
+    key: "horizontal_strafe_speed",
+    labelKey: "component_analyzer.stat_labels.horizontal_strafe_speed",
+    expression: "thrust_strafe_post_mod / physics_drag_horizontal_post_mod",
+    variables: {
+      thrust_strafe_post_mod: { componentType: "thruster", statId: "thrust_strafe_post_mod" },
+      physics_drag_horizontal_post_mod: { componentType: "chassis", statId: "physics_drag_horizontal_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  // ---- Ship Statistics gap stats (Raptor screenshot comparison, see
+  // GitHub issue #26's own "phase 1" notes) -- confidently F=ma/drag
+  // extensions of the speed formulas above, not independently confirmed
+  // against real game code the way those were, but high-confidence by
+  // analogy (same inputs, same physical model). ----
+  {
+    // "ship_" prefix (unlike travel_acceleration/strafe_acceleration
+    // below) because plain "boost_acceleration" already names a real
+    // FUNDAMENTAL engine stat -- the raw <boost acceleration="..."/>
+    // XML value itself, a per-engine multiplier factor, NOT the ship's
+    // own resulting m/s² this formula computes.
+    key: "ship_boost_acceleration",
+    labelKey: "component_analyzer.stat_labels.ship_boost_acceleration",
+    // CONFIRMED (Raptor phase-3 comparison, GitHub issue #26): the first
+    // attempt at this formula reused boost_thrust (boost_speed's own
+    // multiplier) and was wrong by ~2x. The raw engine's own
+    // boost_acceleration field -- a SEPARATE column from boost_thrust,
+    // easy to conflate since both are "boost" multipliers but for
+    // different quantities -- is the right input: max_acceleration's own
+    // F=ma value times this field reproduced the real number to within
+    // display rounding (27.14 computed vs. 27 shown).
+    expression: "boost_acceleration_post_mod * thrust_forward_post_mod * engines / physics_mass_post_mod",
+    variables: {
+      boost_acceleration_post_mod: { componentType: "engine", statId: "boost_acceleration_post_mod" },
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_mass_post_mod: { componentType: "chassis", statId: "physics_mass_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "boost" },
+  },
+  {
+    // "_test" (unlike ship_boost_acceleration/strafe_acceleration, both
+    // confirmed) -- CONFIRMED WRONG as of the Raptor phase-3 comparison
+    // (GitHub issue #26): this travel_thrust-based F=ma shape (the same
+    // pattern that worked for boost_speed/max_speed) predicted 275.9 m/s²
+    // against a real 28 -- off by ~10x, not a rounding-sized gap.
+    // Re-tested treating travel_thrust as a multiplier onto
+    // max_acceleration directly (the same restructuring that fixed
+    // ship_boost_acceleration above, in case travel_thrust turned out to
+    // be the wrong INPUT the way boost_thrust was) -- algebraically
+    // identical to this same expression, so that didn't move the number
+    // at all. Unlike boost, there's no separate "travel_acceleration"-
+    // named raw column on engines_base to swap in either. See
+    // travel_acceleration_test_2 below for the other candidate found so
+    // far.
+    key: "travel_acceleration_test_1",
+    labelKey: "component_analyzer.stat_labels.travel_acceleration_test_1",
+    expression: "travel_thrust_post_mod * thrust_forward_post_mod * engines / physics_mass_post_mod",
+    variables: {
+      travel_thrust_post_mod: { componentType: "engine", statId: "travel_thrust_post_mod" },
+      thrust_forward_post_mod: { componentType: "engine", statId: "thrust_forward_post_mod" },
+      engines: { componentType: "chassis", statId: "engines" },
+      physics_mass_post_mod: { componentType: "chassis", statId: "physics_mass_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "travel" },
+  },
+  {
+    // CONFIRMED (2026-10-26, GitHub issue #26): travel_speed divided by
+    // travel_attack, no F=ma/mass/engine-count term at all (unlike
+    // test_1, and unlike ship_boost_acceleration/strafe_acceleration) --
+    // Travel Acceleration turns out NOT to be a real physics
+    // acceleration, just this flat per-engine ratio, which is why it
+    // never changes with engine count (the Asp's 2x engines and the
+    // Phoenix E's 3x engines both show their single engine's own
+    // tooltip value unchanged at the ship level). Validated against 7
+    // real data points total: the original Raptor (XL) plus 6 more
+    // engines spanning S/M/L sizes and all 3 engine roles (Travel/
+    // Combat/All-round) on the Asp (S) and Dragon (M) and Phoenix E (L)
+    // -- every one landed within 0.1%-0.9% of the real displayed value,
+    // fully explained by display-rounding of the whole-number Travel
+    // Speed/Travel Acceleration inputs. Kept the key name unchanged
+    // (still says "_test_2") to avoid invalidating any saved stat-set
+    // selection that already has it picked -- only the label (no more
+    // "(Test 2)") and this comment changed; see travel_acceleration_test_1
+    // just above, which stays as a clearly-marked dead end, same
+    // convention as missile_pitch_rate_test.
+    key: "travel_acceleration_test_2",
+    labelKey: "component_analyzer.stat_labels.travel_acceleration_test_2",
+    expression: "travel_speed / travel_attack_post_mod",
+    variables: {
+      travel_speed: { componentType: "engine", statId: "travel_speed" },
+      travel_attack_post_mod: { componentType: "engine", statId: "travel_attack_post_mod" },
+    },
+    appliesTo: { chassis: "flight", engine: "travel" },
+  },
+  {
+    key: "strafe_acceleration",
+    labelKey: "component_analyzer.stat_labels.strafe_acceleration",
+    // Only ONE strafe acceleration (unlike speed's own vertical/horizontal
+    // split) -- acceleration is F/mass, and mass isn't split by axis the
+    // way drag is, so both axes always come out identical. Matches the
+    // Ship Statistics panel's own single "Strafe Acceleration" row.
+    expression: "thrust_strafe_post_mod / physics_mass_post_mod",
+    variables: {
+      thrust_strafe_post_mod: { componentType: "thruster", statId: "thrust_strafe_post_mod" },
+      physics_mass_post_mod: { componentType: "chassis", statId: "physics_mass_post_mod" },
+    },
+    appliesTo: { chassis: "flight", thruster: "flight" },
+  },
+  {
+    key: "boost_recharge_rate",
+    labelKey: "component_analyzer.stat_labels.boost_recharge_rate",
+    // Not actually cross-component (boost_recharge already lives on the
+    // engine itself) -- registered through this same mechanism anyway
+    // for one shared place to keep every flight-gap stat, rather than a
+    // separate single-variable-formula path. Confirmed shape (not
+    // hypothesis): boost_recharge is already a real "seconds to reach
+    // full boost" value, so 100/that is just a plain unit conversion to
+    // %/s, nothing to reverse-engineer.
+    expression: "100 / boost_recharge",
+    variables: {
+      boost_recharge: { componentType: "engine", statId: "boost_recharge" },
+    },
+    appliesTo: { engine: "boost" },
+  },
+];
+
+// COMPONENT_TYPE_PRIMARY_TABLE/crossComponentFormula() are declared once,
+// up near customStatFamilies (needed there for the same reason) -- reused
+// here as-is rather than redeclared.
+const COMPONENT_TYPE_DEFINITION_ARRAYS = {
+  chassis: CHASSIS_STAT_DEFINITIONS,
+  engine: ENGINE_STAT_DEFINITIONS,
+  thruster: THRUSTER_STAT_DEFINITIONS,
+  weapon: WEAPON_STAT_DEFINITIONS,
+  turret: TURRET_STAT_DEFINITIONS,
+};
+
+// Shared push-into-catalog step for every "app-authored pre-derived stat
+// registered on N component types" array (CROSS_COMPONENT_FLIGHT_STATS
+// above, COMBAT_DERIVED_STATS below, and CHASSIS_AGGREGATE_STATS further
+// down) -- one place for the {key, table, group, labelKey, kind, formula}
+// shape every one of them builds identically.
+function registerCrossComponentStats(stats) {
+  for (const stat of stats) {
+    for (const [componentType, group] of Object.entries(stat.appliesTo)) {
+      COMPONENT_TYPE_DEFINITION_ARRAYS[componentType].push({
+        key: stat.key,
+        table: COMPONENT_TYPE_PRIMARY_TABLE[componentType],
+        group,
+        labelKey: stat.labelKey,
+        descriptionKey: stat.descriptionKey,
+        kind: "pre-derived",
+        formula: crossComponentFormula(componentType, stat.expression, stat.variables),
+      });
+    }
+  }
+}
+registerCrossComponentStats(CROSS_COMPONENT_FLIGHT_STATS);
+
+// ---- Weapon/turret combat stats (GitHub issue #26's own "phase 1/2"
+// notes -- the Raptor screenshot's own Burst/Sustained Weapon Damage
+// rows) -- registered on BOTH weapon and turret, since both catalogs
+// LEFT JOIN the exact same bullets_base columns the exact same way (see
+// bulletDamageStatDefs()'s own comment). Every entry here is same-type
+// only (weapon->weapon, turret->turret -- never cross-references the
+// other), so crossComponentFormula() always produces plain stat_refs for
+// these regardless of which of the two catalogs it's generated for --
+// registerCrossComponentStats() is reused purely for its shared
+// push-into-catalog plumbing, not because any mock_ref is actually needed
+// here. Several entries reference an EARLIER entry's own `key` as a
+// same-type stat_ref (e.g. hull_dps reads rate_of_fire) -- this resolves
+// recursively through resolveStatValue()'s own kind dispatch (a
+// "pre-derived" stat's formula can reference another "pre-derived" stat
+// exactly like a "fundamental" one), so each formula here stays a small,
+// readable step rather than one giant expression repeating every input.
+//
+// Confidence varies sharply within this list -- see each entry's own
+// comment -- from "confirmed, not a formula to verify" (rate_of_fire is
+// just resolving reload_rate/reload_time's own documented mutual
+// exclusivity) down to "one of four competing hypotheses, name says so"
+// (the sustained_dps_test_* quartet). None of the sustained_dps_test_*
+// keys should be treated as this app's real answer for Sustained DPS
+// until GitHub issue #26's own phase-3 in-game comparison confirms one.
+const COMBAT_DERIVED_STATS = [
+  {
+    key: "rate_of_fire",
+    labelKey: "component_analyzer.stat_labels.rate_of_fire",
+    // reload_rate (shots/sec) and reload_time (sec/shot) are mutually
+    // exclusive per row (see generate_ships_table.py's own schema
+    // comment) -- math.js's ternary short-circuits on a falsy (null/
+    // undefined) condition without ever evaluating the untaken branch,
+    // confirmed empirically (a bare `reload_rate * x` throws instead when
+    // reload_rate is null, since arithmetic can't coerce null the way a
+    // condition check can) -- so this never attempts 1/null. No real row
+    // has reload_rate=0 (confirmed against the current dataset), so the
+    // falsy check is safe, not just convenient.
+    // componentType: "self" (not a literal "weapon") on every variable in
+    // this stat and the three below it -- all four are registered on BOTH
+    // weapon and turret (see crossComponentFormula()'s own comment on
+    // "self" for why a literal "weapon" here would have been a real bug:
+    // confirmed the hard way when generating the TURRET version of these
+    // four).
+    // Missile turrets (no bullet, so bullet_speed is null) fire at their
+    // missile mock's own reload_time instead.
+    //
+    // FIXED (GitHub issue #26 phase-10, S/M Blast Mortar + BOR M Ion
+    // Atomiser): the branch used to key off damage_value, which broke for
+    // every real direct weapon/turret whose bullet deals ONLY area damage
+    // (a null damage_value, same as a missile turret) -- it was wrongly
+    // falling through to the missile branch and reporting a blank rate_of_fire
+    // for a weapon that was never going to have a missile mock configured.
+    // bullet_speed is a safer "does this row have a real bullet at all"
+    // signal: non-null on every real bullet in the dataset (area-damage-only
+    // included), null only via the LEFT JOIN miss a genuine missile-firing
+    // turret produces (no bullets_base row to join at all) and on one
+    // visibly-broken, stat-less macro (weapon_xen_m_mining_02_mk1).
+    //
+    // CONFIRMED (GitHub issue #26 phase-10, PAR M Mass Driver Mk2
+    // Encyclopedia page): charge_time (a bullets_base column that sat
+    // completely unused until now, only ever non-null alongside
+    // reload_time, never reload_rate -- confirmed against the current
+    // dataset) must be added to reload_time before inverting. The
+    // Encyclopedia's own "Rate of Fire" is 0.26/s, which 1/reload_time
+    // alone gets wrong (1/3.4 = 0.294) but 1/(reload_time + charge_time)
+    // matches exactly (1/(3.4+0.5) = 0.2564 -> displays as 0.26). charge_time
+    // is null (falls back to 0) for every weapon without an explicit
+    // charge-up, so this is a no-op everywhere else.
+    expression:
+      "bullet_speed ? (reload_rate ? reload_rate : 1 / (reload_time + (charge_time ? charge_time : 0))) : 1 / missile_reload_time",
+    variables: {
+      bullet_speed: { componentType: "self", statId: "bullet_speed" },
+      missile_reload_time: { componentType: "missile", statId: "reload_time", whenNull: "bullet_speed" },
+      reload_rate: { componentType: "self", statId: "reload_rate" },
+      reload_time: { componentType: "self", statId: "reload_time" },
+      charge_time: { componentType: "self", statId: "charge_time" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "weapon_effective_rate_of_fire",
+    labelKey: "component_analyzer.stat_labels.weapon_effective_rate_of_fire",
+    // CONFIRMED (GitHub issue #26 phase-9, 7 real Hydra tooltips): direct
+    // weapons have the EXACT SAME ammo-clip mechanic as
+    // turret_effective_rate_of_fire above -- the bullet itself carries
+    // <ammunition value="N" reload="R"/> (already extracted into
+    // bullets_base.ammunition_value/ammunition_reload for the missile-
+    // turret clip support), and the tooltip's displayed "Rate of Fire" is
+    // this clip-adjusted rate, not the raw reload_rate/reload_time.
+    // Matches 6 of 7 test weapons exactly (ARG Ion Blaster 0.45, Pulse
+    // Laser 3.15, Shard Battery 0.51, Boson Lance 0.10, Bolt Repeater
+    // 6.94 -- all truncated to 2 decimals, not rounded); the 7th (Beam
+    // Emitter) has no clip at all (null ammunition_value) so just falls
+    // through to the base rate, consistent with every other clip-less
+    // weapon/turret. This supersedes turret_effective_rate_of_fire's own
+    // older comment claiming direct weapons were clip-limited by heat
+    // instead and hadn't been compared -- they weren't, now they have
+    // been, and it's the same clip mechanic, not a heat one. WEAPON-ONLY:
+    // turrets keep using turret_effective_rate_of_fire, which also
+    // handles the missile-turret branch this stat doesn't need (a direct
+    // weapon always has a real bullet).
+    //
+    // FIXED (GitHub issue #26 phase-10): `(ammunition_value - 1) /
+    // rate_of_fire` is mathematically 0 whenever ammunition_value is 1 (a
+    // single-round "clip" has no gaps BETWEEN shots to space out at
+    // rate_of_fire at all) -- rate_of_fire's own value is irrelevant in
+    // that case. But naively computing it anyway meant a weapon with no
+    // reload_rate/reload_time/charge_time at all (e.g. S Boson Lance Mk1,
+    // governed purely by ammunition_reload) had an undefined rate_of_fire
+    // poison the whole result with NaN, even though the broken term should
+    // never have mattered. `ammunition_value > 1 ? ... : 0` skips the
+    // division entirely for a 1-round clip instead of trusting rate_of_fire
+    // to cancel itself out.
+    expression: "ammunition_value ? ammunition_value / ((ammunition_value > 1 ? (ammunition_value - 1) / rate_of_fire : 0) + ammunition_reload) : rate_of_fire",
+    variables: {
+      ammunition_value: { componentType: "self", statId: "ammunition_value" },
+      ammunition_reload: { componentType: "self", statId: "ammunition_reload" },
+      rate_of_fire: { componentType: "self", statId: "rate_of_fire" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "hull_damage_per_shot",
+    labelKey: "component_analyzer.stat_labels.hull_damage_per_shot",
+    // CONFIRMED against 7 real turret tooltips (GitHub issue #26 phase-3
+    // Thresher comparison), PLUS two real Encyclopedia "Damage Breakdown
+    // per Hit" entries (ARG M Scalar Aperture Turret, TER M Electromagnetic
+    // Turret -- phase-4): a shot's damage is damage_value multiplied by
+    // BOTH bullet_amount (pellets per shot -- the Shard turret's 60 x 6 =
+    // 360 MJ) and bullet_barrelamount (simultaneous barrels -- the Plasma
+    // turret's 750 x 2 = 1,500 MJ), each defaulting to 1 when the bullet
+    // doesn't define one (a null column, not a real 0).
+    //
+    // NOT multiplied by bullet_lifetime, even for a BEAM bullet (a real
+    // bullet_range): the ARG Beam Turret's own tooltip shows Hull Damage
+    // 126 MJ -- damage_value alone, not 126 x 3.0s lifetime = 378 -- and
+    // the Scalar Aperture Encyclopedia entry confirms it directly (Hull
+    // Damage against an unshielded target: 200 MJ = damage_value 50 +
+    // damage_hull bonus 150, no x4.4s lifetime factor). damage_value for a
+    // beam bullet is itself a per-SECOND tick rate while the beam is
+    // firing, not a lump sum -- bullet_lifetime (how many seconds it fires
+    // per shot) only matters for the turret's own AVERAGE output over a
+    // full reload cycle, so it's folded into turret_output_mw as a duty-
+    // cycle factor instead, not into this per-hit stat (see that stat's
+    // own comment -- an earlier version of this formula multiplied by
+    // lifetime here, which happened to still produce the right MW through
+    // turret_output_mw, but reported the wrong number on its own, e.g.
+    // "378" here instead of the tooltip's actual "126").
+    //
+    // This is the UNSHIELDED hull damage: damage_value plus BOTH hull
+    // bonuses -- damage_hull (always applies, even through shields; it is
+    // also shown on its own as hull_damage_shielded_per_shot) and
+    // damage_noshield (applies only once the shields are down).
+    // CONFIRMED for noshield: BOR M Phase Turret 94 + 94 = 188 MJ hull,
+    // 94 MJ shield, 0 MJ hull-shielded (real tooltip). CONFIRMED for
+    // damage_hull (shielded bleed-through): ARG M Scalar Aperture Turret
+    // 50 + 150 = 200 MJ hull, TER M Electromagnetic Turret 102 + 68 =
+    // 170 MJ hull (both real Encyclopedia entries).
+    //
+    // AREA DAMAGE fallback (GitHub issue #26 phase-10): a handful of
+    // weapons/turrets (S/M Blast Mortar, BOR M Ion Atomiser, every Flak
+    // turret, the Xenon Seismic Charge turret) have a null damage_value and
+    // deal ONLY areadamage_value -- CONFIRMED for S Blast Mortar Mk1/Mk2
+    // (376/434 MJ, exactly areadamage_value, real Encyclopedia "Area Hull
+    // Damage (at Epicentre)"). Of the 6 real area-damage bullets in the
+    // current dataset, 5 have a null damage_value (area damage is their
+    // ONLY damage -- this fallback is exactly right for those); exactly one
+    // (the Xenon Seismic Charge turret) has BOTH a real damage_value AND a
+    // real areadamage_value simultaneously, and this formula does NOT add
+    // them -- it still prefers damage_value alone, on the reasoning that
+    // area damage splashes onto OTHER nearby targets while damage_value is
+    // what the directly-hit target takes, so they shouldn't sum into one
+    // "per-shot damage to the target I hit" figure. UNCONFIRMED against a
+    // real screenshot for that one turret specifically -- see the dedicated
+    // area_hull_damage_per_shot/area_shield_damage_per_shot stats below,
+    // which always show the raw area figure regardless of damage_value, so
+    // a mixed case like this one stays inspectable instead of silently
+    // combined or dropped.
+    //
+    // FIXED (2026-10-28, user call -- PAR M Blast Mortar Turret reported
+    // via Ship Trials): the 3 missile_* variables' own `whenNull` gate
+    // used to name only "damage_value", so a pure area-damage bullet (null
+    // damage_value, real areadamage_value -- confirmed via its own raw
+    // bullet macro: a real <areadamage value="305"/>, no <missile> element
+    // anywhere, and no real missile ware exists that's even compatible
+    // with this turret) still wrongly attempted -- and flagged as a
+    // missing mock -- a missile lookup this formula's own ternary was
+    // never actually going to use (areadamage_value already wins first).
+    // Now gated on BOTH damage_value AND areadamage_value being null (see
+    // evaluateStatFormula()'s own multi-gate whenNull support) -- the
+    // missile fallback only fires for a genuinely missile-fed turret now.
+    expression:
+      "damage_value ? (damage_value + (damage_hull ? damage_hull : 0) + (damage_noshield ? damage_noshield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? areadamage_value * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
+    variables: {
+      missile_damage: {
+        componentType: "missile",
+        statId: "explosiondamage_value",
+        whenNull: ["damage_value", "areadamage_value"],
+      },
+      missile_amount: { componentType: "missile", statId: "missile_amount", whenNull: ["damage_value", "areadamage_value"] },
+      missile_barrelamount: {
+        componentType: "missile",
+        statId: "missile_barrelamount",
+        whenNull: ["damage_value", "areadamage_value"],
+      },
+      damage_value: { componentType: "self", statId: "damage_value" },
+      damage_hull: { componentType: "self", statId: "damage_hull" },
+      damage_noshield: { componentType: "self", statId: "damage_noshield" },
+      areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      bullet_amount: { componentType: "self", statId: "bullet_amount" },
+      bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "hull_damage_shielded_per_shot",
+    labelKey: "component_analyzer.stat_labels.hull_damage_shielded_per_shot",
+    descriptionKey: "component_analyzer.stat_descriptions.hull_damage_shielded_per_shot",
+    // The tooltip's/Encyclopedia's "Hull Damage - Shielded": the hull bonus
+    // (damage_hull) is dealt to the hull on every hit even while the
+    // target's shields are up (shield bleed-through), unlike damage_value
+    // which only reaches the hull once shields are down. 0 when the
+    // bullet has no hull bonus. CONFIRMED directly against two real
+    // Encyclopedia entries: ARG M Scalar Aperture Turret 150 MJ, TER M
+    // Electromagnetic Turret 68 MJ -- both damage_hull, unmultiplied (see
+    // hull_damage_per_shot's own comment for why beam lifetime is NOT a
+    // factor here). Scales by pellets/barrels like the other per-shot
+    // stats.
+    expression:
+      "(damage_hull ? damage_hull : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+    variables: {
+      damage_hull: { componentType: "self", statId: "damage_hull" },
+      bullet_amount: { componentType: "self", statId: "bullet_amount" },
+      bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "area_hull_damage_per_shot",
+    labelKey: "component_analyzer.stat_labels.area_hull_damage_per_shot",
+    descriptionKey: "component_analyzer.stat_descriptions.area_damage_per_shot",
+    // The Encyclopedia's own "Area Hull Damage (at Epicentre)" -- ALWAYS
+    // shows the raw area-damage figure when this bullet has one, regardless
+    // of whether damage_value is also present, unlike hull_damage_per_shot
+    // above (which only falls back to area damage when damage_value is
+    // null). Exists so the one real bullet with BOTH set at once (Xenon
+    // Seismic Charge turret) stays fully inspectable rather than having its
+    // area component silently folded in or dropped -- see
+    // hull_damage_per_shot's own comment. CONFIRMED against S Blast Mortar
+    // Mk1/Mk2 (376/434 MJ, exact). 0 (not blank) for every bullet with no
+    // area damage at all, same convention as hull_damage_shielded_per_shot.
+    expression:
+      "(areadamage_value ? areadamage_value : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+    variables: {
+      areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      bullet_amount: { componentType: "self", statId: "bullet_amount" },
+      bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "area_shield_damage_per_shot",
+    labelKey: "component_analyzer.stat_labels.area_shield_damage_per_shot",
+    descriptionKey: "component_analyzer.stat_descriptions.area_damage_per_shot",
+    // The Encyclopedia's own "Area Shield Damage (at Epicentre)" -- see
+    // area_hull_damage_per_shot's own comment for why this is always
+    // visible rather than only a fallback. areadamage_shield is a bonus
+    // added on top of areadamage_value, the same relationship
+    // damage_shield has to damage_value (UNCONFIRMED for this bonus
+    // specifically -- see shield_damage_per_shot's own comment).
+    expression:
+      "(areadamage_value ? areadamage_value + (areadamage_shield ? areadamage_shield : 0) : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+    variables: {
+      areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_shield: { componentType: "self", statId: "areadamage_shield" },
+      bullet_amount: { componentType: "self", statId: "bullet_amount" },
+      bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "turret_effective_range",
+    labelKey: "component_analyzer.stat_labels.turret_effective_range",
+    // CONFIRMED against 8 real turret tooltips: a bullet with a real
+    // bullet_range (beams) reports that range directly (ARG Beam 5,000 m
+    // -> 5.0 km); every other bullet flies at bullet_speed for
+    // bullet_lifetime seconds (Plasma 1000 x 5.5 = 5.5 km, Neutron Gatling
+    // 2500 x 1.4 = 3.5, Phase 2400 x 1.6 = 3.84 -> shown 3.8). In km, like
+    // the tooltip.
+    // Missile turrets (no bullet, so bullet_speed is null) use their
+    // missile mock's own missile_range instead -- UNCONFIRMED against a
+    // real missile-turret tooltip.
+    //
+    // FIXED (GitHub issue #26 phase-10) -- same bullet_speed-not-damage_value
+    // fix as rate_of_fire above, for the same reason (a real area-damage-only
+    // bullet has a null damage_value but a perfectly real bullet_speed/
+    // bullet_lifetime of its own).
+    //
+    // ALSO registered on weapon (2026-10-26) -- every real weapon tooltip
+    // shows this exact "Effective Range" figure too (confirmed: PAR M Mass
+    // Driver Mk2 14.0 km, M Beam Emitter Mk1 5.2 km), and the formula is
+    // already fully "self"-scoped with nothing turret-specific in it (a
+    // direct weapon's own bullet_speed is always real, same as
+    // rate_of_fire's own established finding, so the missile_range branch
+    // is simply never reached there). The key keeps its old
+    // "turret_effective_range" name to avoid invalidating any saved
+    // stat-set selection that already references it -- the user-facing
+    // label was always the generic "Effective Range (km)", never
+    // turret-specific, so nothing about what's shown actually changes.
+    expression:
+      "(bullet_speed ? (bullet_range ? bullet_range : bullet_speed * bullet_lifetime) : missile_range) / 1000",
+    variables: {
+      missile_range: { componentType: "missile", statId: "missile_range", whenNull: "bullet_speed" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      bullet_speed: { componentType: "self", statId: "bullet_speed" },
+      bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "shield_damage_per_shot",
+    labelKey: "component_analyzer.stat_labels.shield_damage_per_shot",
+    // CONFIRMED: damage_shield is a BONUS added ON TOP of damage_value, not
+    // a replacement for it (the earlier version of this stat, and the
+    // community Burst-DPS thread's own ion-blaster example, both had it
+    // backwards-looking but happened to only be checked against weapons
+    // with no damage_shield at all): BOR Ion Pulse 306 + 204 = 510 MJ,
+    // ARG Beam 126 + 42 = 168 MJ, both exactly what the tooltip shows. A
+    // null damage_shield (most bullets) means no bonus, i.e. shield damage
+    // equals hull damage. NOT multiplied by beam lifetime -- see
+    // hull_damage_per_shot's own comment (CONFIRMED directly: ARG M Scalar
+    // Aperture Turret's Encyclopedia entry shows Shield Damage 50 MJ, its
+    // own damage_value with no shield bonus and no x4.4s factor).
+    // Everything else (amount/barrels) scales the same way as
+    // hull_damage_per_shot.
+    //
+    // AREA DAMAGE fallback -- see hull_damage_per_shot's own comment
+    // (same reasoning, same areadamage_value/areadamage_shield pairing as
+    // damage_value/damage_shield: a bonus added on top when present, not a
+    // replacement). UNCONFIRMED for the areadamage_shield bonus
+    // specifically (every real area-damage bullet checked so far either has
+    // it null -- S Blast Mortar -- or hasn't been screenshotted yet -- BOR M
+    // Ion Atomiser), but structurally identical to the already-confirmed
+    // damage_shield bonus.
+    expression:
+      "damage_value ? (damage_value + (damage_shield ? damage_shield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? (areadamage_value + (areadamage_shield ? areadamage_shield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
+    variables: {
+      missile_damage: {
+        componentType: "missile",
+        statId: "explosiondamage_value",
+        whenNull: ["damage_value", "areadamage_value"],
+      },
+      missile_amount: { componentType: "missile", statId: "missile_amount", whenNull: ["damage_value", "areadamage_value"] },
+      missile_barrelamount: {
+        componentType: "missile",
+        statId: "missile_barrelamount",
+        whenNull: ["damage_value", "areadamage_value"],
+      },
+      damage_value: { componentType: "self", statId: "damage_value" },
+      damage_shield: { componentType: "self", statId: "damage_shield" },
+      areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_shield: { componentType: "self", statId: "areadamage_shield" },
+      bullet_amount: { componentType: "self", statId: "bullet_amount" },
+      bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
+    },
+    appliesTo: { weapon: "damage", turret: "damage" },
+  },
+  {
+    key: "hull_dps",
+    labelKey: "component_analyzer.stat_labels.hull_dps",
+    // CONFIRMED (GitHub issue #26 phase-9): per-shot damage times the
+    // CLIP-AWARE weapon_effective_rate_of_fire, not the raw rate_of_fire
+    // -- the tooltip's own "Burst Weapon Damage" is the clip-adjusted
+    // figure (e.g. Bolt Repeater 6.94/s x 32 = 222.1 MW matches the real
+    // 222 MW exactly; the raw 11.5/s rate would give 368, clearly wrong).
+    // WEAPON-ONLY: a turret version would be a strict subset of
+    // turret_output_mw with nothing of its own to confirm against --
+    // dropped from turrets for that reason (GitHub issue #26 phase-4).
+    //
+    // The `(bullet_range ? bullet_lifetime : 1)` factor (GitHub issue #26
+    // phase-9) is the same beam duty-cycle fix turret_output_mw already
+    // has: hull_damage_per_shot is a per-SECOND rate while a beam bullet
+    // is actually firing, not a lump sum, so DPS needs how long it fires
+    // each cycle folded back in -- a non-beam bullet (bullet_range null)
+    // gets a factor of 1, unaffected.
+    //
+    // FIXED (2026-10-27, user report -- S Burst Ray showing blank Burst
+    // Weapon Damage): `bullet_range` alone isn't a reliable "this is a
+    // beam" signal -- confirmed via S Burst Ray's own raw bullet macro, a
+    // genuinely discrete projectile (speed="6000", an ordinary travel
+    // speed, not light-speed like every real beam's own ~3e8) that still
+    // defines a real `range` attribute (its own max travel distance) with
+    // NO `lifetime` at all, unlike every actual beam bullet checked (M
+    // Beam Emitter, KHA Kyon Emitter, ...), which always has both. The
+    // inner `(bullet_lifetime ? bullet_lifetime : 1)` only changes
+    // behavior for this edge case -- every real beam's own bullet_lifetime
+    // is already populated and unaffected, so this falls back to a
+    // factor of 1 (hull_damage_per_shot treated as a lump-sum per-shot
+    // amount, which is exactly right for a non-beam bullet) instead of
+    // multiplying by a null and silently producing no value at all.
+    expression: "weapon_effective_rate_of_fire * hull_damage_per_shot * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+    variables: {
+      weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
+      hull_damage_per_shot: { componentType: "self", statId: "hull_damage_per_shot" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "shield_dps",
+    labelKey: "component_analyzer.stat_labels.shield_dps",
+    // WEAPON-ONLY -- see hull_dps's own comment, including the clip-aware
+    // rate and the beam duty-cycle factor (and its own null-safe
+    // bullet_lifetime fallback, same reason, same fix).
+    expression: "weapon_effective_rate_of_fire * shield_damage_per_shot * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+    variables: {
+      weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
+      shield_damage_per_shot: { componentType: "self", statId: "shield_damage_per_shot" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "turret_effective_rate_of_fire",
+    labelKey: "component_analyzer.stat_labels.turret_effective_rate_of_fire",
+    // CONFIRMED against 6 real tooltip "Rate of Fire" numbers (0.20 Plasma,
+    // 0.54 Shard, 0.06 Mass Driver, 6.45 Gatling, 0.30 Ion Pulse -- each
+    // TRUNCATED to 2 decimals, not rounded): a turret with an ammo clip
+    // (ammunition_value shots, then an ammunition_reload pause) fires
+    // ammunition_value shots per cycle, but the first shot has no wait
+    // before it -- only the (ammunition_value - 1) gaps BETWEEN shots, at
+    // the base rate, plus the one reload. So
+    //   rate = n / ((n - 1) / base_rate + ammunition_reload)
+    // e.g. Plasma: 2 / (1 / (1/3.0) + 7.0) = 2 / 10 = 0.20. A turret with
+    // no clip at all (null ammunition_value: every beam, the Mass Driver)
+    // just fires at its base rate. Direct weapons have the identical clip
+    // mechanic on their own bullet -- see weapon_effective_rate_of_fire
+    // above, which reuses this same formula weapon-side (this stat stays
+    // turret-only since it also carries the missile-turret branch below,
+    // which a direct weapon never needs).
+    // Missile turrets use the same clip formula with their missile mock's
+    // own ammunition_value/ammunition_reload (a missile with no reload,
+    // e.g. a guided one that is 1 per clip, just fires at its base rate).
+    // Reproduces the Raptor's L dumbfire turret by hand: 4 x 1,000 damage,
+    // clip 5 / 12 s reload, 1.2 s between shots -> 1,190.5 MW.
+    //
+    // FIXED (GitHub issue #26 phase-10) -- same bullet_speed-not-damage_value
+    // fix as rate_of_fire above: a real area-damage-only turret (the Flak
+    // family, PAR M Blast Mortar Turret) has a null damage_value but a real
+    // bullet of its own, and was wrongly falling through to the missile
+    // branch and reporting blank.
+    //
+    // FIXED (GitHub issue #26 phase-10) -- same ammunition_value > 1 guard
+    // as weapon_effective_rate_of_fire above, on both the direct-bullet and
+    // missile-clip terms: a 1-round clip has no gaps between shots to space
+    // out at rate_of_fire at all, so rate_of_fire's own value shouldn't be
+    // able to break the result when it's undefined.
+    expression:
+      "bullet_speed ? (ammunition_value ? ammunition_value / ((ammunition_value > 1 ? (ammunition_value - 1) / rate_of_fire : 0) + ammunition_reload) : rate_of_fire) : (missile_ammunition_reload ? missile_ammunition_value / ((missile_ammunition_value > 1 ? (missile_ammunition_value - 1) / rate_of_fire : 0) + missile_ammunition_reload) : rate_of_fire)",
+    variables: {
+      bullet_speed: { componentType: "self", statId: "bullet_speed" },
+      missile_ammunition_value: { componentType: "missile", statId: "ammunition_value", whenNull: "bullet_speed", optional: true },
+      missile_ammunition_reload: { componentType: "missile", statId: "ammunition_reload", whenNull: "bullet_speed", optional: true },
+      ammunition_value: { componentType: "self", statId: "ammunition_value" },
+      ammunition_reload: { componentType: "self", statId: "ammunition_reload" },
+      rate_of_fire: { componentType: "self", statId: "rate_of_fire" },
+    },
+    appliesTo: { turret: "damage" },
+  },
+  {
+    key: "turret_output_mw",
+    labelKey: "component_analyzer.stat_labels.turret_output_mw",
+    // CONFIRMED (GitHub issue #26 phase-3/4 turret comparison): the
+    // tooltip's own "Weapon Damage" MW figure -- the better of hull/
+    // shield damage per shot, times the clip-aware effective rate. Matches
+    // all 7 Thresher tooltips (Plasma 300, Shard 198, Mass Driver 69,
+    // Gatling 116, Ion Pulse 156, ARG Beam 72, Meson Stream 81), Raptor
+    // high (1682), and two real Encyclopedia "Weapon Output" entries (ARG
+    // M Scalar Aperture Turret 131, TER M Electromagnetic Turret 121) to
+    // within the game's own integer rounding.
+    //
+    // A BEAM bullet (a real bullet_range) only actually fires for
+    // bullet_lifetime seconds out of each reload cycle -- its damage_value
+    // is a per-SECOND rate while firing (see hull_damage_per_shot's own
+    // comment), so the average output over a full cycle needs that
+    // lifetime folded in as a duty-cycle factor here, on top of the
+    // clip-aware rate: Scalar Aperture 200 MJ/s x 4.4s x (1 / 6.7s reload)
+    // = 131.3 MW; ARG Beam 168 MJ/s x 3.0s x (1/7.0s) = 72.0 MW. A non-beam
+    // bullet (bullet_range null) gets a factor of 1, unaffected. Missile-
+    // firing turrets take their damage from a "missile" mock instead
+    // (explosiondamage_value x missile_amount, its own clip) -- see the
+    // per-shot stats above; they stay blank until a missile mock is
+    // configured.
+    //
+    // Inner `(bullet_lifetime ? bullet_lifetime : 1)` -- same null-safe
+    // fallback as hull_dps/shield_dps's own fix, same reason (a real
+    // bullet_range without a real bullet_lifetime, e.g. S Burst Ray, isn't
+    // actually a beam despite having a range value).
+    expression:
+      "max(hull_damage_per_shot, shield_damage_per_shot) * turret_effective_rate_of_fire * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+    variables: {
+      hull_damage_per_shot: { componentType: "self", statId: "hull_damage_per_shot" },
+      shield_damage_per_shot: { componentType: "self", statId: "shield_damage_per_shot" },
+      turret_effective_rate_of_fire: { componentType: "self", statId: "turret_effective_rate_of_fire" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+    },
+    appliesTo: { turret: "damage" },
+  },
+  {
+    key: "burst_dps",
+    labelKey: "component_analyzer.stat_labels.burst_dps",
+    // Confirmed (two independent worked examples in the community
+    // Burst-DPS thread) that the single "Burst Weapon Damage" number the
+    // game itself displays is the BETTER of hull/shield DPS, not hull
+    // DPS alone -- which is also the source of the well-known "ion/pulse
+    // weapons look stronger than they really are once a target's shield
+    // is down" caveat, since their displayed Burst number is the shield
+    // figure. WEAPON-ONLY -- see hull_dps's own comment (turret_output_mw
+    // is the turret equivalent).
+    expression: "max(hull_dps, shield_dps)",
+    variables: {
+      hull_dps: { componentType: "self", statId: "hull_dps" },
+      shield_dps: { componentType: "self", statId: "shield_dps" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  // heat_per_second/time_to_overheat/cooldown_base_time/sustained_dps_test_*
+  // below are WEAPON-ONLY (never turret) -- confirmed turrets_base has no
+  // heat_overheat/heat_cooldelay/heat_coolrate/heat_reenable/
+  // heat_overheatcooldelay columns AT ALL (checked the real schema, not
+  // just this ship's own data), unlike weapons_base which carries all
+  // five. Turrets structurally don't have an overheat mechanic in this
+  // game's own data model -- their Sustained output (whatever "Avg.
+  // Turret Output" actually is, still unresolved as of GitHub issue #26's
+  // phase-3 comparison) isn't heat-throttled the way a player-fired
+  // weapon's is, so there's no sustained_dps_test_* equivalent to build
+  // for them yet.
+  {
+    key: "heat_per_second",
+    labelKey: "component_analyzer.stat_labels.heat_per_second",
+    // CONFIRMED (GitHub issue #26 phase-9, real Hydra/Dragon screenshots):
+    // two real branches, not one formula.
+    //   - A BEAM bullet (real bullet_range, e.g. M Beam Emitter) generates
+    //     heat_value per SECOND of continuous fire -- no rate multiplier
+    //     at all, since it isn't firing discrete shots.
+    //   - Every other weapon generates heat_value per SHOT, at its own
+    //     CLIP-AWARE weapon_effective_rate_of_fire (not the raw
+    //     rate_of_fire -- confirmed exact for Pulse Laser/Plasma Cannon/
+    //     Bolt Repeater using the clip-aware rate, off otherwise).
+    // `weapon_heat_modifier` (a chassis-level multiplier, e.g. the
+    // Dragon's 1.4 -- see parse_chassis_integrated_mods() in
+    // generate_ships_table.py) scales heat GENERATION, confirmed exactly
+    // via Bolt Repeater on Dragon vs Hydra: Time to Overheat 14.9s vs
+    // 20.8s is precisely the 1.4 ratio. This is the opposite of where an
+    // earlier version of this formula set applied it (scaling
+    // cooldown_base_time's cooling rate instead) -- that was wrong, see
+    // cooldown_base_time's own comment. Unconfigured (no chassis mock)
+    // defaults to 1 (no modifier) rather than reporting a missing mock,
+    // since every weapon has a well-defined heat-per-second in isolation
+    // and most ships carry no modifier at all (exactly 1.0, "Normal").
+    expression:
+      "(bullet_range ? heat_value : heat_value * weapon_effective_rate_of_fire) * (weapon_heat_modifier ? weapon_heat_modifier : 1)",
+    variables: {
+      heat_value: { componentType: "self", statId: "heat_value" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
+      weapon_heat_modifier: { componentType: "chassis", statId: "weapon_heat_modifier", optional: true },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "time_to_overheat",
+    labelKey: "component_analyzer.stat_labels.time_to_overheat",
+    // CONFIRMED (GitHub issue #26 phase-9): matches all 4 real "Time to
+    // Overheat" screenshots (Pulse Laser 16.1s, Plasma Cannon 10.0s, Bolt
+    // Repeater 20.8s Hydra/14.9s Dragon) once heat_per_second uses the
+    // clip-aware rate (see its own comment). A BEAM bullet starts its heat
+    // meter already elevated at heat_initial (e.g. Beam Emitter's 1000, a
+    // previously-unused bullets_base column) instead of 0, so it has less
+    // room left to climb before hitting heat_overheat -- confirmed exact
+    // for Beam Emitter: (10000-1000)/1200 = 7.5s matches the real value
+    // exactly (the naive 10000/1200=8.33s, ignoring heat_initial, does
+    // not). Every non-beam weapon has a null heat_initial, so this is a
+    // beam-only correction.
+    expression: "(heat_overheat - (heat_initial ? heat_initial : 0)) / heat_per_second",
+    variables: {
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      heat_initial: { componentType: "self", statId: "heat_initial" },
+      heat_per_second: { componentType: "weapon", statId: "heat_per_second" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "cooldown_base_time",
+    labelKey: "component_analyzer.stat_labels.cooldown_base_time",
+    // CONFIRMED (GitHub issue #26 phase-9, 4 real "Cooldown Duration"
+    // screenshots, all on a Hydra): heat_overheat / heat_coolrate (full
+    // overheat down to zero, not down to heat_reenable as an earlier
+    // version of this formula assumed) PLUS both heat_cooldelay and
+    // heat_overheatcooldelay. Matches Pulse Laser (8.0s) and Plasma Cannon
+    // (13.8s) exactly; Beam Emitter (8.8s computed 8.88s) and Bolt
+    // Repeater (13.0s computed 13.09s) are within ~0.1s, plausibly the
+    // game's own discrete-tick simulation rounding against this
+    // continuous-math formula.
+    //
+    // Chassis-INDEPENDENT -- confirmed via the same Bolt Repeater on a
+    // Dragon (weapon_heat_modifier 1.4): Cooldown Duration is identical
+    // (13.0s on both ships) even though Time to Overheat is NOT (20.8s
+    // Hydra vs 14.9s Dragon). An earlier version of this formula applied
+    // weapon_heat_modifier here instead of to heat_per_second -- that was
+    // wrong, now moved to where it's actually confirmed to belong.
+    //
+    // UPDATE (2026-10-25, user call): heat_coolrate repointed to its own
+    // Post Mod sibling -- unlike weapon_heat_modifier (which scales heat
+    // GENERATION, confirmed chassis-independent for Cooldown Duration
+    // specifically, see above), a real player-installed "cooling"
+    // equipment mod DOES change this weapon's own actual cooling rate, and
+    // this formula had no way to reflect that until now. Safe to swap
+    // (no double-counting risk): heat_coolrate had zero existing
+    // modifier-handling anywhere in this formula before this change,
+    // unlike heat_value/heat_initial in heat_per_second/time_to_overheat
+    // above, which already apply weapon_heat_modifier inline and are
+    // deliberately NOT touched here for that reason.
+    expression: "heat_overheat / heat_coolrate_post_mod + (heat_cooldelay ? heat_cooldelay : 0) + (heat_overheatcooldelay ? heat_overheatcooldelay : 0)",
+    variables: {
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      heat_coolrate_post_mod: { componentType: "weapon", statId: "heat_coolrate_post_mod" },
+      heat_cooldelay: { componentType: "weapon", statId: "heat_cooldelay" },
+      heat_overheatcooldelay: { componentType: "weapon", statId: "heat_overheatcooldelay" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  // ---- Sustained DPS: SOLVED (GitHub issue #26, 2026-10-25) -- replaces
+  // the old sustained_dps_test_a1/a2/b1/b2 quartet above (four competing,
+  // never-confirmed hypotheses) with the actual derived-and-validated
+  // model. See memory/project_weapon_sustained_dps_scaling.md for the full
+  // derivation trail; this comment only covers what's encoded here.
+  //
+  // Two heat mechanisms, distinguished by which Post Mod field is
+  // populated (heat_value_post_mod -> continuous, e.g. Pulse Laser/Beam
+  // Emitter; null, heat_initial_post_mod populated instead -> discrete,
+  // e.g. Mass Driver): a lone weapon's own duty cycle (sustained_duty_cycle,
+  // "duty1") is computed one of two structurally different ways depending
+  // on which, every downstream stat branches the same way via the same
+  // `heat_value_post_mod ? ... : ...` condition. heat_value_post_mod/
+  // heat_initial_post_mod (not raw heat_value/heat_initial) per the user's
+  // own call to use Post Mod values throughout -- these already fold in
+  // BOTH the chassis's weapon_heat_modifier AND any equipment mod on heat
+  // generation, so no separate chassis mock_ref is needed here the way an
+  // earlier version of heat_per_second/time_to_overheat needed one.
+  //
+  // Scaling a lone weapon's duty1 up to N copies needs a per-mechanism
+  // constant R (continuous ~3.12, discrete ~3.52 -- see
+  // CONSTANT_DEFINITIONS' own "const_sustained_r_continuous"/
+  // "const_sustained_r_discrete", picked by sustained_mechanism_r) to solve
+  // a scale factor k, which in turn gives an "effective" fire time/heat
+  // (FT_e/H_e) smaller than the naive FT_t/heat_overheat that actually
+  // reproduces the real multi-weapon curve. sustained_k/
+  // sustained_effective_fire_time/sustained_effective_heat compute this
+  // using the weapon's OWN mechanism's R (meaningful standalone, e.g. "if
+  // every mounted weapon were this one"); the ship-wide total can't reuse
+  // these directly for a MIXED loadout (confirmed ~12% low if it tries) --
+  // it needs one BLENDED R (count-weighted across every mounted weapon,
+  // regardless of mechanism -- see ship_sustained_r_avg) shared by every
+  // type's own k/FT_e/H_e recomputation, which is what
+  // sustained_k_ship/sustained_effective_fire_time_ship/
+  // sustained_effective_heat_ship do instead (same formulas, R_avg and the
+  // ship's total weapon count read back from the chassis via mock_ref --
+  // resolved through the real enclosing chassis row with no explicit mock
+  // needed, see resolveMockValue()'s own "ambient row" comment). Each
+  // mounted weapon's own sustained_dps_ship_contribution is then just
+  // summed across every weapon mock by ship_sustained_damage_total below,
+  // one weapon at a time -- confirmed mathematically equivalent to the
+  // original "N x burst x FT_e/(...)" single-type formula when every
+  // mounted weapon happens to be identical (summing N identical per-weapon
+  // contributions = N x one contribution), and confirmed numerically
+  // against real cross-mechanism multi-type screenshots (1 Beam Emitter +
+  // 1 Mass Driver on Hydra: predicted 153.0 vs real 152, +0.7% -- exact
+  // match to the figure in memory/project_weapon_sustained_dps_scaling.md).
+  //
+  // heat_overheat itself has no Post Mod sibling (not a real
+  // equipment-moddable column in this dataset) -- left as the plain weapon
+  // column throughout, same as heat_per_second/time_to_overheat/
+  // cooldown_base_time already do.
+  {
+    key: "sustained_mechanism_r",
+    labelKey: "component_analyzer.stat_labels.sustained_mechanism_r",
+    descriptionKey: "component_analyzer.stat_descriptions.sustained_mechanism_r",
+    expression: "heat_value_post_mod ? r_continuous : r_discrete",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      r_continuous: { componentType: "constant", statId: "const_sustained_r_continuous" },
+      r_discrete: { componentType: "constant", statId: "const_sustained_r_discrete" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_overheat_delay",
+    labelKey: "component_analyzer.stat_labels.sustained_overheat_delay",
+    // A = heat_cooldelay + heat_overheatcooldelay -- the fixed dead time
+    // after overheat before cooling starts. CONFIRMED (2026-10-26, 4 real
+    // data points: Dragon 1.4x and Cerberus Vanguard 1.3x, both at 1x and
+    // 2x Mass Driver Mk2 -- all under 1% error) that this "add both" rule
+    // only holds when a discrete weapon takes 2+ shots to reach
+    // heat_overheat. When a chassis's own weapon_heat_modifier is large
+    // enough that a SINGLE shot already crosses the threshold (shots==1,
+    // same ceil() this weapon's own sustained_fire_time/
+    // sustained_heat_at_overheat already compute), heat_overheatcooldelay
+    // REPLACES heat_cooldelay rather than adding to it -- heat_cooldelay
+    // apparently represents the gap BETWEEN shots in a multi-shot burst,
+    // which has no meaning when only one shot ever fires. Adding both
+    // unconditionally (the pre-2026-10-26 version of this formula)
+    // under-predicted Sustained Weapon Damage by 8-10% on every modified-
+    // chassis discrete weapon tested, flat across weapon count -- a
+    // single-weapon (duty1) bug, not a multi-weapon scaling one, exactly
+    // the diagnostic signature that led here. Continuous-mechanism weapons
+    // have no "shots" concept at all and are unaffected -- always both
+    // delays, same as before.
+    expression:
+      "heat_value_post_mod ? heat_cooldelay + (heat_overheatcooldelay ? heat_overheatcooldelay : 0) : (ceil(heat_overheat / heat_initial_post_mod) > 1 ? heat_cooldelay + (heat_overheatcooldelay ? heat_overheatcooldelay : 0) : (heat_overheatcooldelay ? heat_overheatcooldelay : 0))",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      heat_initial_post_mod: { componentType: "self", statId: "heat_initial_post_mod" },
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      heat_cooldelay: { componentType: "weapon", statId: "heat_cooldelay" },
+      heat_overheatcooldelay: { componentType: "weapon", statId: "heat_overheatcooldelay" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_fire_time",
+    labelKey: "component_analyzer.stat_labels.sustained_fire_time",
+    descriptionKey: "component_analyzer.stat_descriptions.sustained_fire_time",
+    // FT_t, generalized across both mechanisms. Continuous (covers both
+    // plain continuous AND beam in one formula -- heat_initial_post_mod is
+    // 0/null for plain continuous, a no-op subtraction): time from 0 heat
+    // to heat_overheat at this weapon's own Post Mod heat generation rate.
+    // Discrete: whole shots (ceil) until the cumulative heat first reaches
+    // or exceeds heat_overheat, times this weapon's own real fire cycle
+    // (reload_time + charge_time) -- the clip/ammo system is NOT modeled
+    // here (assumes a clip large enough to reach overheat uninterrupted,
+    // true of every discrete weapon tested).
+    expression:
+      "heat_value_post_mod ? (heat_overheat - (heat_initial_post_mod ? heat_initial_post_mod : 0)) / (bullet_range ? heat_value_post_mod : heat_value_post_mod * weapon_effective_rate_of_fire) : ceil(heat_overheat / heat_initial_post_mod) * (reload_time + (charge_time ? charge_time : 0))",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      heat_initial_post_mod: { componentType: "self", statId: "heat_initial_post_mod" },
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      bullet_range: { componentType: "self", statId: "bullet_range" },
+      weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
+      reload_time: { componentType: "self", statId: "reload_time" },
+      charge_time: { componentType: "self", statId: "charge_time" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_heat_at_overheat",
+    labelKey: "component_analyzer.stat_labels.sustained_heat_at_overheat",
+    // Continuous never overshoots (smooth accumulation hits heat_overheat
+    // exactly). Discrete overshoots by design (whole lumps) -- the actual
+    // total reached is shots x heat_initial_post_mod, not the raw
+    // threshold; CONFIRMED this (not raw heat_overheat) is the right input
+    // to sustained_k/sustained_k_ship below, both numerically (matches the
+    // real Mass Driver 1-4x curve) and structurally (it's what the
+    // single-weapon Sustained Formula B cooldown math itself already uses).
+    expression: "heat_value_post_mod ? heat_overheat : ceil(heat_overheat / heat_initial_post_mod) * heat_initial_post_mod",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      heat_initial_post_mod: { componentType: "self", statId: "heat_initial_post_mod" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_duty_cycle",
+    labelKey: "component_analyzer.stat_labels.sustained_duty_cycle",
+    descriptionKey: "component_analyzer.stat_descriptions.sustained_duty_cycle",
+    // duty1 = Sustained(1)/Burst(1). Continuous: the classic
+    // fire-time/(fire-time+cooldown) ratio. Discrete: Formula B's own
+    // direct Sustained(1) (shots x per-shot damage over fire+cooldown
+    // time, reusing sustained_fire_time/sustained_heat_at_overheat and
+    // sustained_overheat_delay for the fire/cooldown terms) divided by
+    // burst_dps to get the same ratio shape.
+    //
+    // UPDATE (2026-10-27, user call, "that is how the game does it"): a
+    // THIRD case -- heat_value_post_mod AND heat_initial_post_mod both
+    // null -- means this weapon has no heat-generation data under EITHER
+    // mechanism, i.e. it never overheats at all, so duty1 = 1 (Sustained
+    // == Burst) rather than the blank cell this produced before. Confirmed
+    // via the raw extracted macros, not just the derived columns: a
+    // working continuous weapon's own BULLET macro has a real <heat
+    // initial="..." value="..."/> element (e.g. M Beam Emitter); a
+    // confirmed-broken one (ARG M Ion Blaster, M Shard Battery, SPL M
+    // Boson Lance, KHA M Kyon Emitter) has NO <heat> element anywhere on
+    // its own bullet macro at all, despite its WEAPON macro still
+    // declaring a real heat_overheat/cooldelay/coolrate/reenable (left
+    // those columns alone -- only sustained_duty_cycle itself needed this
+    // 3rd branch, not every intermediate heat_per_second/
+    // time_to_overheat/cooldown_base_time stat upstream, which still
+    // correctly show blank for these -- there IS no real "time to
+    // overheat" to report when a weapon never overheats). Mining Drills
+    // are the most clear-cut case of this same pattern: their own WEAPON
+    // macro has no <heat> element at all (not even overheat/cooldelay),
+    // matching X4's own real mining-tool behavior of firing indefinitely.
+    // Nested as a 3rd ternary branch, not a `&&` condition, since no
+    // existing formula in this catalog uses `&&`/`!` and nesting avoids
+    // introducing untested math.js operator syntax for a one-off case.
+    expression:
+      "heat_value_post_mod ? ft_t / (ft_t + heat_overheat / heat_coolrate_post_mod + a) : (heat_initial_post_mod ? (((heat_term / heat_initial_post_mod) * max(hull_damage_per_shot, shield_damage_per_shot)) / (ft_t + a + heat_term / heat_coolrate_post_mod)) / burst_dps : 1)",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      heat_initial_post_mod: { componentType: "self", statId: "heat_initial_post_mod" },
+      ft_t: { componentType: "self", statId: "sustained_fire_time" },
+      heat_term: { componentType: "self", statId: "sustained_heat_at_overheat" },
+      a: { componentType: "self", statId: "sustained_overheat_delay" },
+      heat_overheat: { componentType: "weapon", statId: "heat_overheat" },
+      heat_coolrate_post_mod: { componentType: "weapon", statId: "heat_coolrate_post_mod" },
+      hull_damage_per_shot: { componentType: "self", statId: "hull_damage_per_shot" },
+      shield_damage_per_shot: { componentType: "self", statId: "shield_damage_per_shot" },
+      burst_dps: { componentType: "self", statId: "burst_dps" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_dps",
+    labelKey: "component_analyzer.stat_labels.sustained_dps",
+    descriptionKey: "component_analyzer.stat_descriptions.sustained_dps",
+    // This weapon's own Sustained Weapon Damage if it were the only weapon
+    // mounted -- the direct Burst Weapon Damage counterpart. See
+    // sustained_dps_ship_contribution/ship_sustained_damage_total for the
+    // real multi-weapon, possibly-mixed-loadout ship total.
+    expression: "duty1 * burst_dps",
+    variables: {
+      duty1: { componentType: "self", statId: "sustained_duty_cycle" },
+      burst_dps: { componentType: "self", statId: "burst_dps" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_k",
+    labelKey: "component_analyzer.stat_labels.sustained_k",
+    // Solved so that Sustained(1) computed via FT_e/H_e below exactly
+    // reproduces duty1 x burst_dps -- using this weapon's OWN mechanism
+    // constant (sustained_mechanism_r), meaningful standalone ("if every
+    // mounted weapon were this one"). See sustained_k_ship for the
+    // ship-blended-R version the real multi-type total actually uses.
+    expression: "(duty1 * a) / (r * ft_t * (1 - duty1) - duty1 * heat_term / heat_coolrate_post_mod)",
+    variables: {
+      duty1: { componentType: "self", statId: "sustained_duty_cycle" },
+      a: { componentType: "self", statId: "sustained_overheat_delay" },
+      r: { componentType: "self", statId: "sustained_mechanism_r" },
+      ft_t: { componentType: "self", statId: "sustained_fire_time" },
+      heat_term: { componentType: "self", statId: "sustained_heat_at_overheat" },
+      heat_coolrate_post_mod: { componentType: "weapon", statId: "heat_coolrate_post_mod" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_effective_fire_time",
+    labelKey: "component_analyzer.stat_labels.sustained_effective_fire_time",
+    expression: "r * ft_t * k",
+    variables: {
+      r: { componentType: "self", statId: "sustained_mechanism_r" },
+      ft_t: { componentType: "self", statId: "sustained_fire_time" },
+      k: { componentType: "self", statId: "sustained_k" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_effective_heat",
+    labelKey: "component_analyzer.stat_labels.sustained_effective_heat",
+    expression: "heat_term * k",
+    variables: {
+      heat_term: { componentType: "self", statId: "sustained_heat_at_overheat" },
+      k: { componentType: "self", statId: "sustained_k" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_k_ship",
+    labelKey: "component_analyzer.stat_labels.sustained_k_ship",
+    // Same solve as sustained_k, but using the SHIP's own blended R
+    // (ship_sustained_r_avg) instead of this weapon's own mechanism
+    // constant -- read back from the real enclosing chassis row via
+    // mock_ref (resolved through the "ambient row" fallback, no explicit
+    // mock needed; blank/missing when this stat is viewed on a standalone
+    // weapon table with no chassis context, which is expected -- there is
+    // no meaningful ship-blended R without a ship).
+    expression: "(duty1 * a) / (r_avg * ft_t * (1 - duty1) - duty1 * heat_term / heat_coolrate_post_mod)",
+    variables: {
+      duty1: { componentType: "self", statId: "sustained_duty_cycle" },
+      a: { componentType: "self", statId: "sustained_overheat_delay" },
+      r_avg: { componentType: "chassis", statId: "ship_sustained_r_avg" },
+      ft_t: { componentType: "self", statId: "sustained_fire_time" },
+      heat_term: { componentType: "self", statId: "sustained_heat_at_overheat" },
+      heat_coolrate_post_mod: { componentType: "weapon", statId: "heat_coolrate_post_mod" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_effective_fire_time_ship",
+    labelKey: "component_analyzer.stat_labels.sustained_effective_fire_time_ship",
+    expression: "r_avg * ft_t * k_ship",
+    variables: {
+      r_avg: { componentType: "chassis", statId: "ship_sustained_r_avg" },
+      ft_t: { componentType: "self", statId: "sustained_fire_time" },
+      k_ship: { componentType: "self", statId: "sustained_k_ship" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_effective_heat_ship",
+    labelKey: "component_analyzer.stat_labels.sustained_effective_heat_ship",
+    expression: "heat_term * k_ship",
+    variables: {
+      heat_term: { componentType: "self", statId: "sustained_heat_at_overheat" },
+      k_ship: { componentType: "self", statId: "sustained_k_ship" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+  {
+    key: "sustained_dps_ship_contribution",
+    labelKey: "component_analyzer.stat_labels.sustained_dps_ship_contribution",
+    descriptionKey: "component_analyzer.stat_descriptions.sustained_dps_ship_contribution",
+    // This weapon's own share of the ship-wide Sustained Weapon Damage
+    // total (see ship_sustained_damage_total, which just sums this across
+    // every mounted weapon) -- the cooldown-sharing term divides by the
+    // ship's TOTAL mounted weapon count (ship_total_weapon_count, every
+    // type pooled together), not just this type's own count, per the
+    // confirmed "total-count pooling" rule.
+    //
+    // UPDATE (2026-10-28, user call): a weapon with NO heat generation
+    // under either mechanism (heat_value_post_mod AND heat_initial_post_mod
+    // both null -- same confirmed-real case sustained_duty_cycle's own 3rd
+    // branch already handles, e.g. SPL M Boson Lance) never needs to
+    // cool down at all, so it doesn't participate in the ship's shared
+    // cooldown pool (sustained_k_ship/ft_e/h_e are all ill-defined/null
+    // for it, since they're solved FROM duty1=1 having no real "cooldown
+    // curve" to fit) -- it just contributes its own burst_dps straight to
+    // the ship total, unthrottled, same as sustained_dps already does for
+    // it standalone (duty1=1 there too). Nested ternary, not `||`, same
+    // "no untested math.js boolean operators" convention sustained_duty_cycle's
+    // own comment already settled on -- the pooled formula itself is
+    // identical for both real heat mechanisms, so it's just repeated
+    // under each truthy branch rather than meaningfully duplicated logic.
+    expression:
+      "heat_value_post_mod ? (burst_dps * ft_e / (ft_e + a + h_e * n_total / heat_coolrate_post_mod)) : (heat_initial_post_mod ? (burst_dps * ft_e / (ft_e + a + h_e * n_total / heat_coolrate_post_mod)) : burst_dps)",
+    variables: {
+      heat_value_post_mod: { componentType: "self", statId: "heat_value_post_mod" },
+      heat_initial_post_mod: { componentType: "self", statId: "heat_initial_post_mod" },
+      burst_dps: { componentType: "self", statId: "burst_dps" },
+      ft_e: { componentType: "self", statId: "sustained_effective_fire_time_ship" },
+      a: { componentType: "self", statId: "sustained_overheat_delay" },
+      h_e: { componentType: "self", statId: "sustained_effective_heat_ship" },
+      n_total: { componentType: "chassis", statId: "ship_total_weapon_count" },
+      heat_coolrate_post_mod: { componentType: "weapon", statId: "heat_coolrate_post_mod" },
+    },
+    appliesTo: { weapon: "damage" },
+  },
+];
+registerCrossComponentStats(COMBAT_DERIVED_STATS);
+
+// ---- Ship-level aggregate stats (chassis "combat" group) -- the
+// Raptor screenshot's own Shield (MJ)/Recharge Rate/Avg. Group Shield/
+// Burst & Sustained Weapon Damage/Avg. Turret Output rows, built on the
+// aggregate-variable mechanism (sum/average/count across every
+// full-component mock configured for a type, plus the row itself when
+// viewing FROM that type -- see resolveAggregateVariable()'s own
+// comment). Since these are only ever meaningful from a CHASSIS row (a
+// ship's own total), each one applies to chassis only, unlike the
+// flight/combat stats above which register on every contributing type.
+//
+// shield_capacity_modifier/shield_rechargerate_modifier/
+// shield_rechargedelay_modifier are real, confirmed chassis columns (see
+// their own "modifiers" group comment) -- the SUM/AVERAGE math itself is
+// the untested part here, not those inputs.
+const CHASSIS_AGGREGATE_STATS = [
+  {
+    key: "shield_total_mj",
+    labelKey: "component_analyzer.stat_labels.shield_total_mj",
+    // CONFIRMED (2026-10-26, Hydra real loadout, GitHub issue #26): the
+    // old "one main shield's recharge_max times `shields`" shape assumed
+    // every main slot holds the identical ware -- broken the moment it
+    // doesn't. A real Hydra with a BOR M Mk3 (recharge_max 8400) and a
+    // SPL M Mk2 (recharge_max 4932) in 2 of its 3 main slots (1 left
+    // empty) shows Shield (MJ) 13,332 -- exactly 8400+4932, the SUM of
+    // only the filled slots, not a single value times 3. Now a true
+    // aggregate over whatever "shield" mocks are configured in scope
+    // (same pool/mechanism avg_group_shield_mj_test below already used,
+    // see its own comment on why main-slot and bonus-group mocks sharing
+    // one pool is a pre-existing simplification, not new here), capped to
+    // `shields` (the chassis's own main-slot count) so over-configuring
+    // mocks can never double-count -- an empty slot simply isn't
+    // represented by a mock at all, contributing nothing, exactly like
+    // the Hydra's own empty 3rd slot.
+    expression: "shield_mj_sum",
+    variables: {
+      main_shield_slots: { componentType: "chassis", statId: "shields" },
+      shield_mj_sum: {
+        componentType: "shield",
+        statId: "recharge_max_post_mod",
+        aggregation: "sum",
+        limit: "main_shield_slots",
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "shield_total_recharge_rate",
+    labelKey: "component_analyzer.stat_labels.shield_total_recharge_rate",
+    // Same CONFIRMED shape as shield_total_mj above, same Hydra data:
+    // 112 (SPL M Mk2) + 178 (BOR M Mk3) = 290, the real Recharge Rate
+    // (MW) exactly.
+    expression: "shield_rate_sum",
+    variables: {
+      main_shield_slots: { componentType: "chassis", statId: "shields" },
+      shield_rate_sum: {
+        componentType: "shield",
+        statId: "recharge_rate_post_mod",
+        aggregation: "sum",
+        limit: "main_shield_slots",
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "shield_recharge_delay_test",
+    labelKey: "component_analyzer.stat_labels.shield_recharge_delay_test",
+    // CONFIRMED (2026-10-26, same Hydra data) -- and the "_test" question
+    // this stat was left with (min? max? does it matter?) is answered:
+    // it's a plain AVERAGE across only the filled main slots, same shape
+    // avg_group_shield_recharge_delay_test below already uses for the
+    // bonus pool. (2.0 + 8.8) / 2 = 5.4, the real Recharge Delay (s)
+    // exactly -- NOT (2.0+8.8+0)/3, so the empty 3rd slot plays no part,
+    // same as the MJ/Recharge Rate sum above. Key/label kept as "_test"
+    // (no more than a cosmetic label change pending) to avoid invalidating
+    // a saved stat-set selection, same precedent as travel_acceleration_test_2.
+    expression: "shield_delay_avg",
+    variables: {
+      main_shield_slots: { componentType: "chassis", statId: "shields" },
+      shield_delay_avg: {
+        componentType: "shield",
+        statId: "recharge_delay_post_mod",
+        aggregation: "average",
+        limit: "main_shield_slots",
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "avg_group_shield_mj_test",
+    labelKey: "component_analyzer.stat_labels.avg_group_shield_mj_test",
+    // CONFIRMED (2026-10-26, real Boron Guppy data) -- and finalized, not
+    // just fixed, with the new group_sum aggregation (see
+    // resolveGroupAggregateVariable()'s own comment): sum of each REAL
+    // hardpoint group's own total capacity (not each raw mounted unit),
+    // divided by how many real groups actually got claimed. A Guppy test
+    // stacking 6 BOR M Shield Generator Mk3 into one single 6-slot
+    // engine-protecting group (alongside 2 more BOR Mk3 + 2 TER M Frontier
+    // Mk2, each still its own separate 1-slot group -- 5 groups total)
+    // proved even the earlier MIN(mounted, groups) divisor wrong: the real
+    // 16,560 only comes out of (8400+8400+7800+7800+8400*6)/5, i.e. that
+    // stacked group counts as ONE group worth 6 units, not 6 groups worth
+    // 1 each -- see memory/project_shield_main_slot_aggregate_and_mock_count.md
+    // for the full real-data writeup, including the earlier two
+    // non-stacked Guppy loadouts (6825 at 2x BOR Mk3 + 2x BOR Mk1, 8100 at
+    // 2x BOR Mk3 + 2x TER Frontier Mk2) and both Raptor loadouts, all
+    // still reproduced exactly by this same shape.
+    expression: "shield_group_avg",
+    variables: {
+      shield_group_avg: { componentType: "shield", statId: "recharge_max_post_mod", aggregation: "group_sum" },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    // The Ship Statistics panel's "Avg. Group Shield" is actually a full
+    // MJ/Recharge Rate/Recharge Delay triad, same shape as the main
+    // shield's own three stats above -- this is the Recharge Rate half,
+    // missed on the first pass through this list (only the MJ one got
+    // built). CONFIRMED (2026-10-26) with the same group_sum shape as
+    // avg_group_shield_mj_test just above, same real data: the stacked
+    // Guppy loadout's real 320 = (178+178+89+89+178*6)/5 exactly.
+    key: "avg_group_shield_recharge_rate_test",
+    labelKey: "component_analyzer.stat_labels.avg_group_shield_recharge_rate_test",
+    // UPDATE (2026-10-25, user call): recharge_rate repointed to
+    // recharge_rate_post_mod, same reason as shield_total_mj above.
+    expression: "shield_group_avg",
+    variables: {
+      shield_group_avg: { componentType: "shield", statId: "recharge_rate_post_mod", aggregation: "group_sum" },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    // The third leg of the same triad -- a DIFFERENT mechanic from
+    // Recharge Rate above, not just a simpler version of it (per the
+    // user): each group's own delay is the AVERAGE of only its own FILLED
+    // slots (an empty group contributes nothing, unlike Recharge Rate's
+    // own sum where an empty group's real 0 still participates), and the
+    // displayed number is the average of every group's own delay --
+    // group_average, not group_sum. CONFIRMED AND FINALIZED (2026-10-26):
+    // the same stacked-group Guppy loadout that broke the old flat
+    // ship-wide average (MIN() didn't apply here at all -- this stat never
+    // had a divisor to fix, just the wrong shape) is the proof. Flat
+    // average of all 10 individual units' own delay = (8x8.8+2x4.0)/10 =
+    // 7.84, NOT the real 6.88. True per-group average -- the stacked
+    // 6-slot group's own delay is just 8.8 once (every slot in one group
+    // always shares the same mounted ware, so a group's own delay is
+    // simply that ware's raw value, never itself an average of repeats) --
+    // (8.8+8.8+4.0+4.0+8.8)/5 = 6.88 exactly. This is the real, definitive
+    // test the two earlier (non-stacked) Guppy loadouts couldn't be: every
+    // group there held at most one filled slot, so flat and true per-group
+    // averaging were mathematically identical regardless of value
+    // differences -- only forcing a group to hold more than one unit can
+    // ever tell the two apart, and now one has. No longer "_test" -- label
+    // promoted; key kept for saved-selection stability, same precedent as
+    // travel_acceleration_test_2.
+    key: "avg_group_shield_recharge_delay_test",
+    labelKey: "component_analyzer.stat_labels.avg_group_shield_recharge_delay_test",
+    // UPDATE (2026-10-25, user call): recharge_delay repointed to
+    // recharge_delay_post_mod, same reason as shield_total_mj above.
+    expression: "shield_delay_avg",
+    variables: {
+      shield_delay_avg: { componentType: "shield", statId: "recharge_delay_post_mod", aggregation: "group_average" },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "burst_weapon_damage_ship_test",
+    labelKey: "component_analyzer.stat_labels.burst_weapon_damage_ship_test",
+    // CONFIRMED (2026-10-26): direct (non-turret) weapons only, matching
+    // the Raptor screenshot's own "Burst Weapon Damage" being 0 on a ship
+    // with only turrets mounted -- sums each mounted weapon's own
+    // burst_dps (itself a same-type derived stat, resolved recursively),
+    // capped to the chassis's own "weapons" slot count. Same mechanism as
+    // ship_sustained_damage_total below, same screenshots even -- the two
+    // real Hydra mixed loadouts already used to confirm THAT stat's own
+    // Sustained Weapon Damage number also show Burst Weapon Damage in the
+    // same Ship Statistics panel, just never checked against it until
+    // now: 1x M Bolt Repeater Mk1 (burst_dps 222) + 1x M Plasma Cannon
+    // Mk1 (480) = 702, exactly the real number. 1x M Beam Emitter Mk1
+    // (180) + 1x PAR M Mass Driver Mk2 (357) = 537 vs. real 536, within
+    // the same per-weapon display-rounding noise every other confirmed
+    // stat here already has. Key/label kept as "_test" (cosmetic label
+    // change only) to avoid invalidating a saved stat-set selection, same
+    // precedent as travel_acceleration_test_2.
+    //
+    // UPDATE (2026-10-26): "weapons" is only the ship's own MAIN weapon
+    // slot count -- the Asgard also has 2 real "bonus L" weapon slots
+    // (ships_base.bonus_l_weapons), a separate pool from its 1 main XL
+    // slot, confirmed live the moment it was the first ship in the catalog
+    // with bonus_l_weapons > 0: without sizeFilter, an L-sized weapon mock
+    // could (and did) consume the ship-wide "weapons" budget meant for the
+    // XL slot, since mockCompatibility()'s own ship-level fit check only
+    // asks "does this ship have a matching-size weapon slot ANYWHERE", not
+    // "does THIS pool's own slot size match" (same class of gap the
+    // shield group-size fix closed earlier this session). weapon_burst_sum
+    // now only draws from mocks whose own ware size matches the chassis's
+    // own size ("chassis" sizeFilter); weapon_burst_sum_bonus_l is a
+    // second, independent sum capped by bonus_l_weapons and restricted to
+    // size "l" specifically (a "bonus L weapon" is always L-sized
+    // regardless of the hull's own overall size tier). zeroLimitIsZero on
+    // the bonus_l variable keeps every OTHER ship (bonus_l_weapons = 0)
+    // resolving to a clean 0 instead of a spurious missing-mock warning
+    // that would null out the whole sum.
+    expression: "weapon_burst_sum + weapon_burst_sum_bonus_l",
+    variables: {
+      weapon_slots: { componentType: "chassis", statId: "weapons" },
+      weapon_burst_sum: {
+        componentType: "weapon",
+        statId: "burst_dps",
+        aggregation: "sum",
+        limit: "weapon_slots",
+        sizeFilter: "chassis",
+      },
+      bonus_l_weapon_slots: { componentType: "chassis", statId: "bonus_l_weapons" },
+      weapon_burst_sum_bonus_l: {
+        componentType: "weapon",
+        statId: "burst_dps",
+        aggregation: "sum",
+        limit: "bonus_l_weapon_slots",
+        sizeFilter: "l",
+        zeroLimitIsZero: true,
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  // ---- Sustained Damage, ship-wide (GitHub issue #26, 2026-10-25) --
+  // see COMBAT_DERIVED_STATS' own big comment above sustained_mechanism_r
+  // for the full derivation; these four just do the ship-level plumbing
+  // (counting mounted weapons, blending R, summing each weapon's own
+  // contribution) that the weapon-level stats read back via mock_ref
+  // (resolved through the real enclosing chassis row with no explicit
+  // mock needed -- see resolveMockValue()'s own "ambient row" comment).
+  // Each sums its own main-slot pool (sizeFilter: "chassis") plus a
+  // bonus-L pool (sizeFilter: "l", zeroLimitIsZero) -- see
+  // burst_weapon_damage_ship_test's own comment for why both are needed.
+  {
+    key: "ship_total_weapon_count",
+    labelKey: "component_analyzer.stat_labels.ship_total_weapon_count",
+    // burst_dps is just a reliably-resolvable probe stat here -- every
+    // real mounted weapon has one, so "count" (aggregation: count) counts
+    // every mounted weapon regardless of type. Capped to the chassis's own
+    // "weapons" slot count, same pattern as burst_weapon_damage_ship_test.
+    // "count" never reports missing even at limit 0 (see
+    // resolveAggregateVariable()'s own comment), so the bonus_l half needs
+    // no zeroLimitIsZero flag the way the sum-based siblings below do.
+    expression: "weapon_count + weapon_count_bonus_l",
+    variables: {
+      weapon_slots: { componentType: "chassis", statId: "weapons" },
+      weapon_count: {
+        componentType: "weapon",
+        statId: "burst_dps",
+        aggregation: "count",
+        limit: "weapon_slots",
+        sizeFilter: "chassis",
+      },
+      bonus_l_weapon_slots: { componentType: "chassis", statId: "bonus_l_weapons" },
+      weapon_count_bonus_l: {
+        componentType: "weapon",
+        statId: "burst_dps",
+        aggregation: "count",
+        limit: "bonus_l_weapon_slots",
+        sizeFilter: "l",
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "ship_weapon_r_sum",
+    labelKey: "component_analyzer.stat_labels.ship_weapon_r_sum",
+    // Plumbing for ship_sustained_r_avg below -- the sum half of the
+    // count-weighted average (sum of each mounted weapon's own mechanism
+    // constant, divided by ship_total_weapon_count next).
+    expression: "r_sum + r_sum_bonus_l",
+    variables: {
+      weapon_slots: { componentType: "chassis", statId: "weapons" },
+      r_sum: {
+        componentType: "weapon",
+        statId: "sustained_mechanism_r",
+        aggregation: "sum",
+        limit: "weapon_slots",
+        sizeFilter: "chassis",
+      },
+      bonus_l_weapon_slots: { componentType: "chassis", statId: "bonus_l_weapons" },
+      r_sum_bonus_l: {
+        componentType: "weapon",
+        statId: "sustained_mechanism_r",
+        aggregation: "sum",
+        limit: "bonus_l_weapon_slots",
+        sizeFilter: "l",
+        zeroLimitIsZero: true,
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "ship_sustained_r_avg",
+    labelKey: "component_analyzer.stat_labels.ship_sustained_r_avg",
+    descriptionKey: "component_analyzer.stat_descriptions.ship_sustained_r_avg",
+    // The count-weighted blend across every mounted weapon's own mechanism
+    // constant -- CONFIRMED (not a flat/unweighted average) via real
+    // cross-mechanism screenshots; see
+    // memory/project_weapon_sustained_dps_scaling.md's own "SOLVED -- blend
+    // R itself" section. Correctly collapses back to a single type's own
+    // constant when every mounted weapon shares one mechanism.
+    expression: "r_sum / weapon_count",
+    variables: {
+      r_sum: { componentType: "chassis", statId: "ship_weapon_r_sum" },
+      weapon_count: { componentType: "chassis", statId: "ship_total_weapon_count" },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "ship_sustained_damage_total",
+    labelKey: "component_analyzer.stat_labels.ship_sustained_damage_total",
+    descriptionKey: "component_analyzer.stat_descriptions.ship_sustained_damage_total",
+    // The real ship-wide Sustained Weapon Damage -- sum of every mounted
+    // weapon's own sustained_dps_ship_contribution (itself already
+    // R_avg/N_total-aware, see COMBAT_DERIVED_STATS). CONFIRMED against
+    // real mixed-loadout screenshots, both same-mechanism (1 Bolt Repeater
+    // + 1 Plasma Cannon: predicted 303.4, real 303) and cross-mechanism
+    // (1 Beam Emitter + 1 Mass Driver: predicted 153.0, real 152).
+    expression: "contribution_sum + contribution_sum_bonus_l",
+    variables: {
+      weapon_slots: { componentType: "chassis", statId: "weapons" },
+      contribution_sum: {
+        componentType: "weapon",
+        statId: "sustained_dps_ship_contribution",
+        aggregation: "sum",
+        limit: "weapon_slots",
+        sizeFilter: "chassis",
+      },
+      bonus_l_weapon_slots: { componentType: "chassis", statId: "bonus_l_weapons" },
+      contribution_sum_bonus_l: {
+        componentType: "weapon",
+        statId: "sustained_dps_ship_contribution",
+        aggregation: "sum",
+        limit: "bonus_l_weapon_slots",
+        sizeFilter: "l",
+        zeroLimitIsZero: true,
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "avg_turret_output",
+    labelKey: "component_analyzer.stat_labels.avg_turret_output",
+    descriptionKey: "component_analyzer.stat_descriptions.avg_turret_output",
+    // CONFIRMED (GitHub issue #26 phase-3 turret comparison): the sum of
+    // every mounted turret's own turret_output_mw (its clip-aware
+    // "Weapon Damage" MW figure -- see that stat's own comment), divided
+    // by a fixed 6. Reproduces 9 real numbers: both Raptor loadouts
+    // (1682.29 -> 1682, 1742.89 -> 1742 -- the latter including dumbfire
+    // MISSILE turrets, whose per-turret number is supplied by hand until
+    // missile turrets get their own columns) and 7 single-turret Thresher
+    // loadouts (each tooltip MW / 6, truncated).
+    //
+    // The 6 is a fixed constant the GAME itself defines (per the user's
+    // own lookup) -- reportedly one per face of a cube a turret could fire
+    // from -- which is why the label reads "Game Defined". It is
+    // deliberately NOT the hull's turret-group count, unlike Avg. Group
+    // Shield's shield-group divisor: the Thresher has 8 turret groups and
+    // the Raptor 19, and both divide by 6 (as do 5 through 8 plasma turrets
+    // on the Thresher, so it isn't the filled count either). Real turrets
+    // cover far wider arcs than a cube face and can engage different
+    // targets at once, so this understates real simultaneous output -- it's
+    // the game's own convention, not a physical model.
+    // UPDATE (2026-10-25): the fixed 6 is now the "Turret Output Divisor"
+    // pre-derived constant (see CONSTANT_DEFINITIONS) rather than a bare
+    // literal in the expression -- same real number, just named and
+    // reusable like any other curated constant now that the Constants page
+    // exists.
+    expression: "turret_output_sum / turret_output_divisor",
+    variables: {
+      turret_output_sum: {
+        componentType: "turret",
+        statId: "turret_output_mw",
+        aggregation: "sum",
+      },
+      turret_output_divisor: { componentType: "constant", statId: "const_turret_output_divisor" },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+  {
+    key: "total_turret_output",
+    labelKey: "component_analyzer.stat_labels.total_turret_output",
+    descriptionKey: "component_analyzer.stat_descriptions.total_turret_output",
+    // Not a game statistic: the plain sum of every mounted turret's
+    // turret_output_mw, i.e. Avg. Turret Output before its fixed /6.
+    expression: "turret_output_sum",
+    variables: {
+      turret_output_sum: {
+        componentType: "turret",
+        statId: "turret_output_mw",
+        aggregation: "sum",
+      },
+    },
+    appliesTo: { chassis: "combat" },
+  },
+];
+registerCrossComponentStats(CHASSIS_AGGREGATE_STATS);
 
 // software_base -- core is everything besides ware_id/name (which the
 // fixed Name column already shows): category, mk. economy is price only --
@@ -6743,7 +10304,7 @@ const THRUSTER_STAT_DEFINITIONS = [
 // concept at all (see software_base's own schema comment) -- just the
 // three price columns list_components()'s own software special-case query
 // already exposes.
-const SOFTWARE_STAT_GROUPS = ["core", "economy"];
+const SOFTWARE_STAT_GROUPS = [statGroup("core"), statGroup("economy")];
 const SOFTWARE_STAT_DEFINITIONS = [
   statDef("category", "software_base", "core", "component_analyzer.stat_labels.category"),
   statDef("mk", "software_base", "core", "component_analyzer.stat_labels.mk"),
@@ -6757,7 +10318,7 @@ const SOFTWARE_STAT_DEFINITIONS = [
 // surfaced as a stat anywhere else either): ship_type, purpose, hull,
 // physics_mass. economy is price only. Backed by GET /api/drones, now
 // expanded past just ware_id/name to carry every drones_base column.
-const DRONE_STAT_GROUPS = ["core", "economy"];
+const DRONE_STAT_GROUPS = [statGroup("core"), statGroup("economy")];
 const DRONE_STAT_DEFINITIONS = [
   statDef("ship_type", "drones_base", "core", "component_analyzer.stat_labels.ship_type"),
   purposeStatDef("purpose", "drones_base", "core", "component_analyzer.stat_labels.purpose"),
@@ -6781,7 +10342,7 @@ const DRONE_STAT_DEFINITIONS = [
 // economy (price). A blank cell for a stat that subtype doesn't have is
 // expected, not a bug -- same "wares that have that stat" shape as
 // WARE_STAT_DEFINITIONS' own volume/transport below.
-const DEPLOYABLE_STAT_GROUPS = ["core", "detection", "combat", "economy"];
+const DEPLOYABLE_STAT_GROUPS = [statGroup("core"), statGroup("detection"), statGroup("combat"), statGroup("economy")];
 const DEPLOYABLE_STAT_DEFINITIONS = [
   deployableTypeStatDef("deployable_type", "deployables_base", "core", "component_analyzer.stat_labels.deployable_type"),
   statDef("hull", "deployables_base", "core", "component_analyzer.stat_labels.hull"),
@@ -6803,7 +10364,7 @@ const DEPLOYABLE_STAT_DEFINITIONS = [
 // countermeasures_base -- price is the only stat this table has at all
 // (see its own schema comment in ships_tables.sql) -- economy only, no
 // core group. Only one real row in the base game ("Flares").
-const COUNTERMEASURE_STAT_GROUPS = ["economy"];
+const COUNTERMEASURE_STAT_GROUPS = [statGroup("economy")];
 const COUNTERMEASURE_STAT_DEFINITIONS = [
   statDef("price_min", "countermeasures_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "countermeasures_base", "economy", "component_analyzer.stat_labels.price_avg"),
@@ -6812,7 +10373,7 @@ const COUNTERMEASURE_STAT_DEFINITIONS = [
 
 // crew_base -- same story as countermeasures_base immediately above:
 // price is the only stat, one real row ("Crew").
-const CREW_STAT_GROUPS = ["economy"];
+const CREW_STAT_GROUPS = [statGroup("economy")];
 const CREW_STAT_DEFINITIONS = [
   statDef("price_min", "crew_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "crew_base", "economy", "component_analyzer.stat_labels.price_avg"),
@@ -6829,7 +10390,7 @@ const CREW_STAT_DEFINITIONS = [
 // old type) plus leaf_ware (true = a bottom-of-chain resource with no
 // further recipe inputs, e.g. Ore/Silicon/Ice -- false = manufactured from
 // other wares). economy is price.
-const ECONOMY_WARE_STAT_GROUPS = ["core", "economy"];
+const ECONOMY_WARE_STAT_GROUPS = [statGroup("core"), statGroup("economy")];
 const ECONOMY_WARE_STAT_DEFINITIONS = [
   statDef("volume", "economy_wares_base", "core", "component_analyzer.stat_labels.volume"),
   cargoTypeStatDef("transport", "economy_wares_base", "core", "component_analyzer.stat_labels.transport"),
@@ -6837,6 +10398,32 @@ const ECONOMY_WARE_STAT_DEFINITIONS = [
   statDef("price_min", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "economy_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
+  // The Statistics Lab's own first "pre-derived" stat (GitHub issue #26,
+  // "Known calculated stats to start with" -- the price-to-cargo-space
+  // ratio), and the simplest one on that list by a wide margin: unlike
+  // burst/sustained damage or overheat time (which need real in-game
+  // verification before shipping -- see that issue's own "Important
+  // caveat"), price/volume is a plain division of two already-fundamental
+  // stats on this exact same catalog, nothing to get wrong or need to
+  // sanity-check beyond arithmetic itself. `kind`/`formula` are set
+  // explicitly here (not left for the blanket fundamental-stamping pass
+  // above to fill in, see its own updated comment) -- this has no real
+  // "price_per_volume" column anywhere, resolveStatValue() evaluates the
+  // formula instead of reading one.
+  {
+    key: "price_per_volume",
+    table: "economy_wares_base",
+    group: "economy",
+    labelKey: "component_analyzer.stat_labels.price_per_volume",
+    kind: "pre-derived",
+    formula: {
+      expression: "price_avg / volume",
+      variables: {
+        price_avg: { type: "stat_ref", componentType: "economy_ware", statId: "price_avg" },
+        volume: { type: "stat_ref", componentType: "economy_ware", statId: "volume" },
+      },
+    },
+  },
 ];
 
 // missiles_base -- core (identity), flight (movement/lock/lifetime),
@@ -6844,7 +10431,7 @@ const ECONOMY_WARE_STAT_DEFINITIONS = [
 // explosion numbers, reload, launcher-compatibility tag), economy (price
 // only -- missiles_base has no production_method/production_time column at
 // all, unlike every equipment_wares_base-backed type above).
-const MISSILE_STAT_GROUPS = ["core", "flight", "damage", "economy"];
+const MISSILE_STAT_GROUPS = [statGroup("core"), statGroup("flight"), statGroup("damage"), statGroup("economy")];
 const MISSILE_STAT_DEFINITIONS = [
   statDef("hull", "missiles_base", "core", "component_analyzer.stat_labels.hull"),
   missileWeaponSystemStatDef("weapon_system", "missiles_base", "core", "component_analyzer.stat_labels.weapon_system"),
@@ -6860,6 +10447,102 @@ const MISSILE_STAT_DEFINITIONS = [
   boolStatDef("missile_guided", "missiles_base", "flight", "component_analyzer.stat_labels.missile_guided"),
   statDef("lock_time", "missiles_base", "flight", "component_analyzer.stat_labels.lock_time"),
   statDef("lock_range", "missiles_base", "flight", "component_analyzer.stat_labels.lock_range"),
+  // The missile's own real, separate propulsion macro (GitHub issue #26
+  // phase-5) -- forward/reverse thrust plus, for guided/swarm missiles,
+  // real strafe/pitch/yaw/roll maneuvering thrust (a dumbfire missile has
+  // none of the latter -- it can't steer at all, confirmed 0 on every
+  // axis for the one real dumbfire propulsion macro). NULL for the
+  // handful of missiles (heavy torpedoes) with no propulsion macro at
+  // all -- a real absence, not a gap. Raw thrust values only; turning
+  // that into a real speed/acceleration/turn-rate stat still needs the
+  // missile's own physics_mass and drag (not extracted yet -- drag is
+  // present in the game's own <physics> block but this app has never
+  // read it, same as a ship's own flight_model does for a chassis).
+  statDef("thrust_forward", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_forward"),
+  statDef("thrust_reverse", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_reverse"),
+  statDef("thrust_strafe", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_strafe"),
+  statDef("thrust_pitch", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_pitch"),
+  statDef("thrust_yaw", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_yaw"),
+  statDef("thrust_roll", "missiles_base", "flight", "component_analyzer.stat_labels.thrust_roll"),
+  // The missile's own <physics><drag/><inertia/></physics> (GitHub issue
+  // #26 phase-6) -- same raw shape a ship's own flight_model table reads
+  // generically; here just the handful of attributes the pre-derived
+  // flight stats below actually need. physics_drag_horizontal doubles as
+  // "vertical" too -- confirmed identical on every real missile checked
+  // (a missile body has no up/down vs left/right asymmetry the way a
+  // ship's hull does), so there's no separate physics_drag_vertical stat.
+  statDef("physics_drag_forward", "missiles_base", "flight", "component_analyzer.stat_labels.physics_drag_forward"),
+  statDef(
+    "physics_drag_horizontal",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.physics_drag_horizontal",
+  ),
+  statDef("physics_drag_pitch", "missiles_base", "flight", "component_analyzer.stat_labels.physics_drag_pitch"),
+  statDef("physics_drag_yaw", "missiles_base", "flight", "component_analyzer.stat_labels.physics_drag_yaw"),
+  statDef("physics_drag_roll", "missiles_base", "flight", "component_analyzer.stat_labels.physics_drag_roll"),
+  // Hand-measured, not derivable from any extracted game file (GitHub
+  // issue #26 phase-7 -- see MISSILE_ANOMALOUS_RANGE_MULTIPLIER's own
+  // comment in generate_ships_table.py for the full methodology): the
+  // user compared this app's own computed Max Distance against the real
+  // in-game Encyclopedia range for all 18 real missiles. 13 of 18 round to
+  // exactly 1.00 (the formula is already right for them); the 5 plain
+  // dumbfire-family missiles (dumbfire + its "breaching" variant, all 3
+  // sizes) consistently undershoot by ~19-27%, so this multiplier corrects
+  // just those 5. Defaults to 1 (a no-op) for every other missile.
+  statDef(
+    "anomalous_range_multiplier",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.anomalous_range_multiplier",
+    "component_analyzer.stat_descriptions.anomalous_range_multiplier",
+  ),
+  // Hand-measured, not derivable from any extracted game file (GitHub
+  // issue #26 phase-8 -- see MISSILE_GAME_VALUES' own comment in
+  // generate_ships_table.py): the real Max Turning/Pitch/Vertical Strafe/
+  // Horizontal Strafe Rate shown on the player's own real in-game
+  // Encyclopedia screenshot, for all 16 real missiles the player has one
+  // for -- the two Barrage missiles are left blank (no screenshot), not
+  // guessed. These exist purely as ground truth to check a formula
+  // against, the same role missile_max_distance's own real Encyclopedia
+  // range numbers already played for anomalous_range_multiplier -- NOT
+  // themselves used by missile_pitch_rate_test/missile_yaw_rate_test/
+  // missile_roll_rate_test (those remain confirmed-wrong test formulas;
+  // see their own comments). Two independent prior guesses (thrust/drag,
+  // thrust/inertia) and a third-party wiki's own published numbers were
+  // all checked against this data and none held up -- the wiki in
+  // particular is off by roughly 10x on every guided-family missile
+  // (e.g. it lists the Light Guided Missile at 22 deg/s against a real
+  // 2 deg/s) -- so no corrected pre-derived stat exists yet; these are
+  // the real numbers a future attempt would need to match.
+  statDef(
+    "game_value_turn_rate",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.game_value_turn_rate",
+    "component_analyzer.stat_descriptions.missile_game_value",
+  ),
+  statDef(
+    "game_value_pitch_rate",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.game_value_pitch_rate",
+    "component_analyzer.stat_descriptions.missile_game_value",
+  ),
+  statDef(
+    "game_value_vertical_strafe",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.game_value_vertical_strafe",
+    "component_analyzer.stat_descriptions.missile_game_value",
+  ),
+  statDef(
+    "game_value_horizontal_strafe",
+    "missiles_base",
+    "flight",
+    "component_analyzer.stat_labels.game_value_horizontal_strafe",
+    "component_analyzer.stat_descriptions.missile_game_value",
+  ),
   statDef("ammunition_value", "missiles_base", "damage", "component_analyzer.stat_labels.ammunition_value"),
   statDef("ammunition_reload", "missiles_base", "damage", "component_analyzer.stat_labels.ammunition_reload"),
   statDef("missile_amount", "missiles_base", "damage", "component_analyzer.stat_labels.missile_amount"),
@@ -6882,6 +10565,293 @@ const MISSILE_STAT_DEFINITIONS = [
   statDef("price_avg", "missiles_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "missiles_base", "economy", "component_analyzer.stat_labels.price_max"),
 ];
+
+// A missile carries its own thrust AND its own drag/mass on one row (its
+// propulsion is a real, separate engine macro it references, wired in as
+// plain thrust_*/physics_drag_*/physics_mass columns above -- GitHub issue
+// #26 phase-6), so every formula below is same-type (missile -> missile,
+// componentType "self"), unlike CROSS_COMPONENT_FLIGHT_STATS' own
+// chassis+engine split for ships. registerCrossComponentStats() is reused
+// purely for its shared push-into-catalog plumbing; nothing here is
+// actually cross-component. "No boost or travel" per the user's own
+// request -- missiles have neither (no <boost>/<travel> element anywhere
+// in the game's own missile macros), only a single constant thrust.
+const MISSILE_FLIGHT_DERIVED_STATS = [
+  {
+    key: "missile_max_speed",
+    labelKey: "component_analyzer.stat_labels.missile_max_speed",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_max_speed",
+    // CONFIRMED against two real Encyclopedia entries (GitHub issue #26
+    // phase-6): the same forward-thrust/forward-drag terminal-velocity
+    // model a ship's own Max Speed uses (see max_speed above).
+    // Heavy Cluster Rocket: 57.887 / 0.085 = 681.02 -> real 681 m/s.
+    // Heavy Guided Missile: 57.887 / 0.32 = 180.90 -> real 180 m/s.
+    expression: "thrust_forward / physics_drag_forward",
+    variables: {
+      thrust_forward: { componentType: "self", statId: "thrust_forward" },
+      physics_drag_forward: { componentType: "self", statId: "physics_drag_forward" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_acceleration",
+    labelKey: "component_analyzer.stat_labels.missile_acceleration",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_acceleration",
+    // Same F = ma model a ship's own Max Acceleration uses (thrust divided
+    // by mass, not drag -- see max_acceleration above). Built from the
+    // same two inputs (thrust_forward, physics_mass) that made
+    // missile_max_speed's own model trustworthy, but not itself checked
+    // against a real Encyclopedia number (none of the ones seen so far
+    // show an acceleration figure).
+    expression: "thrust_forward / physics_mass",
+    variables: {
+      thrust_forward: { componentType: "self", statId: "thrust_forward" },
+      physics_mass: { componentType: "self", statId: "physics_mass" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_strafe_speed",
+    labelKey: "component_analyzer.stat_labels.missile_strafe_speed",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_strafe_speed",
+    // Same thrust/drag terminal-velocity model as missile_max_speed, on
+    // the strafe axis -- a ship splits this into separate horizontal/
+    // vertical stats because chassis drag differs by axis; a missile's own
+    // horizontal and vertical drag are always identical (see
+    // physics_drag_horizontal's own comment), so one stat covers both. 0
+    // for every dumbfire missile (no strafing thrust at all -- it can't
+    // steer, confirmed 0 on the one real dumbfire propulsion macro). Not
+    // itself checked against a real Encyclopedia number.
+    expression: "thrust_strafe / physics_drag_horizontal",
+    variables: {
+      thrust_strafe: { componentType: "self", statId: "thrust_strafe" },
+      physics_drag_horizontal: { componentType: "self", statId: "physics_drag_horizontal" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_pitch_rate_test",
+    labelKey: "component_analyzer.stat_labels.missile_pitch_rate_test",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_turn_rate_test",
+    // TEST -- CONFIRMED WRONG (GitHub issue #26 phase-6): the exact same
+    // thrust/drag model that correctly predicts a ship's own pitch_rate
+    // (see pitch_rate above), applied to the Heavy Guided Missile's own
+    // pitch thrust (55) and pitch drag (4.8), predicts 55/4.8 x 180/pi =~
+    // 657 deg/s -- the real Encyclopedia entry shows Max Pitch Rate
+    // 0.2 deg/s, over 3,000x smaller. A dumbfire missile (0 pitch thrust)
+    // does correctly come out as 0, matching its own real 0 deg/s -- but
+    // that's a degenerate case (anything divided into 0 is 0), not real
+    // confirmation of the formula. Missiles most likely turn via a
+    // completely different mechanic (e.g. a seeker/guidance turn-rate
+    // limit) this app has no extracted data for at all. Kept as a clearly-
+    // marked test rather than a real stat, same convention as
+    // travel_acceleration_test_1/2.
+    expression: "thrust_pitch / physics_drag_pitch * 180 / pi",
+    variables: {
+      thrust_pitch: { componentType: "self", statId: "thrust_pitch" },
+      physics_drag_pitch: { componentType: "self", statId: "physics_drag_pitch" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_yaw_rate_test",
+    labelKey: "component_analyzer.stat_labels.missile_yaw_rate_test",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_turn_rate_test",
+    // TEST -- see missile_pitch_rate_test's own comment (same formula,
+    // same confirmed-wrong result: yaw thrust/drag are identical to pitch
+    // on every real missile checked).
+    expression: "thrust_yaw / physics_drag_yaw * 180 / pi",
+    variables: {
+      thrust_yaw: { componentType: "self", statId: "thrust_yaw" },
+      physics_drag_yaw: { componentType: "self", statId: "physics_drag_yaw" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_roll_rate_test",
+    labelKey: "component_analyzer.stat_labels.missile_roll_rate_test",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_turn_rate_test",
+    // TEST -- see missile_pitch_rate_test's own comment. No real
+    // Encyclopedia entry shows a roll figure at all (same gap noted on
+    // roll_rate above, for ships) -- assumed equally wrong by the same
+    // reasoning, not independently confirmed either way.
+    expression: "thrust_roll / physics_drag_roll * 180 / pi",
+    variables: {
+      thrust_roll: { componentType: "self", statId: "thrust_roll" },
+      physics_drag_roll: { componentType: "self", statId: "physics_drag_roll" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+  {
+    key: "missile_max_distance",
+    labelKey: "component_analyzer.stat_labels.missile_max_distance",
+    descriptionKey: "component_analyzer.stat_descriptions.missile_max_distance",
+    // Max Speed x Time To Live, per the user's own request -- the
+    // simplest possible distance estimate, treating the missile as
+    // already at top speed for its entire flight. CONFIRMED against all
+    // 18 real missiles (GitHub issue #26 phase-7): the user compared this
+    // formula's own output to the real in-game Encyclopedia range for
+    // every one of them. 13 of 18 (every guided/smart/swarm/heatseeker/
+    // torpedo/disruptor/interceptor/barrage missile) already matched
+    // almost exactly with no correction at all. The remaining 5 -- every
+    // plain, unguided dumbfire-family missile -- consistently undershot by
+    // ~19-27%, a real physical gap this simple model can't capture on its
+    // own (a missile needs real time to accelerate up to its own top
+    // speed, and the compiled game engine's own actual range formula isn't
+    // readable from any asset this app extracts -- confirmed via
+    // menu_encyclopedia.lua, which only displays an already-computed
+    // GetLibraryEntry() result, never calculates one itself). See
+    // anomalous_range_multiplier's own comment for that correction, which
+    // is 1 (a no-op) for the 13 missiles that never needed one.
+    expression: "missile_max_speed * missile_lifetime * anomalous_range_multiplier / 1000",
+    variables: {
+      missile_max_speed: { componentType: "self", statId: "missile_max_speed" },
+      missile_lifetime: { componentType: "self", statId: "missile_lifetime" },
+      anomalous_range_multiplier: { componentType: "self", statId: "anomalous_range_multiplier" },
+    },
+    appliesTo: { missile: "flight" },
+  },
+];
+COMPONENT_TYPE_DEFINITION_ARRAYS.missile = MISSILE_STAT_DEFINITIONS;
+registerCrossComponentStats(MISSILE_FLIGHT_DERIVED_STATS);
+
+// ---- Equipped Cost (user call, 2026-11-01) ----
+// "Avg/Min/Max Equipped Cost": the sum of every REALLY-equipped
+// component's own price_avg/price_min/price_max, across every equippable
+// sub-type at once (engine/thruster/shield/weapon/turret/missile/drone/
+// deployable/countermeasure/crew/software). Chassis-only (unlike
+// price_min/avg/max themselves, which are plain real columns defined on
+// every type) -- same reasoning as shield_total_mj/ship_sustained_damage_total
+// above, both ALSO chassis-only: every sub-type's own sum below is capped
+// to a REAL chassis slot/capacity count, which only exists as a concept
+// when a real chassis is actually in view. Registering this on, say, a
+// bare Weapon table would have no chassis to read a cap from at all.
+//
+// UPDATE (2026-11-01, user call): originally had NO cap at all ("sum of
+// whatever's mocked") -- WRONG. A Hydra (4 main weapon slots) with 20 M
+// Ion Cannons mocked onto it for comparison purposes must only count 4
+// of them, the same way shield_total_mj/ship_sustained_damage_total
+// already cap their own sums to a real slot count rather than trusting
+// however many mocks happen to be configured. Each sub-type below is
+// capped the same way those two already are, using whichever real
+// chassis column actually represents that type's own slot/capacity
+// count:
+// - engine/shield: `engines`/`shields` (chassis's own main slot counts).
+// - weapon: TWO pools summed, same split ship_sustained_damage_total
+//   already uses -- main (`weapons`, sizeFilter "chassis") + bonus L
+//   (`bonus_l_weapons`, sizeFilter "l", zeroLimitIsZero so a ship with no
+//   bonus L slots -- every ship but the Asgard -- doesn't show a
+//   spurious missing-mock warning for that pool). Missile launcher
+//   mocks share this same "weapon" bucket and fall under the SAME main
+//   pool/cap (no separate missile-launcher-sized pool exists to split
+//   them into).
+// - turret: TWO pools summed, mirroring the same main/secondary split --
+//   `turret_l` (sizeFilter "l") + `turret_m` (sizeFilter "m"), the two
+//   real turret-slot-count columns this app already has (no established
+//   precedent to copy here, built fresh on the same pattern).
+// - missile/drone/deployable/countermeasure: capped to the chassis's own
+//   CAPACITY stat (missile_capacity/drone_capacity/deployable_capacity/
+//   countermeasure_capacity) -- a real unit budget, not an entry count,
+//   which resolveAggregateVariable()'s own mockBudget already consumes
+//   correctly per-entry via each mock's own `count` (so "1 mock entry
+//   worth 20 units" is handled the same as "20 separate entries" would
+//   be).
+// - crew: capped to `crew` (the chassis's own crew capacity column).
+// - thruster: user call -- always exactly 1 on every real ship, and no
+//   chassis column actually represents that (there's no "thrusters"
+//   stat the way there's an "engines" one) -- a literal 1 here instead
+//   of a named chassis variable (see aggregateLimitValue()'s own
+//   comment on `limit` accepting a plain number for exactly this case).
+// - software: user call -- left UNCAPPED. Confirmed no software mod
+//   category exists at all (MOD_LAB_COMPONENT_TYPE_MAP has no "software"
+//   entry -- equipmentmods.xml has no matching category), so there's no
+//   "many options to compare" use case the way weapons/turrets have; a
+//   real ship's own software mocks already come straight from its real,
+//   already-bounded loadout.selections (one real group per slot, see
+//   buildShipMocksFromLoadout()), never over-mocked in practice. No
+//   chassis "software slot count" stat exists to cap against anyway.
+const ECONOMY_EQUIPPED_COST_CAP_VARIABLES = {
+  engine_slots: { componentType: "chassis", statId: "engines" },
+  shield_slots: { componentType: "chassis", statId: "shields" },
+  weapon_slots: { componentType: "chassis", statId: "weapons" },
+  bonus_l_weapon_slots: { componentType: "chassis", statId: "bonus_l_weapons" },
+  turret_l_slots: { componentType: "chassis", statId: "turret_l" },
+  turret_m_slots: { componentType: "chassis", statId: "turret_m" },
+  missile_capacity_slots: { componentType: "chassis", statId: "missile_capacity" },
+  drone_capacity_slots: { componentType: "chassis", statId: "drone_capacity" },
+  deployable_capacity_slots: { componentType: "chassis", statId: "deployable_capacity" },
+  countermeasure_capacity_slots: { componentType: "chassis", statId: "countermeasure_capacity" },
+  crew_capacity_slots: { componentType: "chassis", statId: "crew" },
+};
+
+function equippedCostStatVariables(priceStatId) {
+  // zeroLimitIsZero on every CAPPED sum (everything but software, which
+  // has no limit at all -- see that case's own comment above) -- a
+  // chassis with 0 real slots/capacity of some type (e.g. most combat
+  // ships' own 0 drone_capacity) must cap that sum to 0, not fall
+  // through to "no limit at all" the way a null/non-numeric limitValue
+  // normally would (see resolveAggregateVariable()'s own mockBudget
+  // comment: a non-numeric limitValue means Infinity, not zero).
+  // treatMissingAsZero covers the OTHER empty case -- real slots exist
+  // (limitValue > 0) but nothing is actually mocked into them yet.
+  const sum = (componentType, extra = {}) => ({
+    componentType,
+    statId: priceStatId,
+    aggregation: "sum",
+    treatMissingAsZero: true,
+    zeroLimitIsZero: true,
+    ...extra,
+  });
+  return {
+    ...ECONOMY_EQUIPPED_COST_CAP_VARIABLES,
+    engine_sum: sum("engine", { limit: "engine_slots" }),
+    thruster_sum: sum("thruster", { limit: 1 }),
+    shield_sum: sum("shield", { limit: "shield_slots" }),
+    weapon_main_sum: sum("weapon", { limit: "weapon_slots", sizeFilter: "chassis" }),
+    weapon_bonus_l_sum: sum("weapon", { limit: "bonus_l_weapon_slots", sizeFilter: "l" }),
+    turret_l_sum: sum("turret", { limit: "turret_l_slots", sizeFilter: "l" }),
+    turret_m_sum: sum("turret", { limit: "turret_m_slots", sizeFilter: "m" }),
+    missile_sum: sum("missile", { limit: "missile_capacity_slots" }),
+    drone_sum: sum("drone", { limit: "drone_capacity_slots" }),
+    deployable_sum: sum("deployable", { limit: "deployable_capacity_slots" }),
+    countermeasure_sum: sum("countermeasure", { limit: "countermeasure_capacity_slots" }),
+    crew_sum: sum("crew", { limit: "crew_capacity_slots" }),
+    // No limit, no zeroLimitIsZero -- see this stat's own top comment on
+    // why software is deliberately left uncapped.
+    software_sum: { componentType: "software", statId: priceStatId, aggregation: "sum", treatMissingAsZero: true },
+  };
+}
+
+const EQUIPPED_COST_SUM_EXPRESSION =
+  "engine_sum + thruster_sum + shield_sum + weapon_main_sum + weapon_bonus_l_sum + turret_l_sum + turret_m_sum + missile_sum + drone_sum + deployable_sum + countermeasure_sum + crew_sum + software_sum";
+
+const ECONOMY_EQUIPPED_COST_STATS = [
+  {
+    key: "equipped_cost_avg",
+    labelKey: "component_analyzer.stat_labels.equipped_cost_avg",
+    descriptionKey: "component_analyzer.stat_descriptions.equipped_cost_avg",
+    expression: EQUIPPED_COST_SUM_EXPRESSION,
+    variables: equippedCostStatVariables("price_avg"),
+    appliesTo: { chassis: "economy" },
+  },
+  {
+    key: "equipped_cost_min",
+    labelKey: "component_analyzer.stat_labels.equipped_cost_min",
+    descriptionKey: "component_analyzer.stat_descriptions.equipped_cost_min",
+    expression: EQUIPPED_COST_SUM_EXPRESSION,
+    variables: equippedCostStatVariables("price_min"),
+    appliesTo: { chassis: "economy" },
+  },
+  {
+    key: "equipped_cost_max",
+    labelKey: "component_analyzer.stat_labels.equipped_cost_max",
+    descriptionKey: "component_analyzer.stat_descriptions.equipped_cost_max",
+    expression: EQUIPPED_COST_SUM_EXPRESSION,
+    variables: equippedCostStatVariables("price_max"),
+    appliesTo: { chassis: "economy" },
+  },
+];
+registerCrossComponentStats(ECONOMY_EQUIPPED_COST_STATS);
 
 // Every real component type this app already models a flat, ship-agnostic
 // list for -- "chassis" reuses data this app already loads elsewhere
@@ -6909,6 +10879,30 @@ const COMPONENT_TYPES = [
 
 function componentTypeI18nKey(componentType) {
   return COMPONENT_TYPES.find((type) => type.id === componentType)?.i18nKey ?? componentType;
+}
+
+// A lowercase, singular noun for `componentType` -- fit for "this ___"
+// phrasing (e.g. mock_trace_skipped_ship's own "it can't be fitted to this
+// {{componentType}}"), unlike componentTypeI18nKey()'s own labels (picker/
+// nav text, plural and title-cased: "Engines", "Shields", "Ship Chassis").
+// Only covers the types SHIP_FIT_COMPONENT_TYPES' own ship-fit check can
+// ever actually name here (chassis, engine, shield, weapon, turret,
+// thruster -- see mockCompatibility()) -- falls back to
+// componentTypeI18nKey()'s own plural label for anything else, since that
+// can't currently happen but shouldn't render as a blank/broken string if
+// it ever does.
+const TYPE_SINGULAR_I18N_KEYS = {
+  chassis: "component_analyzer.type_singular_chassis",
+  engine: "component_analyzer.type_singular_engine",
+  shield: "component_analyzer.type_singular_shield",
+  weapon: "component_analyzer.type_singular_weapon",
+  turret: "component_analyzer.type_singular_turret",
+  thruster: "component_analyzer.type_singular_thruster",
+};
+
+function componentTypeSingularLabel(componentType) {
+  const key = TYPE_SINGULAR_I18N_KEYS[componentType];
+  return key ? t(key) : t(componentTypeI18nKey(componentType));
 }
 
 // type id -> {ware_id, name}[], fetched once per type per page load (a
@@ -6991,6 +10985,1374 @@ const STAT_CATALOG_BY_TYPE = {
   economy_ware: { groups: ECONOMY_WARE_STAT_GROUPS, definitions: ECONOMY_WARE_STAT_DEFINITIONS },
 };
 
+// Stamps kind: "fundamental" onto every stat definition in every catalog
+// above that doesn't already declare its own `kind` -- a blanket
+// post-processing pass here, rather than baking it into statDef() (and
+// every boolStatDef()/cargoTypeStatDef()/etc. wrapper) or hand-adding it
+// to every individual definition, specifically because a real chunk of
+// these (chassis's whole catalog, plus scattered entries elsewhere --
+// anywhere a plain {key, table, group, labelKey} object literal was
+// written directly instead of going through a helper) never call
+// statDef() at all, so tagging it there alone would silently miss them.
+// This is the Statistics Lab's own "fundamental" tag (see GitHub issue
+// #26) -- see statDef()'s own comment for what it means. The `undefined`
+// check is what lets a "pre-derived" stat definition (backed by a formula
+// instead of a real column -- e.g. ECONOMY_WARE_STAT_DEFINITIONS' own
+// "price_per_volume") sit directly in one of these same
+// *_STAT_DEFINITIONS arrays with its own `kind` already set, and have
+// this loop leave it alone rather than clobbering it back to
+// "fundamental" just because it happens to live in the same array as 100
+// real fundamental ones.
+for (const catalog of Object.values(STAT_CATALOG_BY_TYPE)) {
+  for (const def of catalog.definitions) {
+    if (def.kind === undefined) def.kind = "fundamental";
+  }
+}
+
+// ---- Statistics Lab: user-created stats/groups (GitHub issue #26) ----
+// Persisted globally (see PERSISTED_STATE_KEY below), independent of any
+// one Component Analyzer table -- a custom stat/group belongs to a
+// component TYPE, not a table, so every table of that type (existing or
+// created later) sees the exact same catalog entry, the same way a
+// built-in stat/group already does. `kind` is always "derived" for a
+// stat, "dynamic" for a group -- the two user-created tags statDef()'s/
+// statGroup()'s own comments already reserved for this.
+let customStatGroups = [];
+// A "family" is ONE user-authored formula that can be registered on
+// several component types at once -- the same shape
+// CROSS_COMPONENT_FLIGHT_STATS' own entries use for the built-in flight
+// stats further down, just user-authored and persisted instead of
+// hardcoded. {id, key, label, formula: {expression, variables}, groups:
+// {componentType: groupId}} -- `variables` here is the shared, not-yet-
+// split raw {componentType, statId} target per name (see the Stat Lab
+// builder's own statLabBuilderVariableTargets); `groups` decides which
+// types this family is actually registered on at all -- a component type
+// that appears in some variable's own componentType but is missing from
+// `groups` simply isn't selectable from that type's own table, exactly as
+// if the family didn't exist there (see statCatalogForComponentType()'s
+// own generation below). Kept as its own separate structure -- never
+// pushed into STAT_CATALOG_BY_TYPE's own arrays -- so a family's shared
+// fields (key, label, formula) live in exactly one place regardless of how
+// many types it's registered on, instead of N independent per-type
+// definitions that could drift out of sync with each other.
+let customStatFamilies = [];
+let nextCustomStatGroupId = 1;
+let nextCustomStatFamilyId = 1;
+
+function makeCustomStatGroup(componentType, name) {
+  return { id: `custom_group_${nextCustomStatGroupId++}`, componentType, name, kind: "dynamic" };
+}
+
+// `key` is this family's own identity everywhere a built-in stat's real
+// column name would be (a stat set's own selectedStats, sort state,
+// mod-highlight lookups) -- the "custom_stat_<n>" shape can never collide
+// with a real database column the way a user-typed name might. Shared by
+// every component type this family is registered on; `id` is this
+// family's own separate identity (edit/delete/Clone lookups), never shown
+// anywhere.
+function makeCustomStatFamily(label, formula, groups, description = "") {
+  const id = nextCustomStatFamilyId++;
+  return { id, key: `custom_stat_${id}`, label, formula, groups, description };
+}
+
+// ---- Constants (GitHub issue #26 extension: Sustained/Burst Damage) ----
+// A curated, GLOBAL numeric value a formula can reference the same way it
+// references a stat (see "constant_ref" in resolveFormulaVariable() below)
+// -- for an input that doesn't belong to any one component type (e.g. a
+// blending exponent the Sustained Damage formula needs), where a per-type
+// stat_ref/mock_ref would make no sense. Two kinds, the exact same
+// fundamental/pre-derived/derived vocabulary a stat's own `kind` uses (see
+// STAT_TAG_LABEL_KEYS): "pre-derived" (app-curated, in CONSTANT_DEFINITIONS
+// below, never editable/deletable from the UI) and "derived" (user-authored
+// via the Stat Lab's own Constants page, persisted in customConstants,
+// addable/deletable there). Shape: { id, kind: "pre-derived"|"derived",
+// labelKey|label, descriptionKey|description, type: "literal"|"formula",
+// value (a number, when type is "literal"), formula ({expression,
+// variables}, when type is "formula" -- every variable is a constant_ref,
+// see the Constants page's own wizard) }. labelKey/label and
+// descriptionKey/description deliberately match a stat definition's own
+// shape exactly, so statDefLabel()/statDefDescription() work unchanged on a
+// constant too.
+// R (the Sustained DPS mechanism constant, see sustained_mechanism_r's own
+// comment) and the turret output divisor are the first real pre-derived
+// constants -- curated via real-screenshot curve-fitting (GitHub issue #26),
+// not extracted from any game XML column. Referenced via `{componentType:
+// "constant", statId: "<id>"}` targets in COMBAT_DERIVED_STATS/
+// CHASSIS_AGGREGATE_STATS below, exactly like any other cross-component
+// variable target -- crossComponentFormula() special-cases "constant" into
+// a constant_ref regardless of which real component type the formula is
+// being generated for.
+const CONSTANT_DEFINITIONS = [
+  {
+    id: "const_sustained_r_continuous",
+    kind: "pre-derived",
+    labelKey: "component_analyzer.constant_labels.sustained_r_continuous",
+    descriptionKey: "component_analyzer.constant_descriptions.sustained_r_continuous",
+    type: "literal",
+    value: 3.12,
+  },
+  {
+    id: "const_sustained_r_discrete",
+    kind: "pre-derived",
+    labelKey: "component_analyzer.constant_labels.sustained_r_discrete",
+    descriptionKey: "component_analyzer.constant_descriptions.sustained_r_discrete",
+    type: "literal",
+    value: 3.52,
+  },
+  {
+    id: "const_turret_output_divisor",
+    kind: "pre-derived",
+    labelKey: "component_analyzer.constant_labels.turret_output_divisor",
+    descriptionKey: "component_analyzer.constant_descriptions.turret_output_divisor",
+    type: "literal",
+    value: 6,
+  },
+];
+let customConstants = [];
+let nextCustomConstantId = 1;
+
+function makeCustomConstant(label, type, value, formula, description = "") {
+  const id = `custom_constant_${nextCustomConstantId++}`;
+  return { id, kind: "derived", label, description, type, value, formula };
+}
+
+function allConstantDefs() {
+  return [...CONSTANT_DEFINITIONS, ...customConstants];
+}
+
+function lookupConstantDef(constantId) {
+  return allConstantDefs().find((def) => def.id === constantId) ?? null;
+}
+
+// Resolves one constant to a plain number -- `resolving` (the same Set a
+// stat_ref's own resolutionKey chain already threads through
+// evaluateStatFormula()/resolveFormulaVariable()) catches a constant that
+// (directly, or via another constant's own formula) references itself,
+// instead of hanging the page; a constant id can never collide with a
+// stat's own "componentType:statId" resolutionKey shape, so sharing one Set
+// across both is safe.
+function resolveConstantValue(constantId, resolving) {
+  const def = lookupConstantDef(constantId);
+  if (!def) return null;
+  if (resolving?.has(constantId)) {
+    console.error(`Statistics Lab: circular constant reference detected at ${constantId}`);
+    return null;
+  }
+  if (def.type === "literal") return typeof def.value === "number" ? def.value : null;
+  if (def.type === "formula") {
+    const nextResolving = new Set(resolving);
+    nextResolving.add(constantId);
+    return evaluateStatFormula(def.formula, null, { resolving: nextResolving });
+  }
+  return null;
+}
+
+// COMPONENT_TYPE_PRIMARY_TABLE is declared much earlier (right before
+// CHASSIS_STAT_GROUPS) -- CROSS_COMPONENT_FLIGHT_STATS' own generation
+// loop needs it at plain top-level execution time, long before this point
+// in the file, so it can't live down here where it'd logically read
+// better next to statDefFromFamily() below.
+
+// Builds one componentType's own formula object from a shared
+// {name: {componentType, statId, aggregation, limit}} variable map --
+// whichever variable's own componentType matches `owningType` becomes a
+// same-type stat_ref (reads the real row directly); every other one has
+// no real row of that type to read from a table whose own rows are
+// `owningType`, so it goes through a configured mock instead (mock_ref,
+// keyed "<componentType>:<statId>" -- see resolveMockValue()'s own
+// comment). componentType: "self" resolves to `owningType` itself before
+// that comparison -- for a variable that should ALWAYS be same-type
+// regardless of which of a stat's several registered types is currently
+// being generated for (e.g. COMBAT_DERIVED_STATS' own rate_of_fire/
+// hull_dps/shield_dps/burst_dps, registered on both weapon and turret --
+// a literal `componentType: "weapon"` target would incorrectly become a
+// mock_ref to a "weapon:..." mock when generating the TURRET version of
+// these stats instead of reading the real turret row directly, since
+// "weapon" !== "turret" -- confirmed the hard way, see GitHub issue #26's
+// own phase-3 notes: avg_turret_output_test was silently reading a
+// configured WEAPON mock instead of the turret being tested, which is why
+// two independently-configured weapon/turret mocks of the same
+// underlying gatling produced the exact same number for both stats).
+// "self" is meaningless (and never given) on the single-appliesTo stats
+// further down that already legitimately cross to a different real type
+// by design (e.g. the "shield"/"turret"/"weapon" targets inside the
+// chassis-only aggregate stats need the OTHER type on purpose, not
+// "whichever type this happens to be generated for", which is always
+// chassis for those anyway).
+//
+// A target with a real `aggregation` (anything but "none"/undefined)
+// always becomes an aggregate_ref instead, REGARDLESS of whether its
+// componentType matches owningType -- an aggregate reads across every
+// mock configured for that type PLUS the row actually being evaluated
+// when it's that same type too (see resolveAggregateVariable()'s own
+// comment -- "sum of every mounted shield's capacity" viewed from one
+// real Shield row counts that row as one already-mounted instance, mocks
+// standing in for the rest). `limit`, when present, names another
+// variable in this SAME formula (by its `name` key) whose own resolved
+// value caps how many configured mocks the aggregate folds in on top of
+// the row -- see evaluateStatFormula()'s own two-pass resolution. Shared
+// by both the built-in cross-component flight stats and every
+// user-created family.
+function crossComponentFormula(owningType, expression, variableTargets) {
+  const variables = {};
+  for (const [name, target] of Object.entries(variableTargets)) {
+    // A "Constant" variable row (see statLabVariableTypeOptions()) has no
+    // real component type at all -- constantId rides along in the same
+    // `statId` field every other target shape already uses, purely so the
+    // rest of this map/save/clone/rename machinery (which only ever reads
+    // {componentType, statId} generically) needs no separate shape for it.
+    if (target.componentType === "constant") {
+      variables[name] = { type: "constant_ref", constantId: target.statId };
+      continue;
+    }
+    const componentType = target.componentType === "self" ? owningType : target.componentType;
+    if (target.aggregation && target.aggregation !== "none") {
+      variables[name] = {
+        type: "aggregate_ref",
+        aggregation: target.aggregation,
+        componentType,
+        statId: target.statId,
+        // ?? not || -- a literal 0 limit (falsy but meaningful, distinct
+        // from "no limit at all") must survive here; see
+        // aggregateLimitValue()'s own comment on when `limit` is a plain
+        // number instead of a named-variable string.
+        limit: target.limit ?? undefined,
+        sizeFilter: target.sizeFilter || undefined,
+        zeroLimitIsZero: target.zeroLimitIsZero || undefined,
+        // See resolveAggregateVariable()'s own comment -- distinct from
+        // zeroLimitIsZero above (that one's about a zero-valued *limit*;
+        // this is about the mock search itself coming back empty with no
+        // limit involved at all).
+        treatMissingAsZero: target.treatMissingAsZero || undefined,
+      };
+    } else {
+      variables[name] =
+        componentType === owningType
+          ? { type: "stat_ref", componentType, statId: target.statId }
+          : {
+              type: "mock_ref",
+              mockId: `${componentType}:${target.statId}`,
+              whenNull: target.whenNull || undefined,
+              optional: target.optional || undefined,
+            };
+    }
+  }
+  return { expression, variables };
+}
+
+// One family's own generated definition for one componentType it's
+// registered on (see family.groups) -- kind is always "derived" (a
+// user-authored formula), unlike CROSS_COMPONENT_FLIGHT_STATS' own
+// generated defs (kind: "pre-derived", app-authored/locked).
+function statDefFromFamily(family, componentType) {
+  return {
+    key: family.key,
+    table: COMPONENT_TYPE_PRIMARY_TABLE[componentType] ?? componentType,
+    group: family.groups[componentType],
+    label: family.label,
+    description: family.description || undefined,
+    kind: "derived",
+    familyId: family.id,
+    formula: crossComponentFormula(componentType, family.formula.expression, family.formula.variables),
+  };
+}
+
+// componentType -> {groups, definitions}, merging that type's own built-in
+// catalog (STAT_CATALOG_BY_TYPE, if any) with every custom group created
+// against it and every custom stat FAMILY registered on it (see
+// customStatFamilies' own comment -- a family's componentType-specific
+// definition is generated fresh here, never stored per type). The one
+// place all three are combined, so every reader that used to index
+// STAT_CATALOG_BY_TYPE directly (table rendering, the Select Stats modal,
+// CSV/XLSX export, sort comparators) goes through this instead and
+// automatically picks up custom entries with no separate merge logic of
+// its own. Returns null under the exact same condition a bare
+// STAT_CATALOG_BY_TYPE[type] lookup used to (nothing built-in, and now
+// also nothing custom), so every existing `if (catalog)` gate still works
+// unchanged.
+function statCatalogForComponentType(componentType) {
+  const builtIn = STAT_CATALOG_BY_TYPE[componentType];
+  const groups = customStatGroups.filter((g) => g.componentType === componentType);
+  const definitions = customStatFamilies
+    .filter((family) => family.groups[componentType] !== undefined)
+    .map((family) => statDefFromFamily(family, componentType));
+  if (!builtIn && groups.length === 0 && definitions.length === 0) return null;
+  return {
+    groups: [...(builtIn?.groups ?? []), ...groups],
+    definitions: [...(builtIn?.definitions ?? []), ...definitions],
+  };
+}
+
+// A group's own display name -- t("component_analyzer.stat_groups.<id>")
+// for a built-in "static" group (every one ships a real i18n key), or the
+// user's own free-typed name for a "dynamic" one (no i18n key exists for a
+// name only this one user ever typed).
+function statGroupLabel(group) {
+  return group.kind === "dynamic" ? group.name : t(`component_analyzer.stat_groups.${group.id}`);
+}
+
+// A stat's own display name -- t(def.labelKey) for a built-in stat (every
+// one ships a real i18n key), or the user's own free-typed label for a
+// "derived" one -- same "dynamic group -> plain name" reasoning as
+// statGroupLabel() above.
+// A stat's own OPTIONAL description -- descriptionKey (an i18n key, every
+// built-in stat that has one) or a free-typed `description` (a user-created
+// stat, see the Stat Lab builder's own Description field); "" when the
+// stat has neither, which is also the "show no info icon" signal.
+function statDefDescription(def) {
+  if (!def) return "";
+  return def.descriptionKey ? t(def.descriptionKey) : def.description || "";
+}
+
+// The small "i" circle shown right after a stat's name when it has a
+// description -- the same text is set as the hover tooltip on BOTH the
+// icon and `nameEl` itself, so hovering either one shows it. Returns null
+// (and touches nothing) for a stat with no description, so callers can
+// just `if (icon) parent.appendChild(icon)`.
+function buildStatInfoIcon(nameEl, def) {
+  const description = statDefDescription(def);
+  if (!description) return null;
+  nameEl.title = description;
+  const icon = document.createElement("span");
+  icon.className = "stat-info-icon";
+  icon.textContent = "i";
+  icon.title = description;
+  icon.setAttribute("aria-label", description);
+  return icon;
+}
+
+function statDefLabel(def) {
+  return def.labelKey ? t(def.labelKey) : def.label;
+}
+
+// ---- Statistics Lab: formula-backed stat resolution (GitHub issue #26) ----
+// A "fundamental" stat (see statDef()'s own comment) reads straight off a
+// real database column -- def.key IS that column name, exactly like every
+// existing caller's own row[def.key] already assumes. A "pre-derived"
+// (app-shipped, locked -- not built yet) or "derived" (user-created, not
+// built yet either) stat instead carries its own `formula`:
+//
+//   {
+//     expression: "damage_value * bullet_amount",
+//     variables: {
+//       damage_value: { type: "stat_ref", componentType: "weapon", statId: "damage_value" },
+//       bullet_amount: { type: "stat_ref", componentType: "weapon", statId: "bullet_amount" },
+//     },
+//   }
+//
+// `expression` is a normal, human-typed math.js expression (real operator
+// precedence, parens, functions -- see https://mathjs.org/docs/expressions/syntax.html)
+// -- math.js (vendor/math.min.js) owns parsing/evaluation entirely, this
+// app only ever builds the plain {name: number} `scope` object it
+// evaluates against. `variables` maps each name actually appearing in the
+// expression to where its number comes from: another stat -- same
+// component type, or a different one (statId matches that other stat's
+// own def.key either way) -- or a mocked input. A literal number typed
+// directly into the expression (e.g. "* 0.5") needs no variables entry at
+// all; math.js evaluates it as-is.
+//
+// Nothing actually creates a formula-backed stat definition yet (no
+// pre-derived stat has been built, no derived-stat editor exists) -- this
+// is purely the resolution mechanism every later step in that chain reads
+// through, so it can be exercised/tested standalone before any UI depends
+// on it.
+
+// componentType -> that type's own full stat definition list, built-in
+// plus every custom "derived" one -- see statCatalogForComponentType()'s
+// own comment. Every lookup below (and any future caller) reads stat
+// definitions through this one function rather than indexing a catalog
+// directly, so a custom stat is visible everywhere a built-in one already
+// is with no separate merge logic per call site.
+function allStatDefsForComponentType(componentType) {
+  return statCatalogForComponentType(componentType)?.definitions ?? [];
+}
+
+function lookupStatDef(componentType, statKey) {
+  return allStatDefsForComponentType(componentType).find((def) => def.key === statKey) ?? null;
+}
+
+// One component row's own value for one stat, dispatched on whether a
+// `formula` is actually present -- NOT on `kind` (kind is a pure display
+// label, see STAT_TAG_LABEL_KEYS' own comment). This decoupling matters
+// because a stat can be labeled "fundamental" -- "comes straight from
+// real game data, nothing app-computed about its VALUE" -- while still
+// needing a formula to actually FETCH that value, e.g. a cross-component
+// mock_ref reading a different component type's own real column instead
+// of a same-row one. No stat currently on the catalog actually needs
+// this combination (every "fundamental"-labeled stat today has no
+// formula at all, and every formula-backed stat is labeled "pre-derived"/
+// "mod"/"derived" instead) -- but the dispatch logic here supports it
+// correctly whenever one does, rather than hard-coupling "where did this
+// value come from" (the label) to "how do we technically fetch it" (the
+// mechanism). Direct row[def.key] lookup for anything with no formula at
+// all (every true fundamental stat, no
+// context needed -- its own value never depends on it); formula
+// evaluation otherwise.
+function resolveStatValue(statDef, row, context) {
+  if (!statDef) return null;
+  if (statDef.formula) return evaluateStatFormula(statDef.formula, row, context);
+  return row ? row[statDef.key] : null;
+}
+
+// `context`: { componentType (the row's own type), table, statSet,
+// component (the row's own {ware_id, name} entry -- table/statSet/
+// component may all be null, e.g. a Stat Lab "Eval" dry run with no real
+// row selected yet -- see resolveMockValue()'s own null-safe chain),
+// resolving (a Set of "componentType:statKey" strings currently being
+// resolved up this same call stack), missingMocks (a Set a table-render
+// cell passes in fresh and mutates in place across the whole call tree --
+// see resolveMockValue()'s own comment -- left undefined by callers that
+// don't care, e.g. a sort comparator, since every write to it is already
+// optional-chained) }. `resolving` is a bare safety net, not a real
+// feature -- it exists only so a formula that (directly, or through a
+// chain of other stat_refs) ends up referencing itself can never hang the
+// page by recursing forever, before any user-facing "this formula is
+// circular" validation exists at authoring time (a later, separate step)
+// to stop someone from ever building one of these in the first place.
+function evaluateStatFormula(formula, row, context) {
+  if (!formula) return null;
+  const scope = {};
+  const aggregateEntries = [];
+  const conditionalEntries = [];
+  // Two passes: every plain stat_ref/mock_ref variable resolves first, so
+  // an aggregate variable's own `limit` (naming one of those plain
+  // variables) always has a real value already sitting in `scope` by the
+  // time resolveAggregateVariable() needs it below -- independent of
+  // whichever order `formula.variables`' own keys happen to iterate in.
+  for (const [name, ref] of Object.entries(formula.variables ?? {})) {
+    if (ref.type === "aggregate_ref") aggregateEntries.push([name, ref]);
+    else if (ref.whenNull) conditionalEntries.push([name, ref]);
+    else scope[name] = resolveFormulaVariable(ref, row, context);
+  }
+  // A `whenNull` variable is only needed when the plain variable(s) it
+  // names have no value (e.g. a missile turret's damage_value: the bullets
+  // join leaves it null, so the missile mock supplies the damage instead)
+  // -- otherwise it is skipped entirely, so it never asks for a mock (or
+  // flags one missing) on a row that doesn't use it. Skipped => null,
+  // which the formula's own ternary never reads.
+  //
+  // `whenNull` can name more than one gate (an array, AND'ed together --
+  // still needed when EVERY one of them is null) -- added (2026-10-28,
+  // user call) for hull_damage_per_shot/shield_damage_per_shot's own
+  // missile_damage/missile_amount/missile_barrelamount, whose single-gate
+  // "damage_value is null" check couldn't tell a genuinely missile-fired
+  // turret (no direct bullet data at all) apart from a real area-damage-
+  // only bullet (PAR M Blast Mortar and the other Flak-family turrets --
+  // damage_value null, but a perfectly real areadamage_value of their own)
+  // -- the latter was wrongly attempting (and flagging as missing) a
+  // missile mock it never actually needed, since those formulas' own
+  // ternary already prefers areadamage_value over the missile fallback
+  // whenever it's present. A plain string still works exactly as before
+  // (single gate, unchanged behavior for every other whenNull user).
+  for (const [name, ref] of conditionalEntries) {
+    const gates = Array.isArray(ref.whenNull) ? ref.whenNull : [ref.whenNull];
+    const stillNeeded = gates.every((gateName) => scope[gateName] === null || scope[gateName] === undefined);
+    scope[name] = stillNeeded ? resolveFormulaVariable(ref, row, context) : null;
+  }
+  for (const [name, ref] of aggregateEntries) {
+    scope[name] = resolveAggregateVariable(ref, row, context, aggregateLimitValue(ref, scope));
+  }
+  let result;
+  try {
+    result = math.evaluate(formula.expression, scope);
+  } catch {
+    return null; // malformed expression, or a variable math.evaluate() needed that scope doesn't have -- graceful, not fatal
+  }
+  // Full precision on purpose -- NOT truncated here. A derived stat's own
+  // value is also what every OTHER derived stat that references it reads
+  // (rate_of_fire feeds hull_dps feeds burst_dps, ...), so cutting it to 1
+  // decimal at this level compounded through every chained formula (a
+  // 0.333 rate became 0.3, wrecking everything downstream -- confirmed
+  // when the turret comparison came out ~2x off). The 1-decimal
+  // TRUNCATION the game's own displays use (GitHub issue #26 phase-3:
+  // boost_recharge_rate's 0.781 shows in-game as 0.7, not a round-half-up
+  // 0.8) is applied only at display time -- see formatStatValue() and
+  // truncateStatDisplayNumber().
+  return result;
+}
+
+// ---- Statistics Lab: mock values (GitHub issue #26) ----
+// A mock supplies the number a formula's cross-component-type stat_ref
+// can't get from a real row (see resolveRowFor()'s own comment just below)
+// -- either a literal number the user typed, or a real component's own
+// value for that exact stat ("mock component", e.g. "assume this engine's
+// ship is the Rattlesnake"). Keyed by mockId, which is always
+// "<componentType>:<statId>" -- the exact same shape resolveFormulaVariable()'s
+// own circular-reference `resolving` Set already uses -- so every formula
+// needing "chassis:physics_mass" shares one configured mock rather than
+// each formula getting its own independent copy of the same conceptual
+// input.
+//
+// Configured at up to 5 levels, most specific wins:
+//   tab-row (statSet.rowStatMocks[wareId]) -- one component, one stat-set tab
+//   row     (table.rowStatMocks[wareId])   -- one component, every tab
+//   tab     (statSet.statMocks)            -- every component in one tab
+//   table   (table.statMocks)              -- every tab of one table
+//   global  (globalStatMocks)              -- every table, the app-wide default
+// The table/statSet-level maps live directly on the table/statSet objects
+// (already persisted wholesale via componentAnalyzerTables) -- only the
+// global level needs its own persisted top-level state field.
+let globalStatMocks = {};
+
+// mockConfig shape: { type: "literal", value: number } | { type:
+// "component_ref", wareId, count? } -- componentType isn't stored on the
+// config itself since it's always known from context (either half of a
+// specific mockId, or the componentType an aggregate_ref/full-component
+// list is already keyed by). `count` (full-component only, default 1 when
+// absent -- a value written before this field existed still means exactly
+// 1) is how many identical instances this ONE entry stands in for, e.g. a
+// single "Mass Driver, count 3" entry instead of three separate entries --
+// resolveAggregateVariable() below pushes the entry's resolved value onto
+// its running sum/average `count` times (capped by whatever budget a
+// `limit` leaves) rather than once, and the Mocks view's own count control
+// (see buildMockEntryRow()) is the only place it's edited. A plain
+// (non-aggregate) mock_ref ignores it entirely -- picking first-usable
+// doesn't care how many of something there are, only the number itself.
+//
+// A "full component" mock (see the Add Mock wizard's own "Full Component"
+// type) is stored as an ARRAY of these configs, keyed by the bare
+// componentType (no ":statId") -- one array entry per component the user
+// has told the wizard to add for that (scope, componentType), in the
+// order they were added. A single-entry array is by far the common case
+// (the old "assume every stat this table needs from an Engine comes from
+// this one reference engine" behavior, unchanged), but more than one
+// entry is exactly what an aggregate_ref variable (see
+// resolveAggregateVariable() below) sums/averages/counts across -- e.g.
+// two Shield full-component mocks in the same scope let a "total shield
+// capacity" aggregate variable add both together. asConfigList() below
+// also accepts a bare (non-array) config object for this same key, so a
+// value written before this list shape existed still resolves exactly as
+// it always did (a 1-element list), with no separate migration pass
+// needed.
+//
+// `groupMode`/`perGroupCount`/`groupCount` (shield/turret full-component
+// entries only, and only consulted by a "group_sum"/"group_average"
+// aggregate_ref -- see resolveGroupAggregateVariable()): lets one entry
+// claim several of the consuming chassis's own REAL hardpoint groups
+// (GET /api/ships/{id}/groups, see chassisGroupsFor()) explicitly, rather
+// than the implicit "one flat unit = one group" a plain `count` entry
+// gets there. `groupCount` groups are claimed, each filled with
+// min(perGroupCount, that real group's own slot_count) units -- e.g. "6
+// groups of 1" to spread 6 separate shields one-per-group (what a plain
+// `count: 6` entry already does for group-aware stats), or "1 group of 6"
+// to stack all 6 into a single 6-slot group instead, which a plain count
+// can't express at all (it always claims ONE group per unit). Edited via
+// the same checkbox the Add Mock wizard's Full Component step shows for
+// shield/turret types, and the equivalent controls on an already-
+// configured entry (see buildMockEntryRow()).
+function asConfigList(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return [value];
+  return [];
+}
+
+// How many flat UNITS one full-component entry is worth, for a plain
+// (non-group) "sum"/"average"/"count" aggregate -- a "group mode" entry's
+// own `count` field is unset/irrelevant (it uses perGroupCount/groupCount
+// instead, see asConfigList()'s own comment), so a flat aggregate reading
+// `config.count` directly would silently undercount it as just 1 unit.
+// total_turret_output/avg_turret_output are exactly this case: their own
+// divisor is the game's own fixed constant, not group-count-based (see
+// avg_turret_output's own comment on why it's deliberately NOT like Avg.
+// Group Shield), so they stay on the plain flat "sum" aggregation and need
+// this to still count a group-mode turret entry's real total correctly.
+function entryUnitCount(config) {
+  if (config?.groupMode) {
+    return Math.max(1, Math.floor(config?.perGroupCount ?? 1)) * Math.max(1, Math.floor(config?.groupCount ?? 1));
+  }
+  return Math.max(1, Math.floor(config?.count ?? 1));
+}
+
+// Resolves ONE mock config (as stored, regardless of whether it came from
+// a specific-stat key or a full-component list entry) to a plain number
+// for `statId` on `componentType` -- a "component_ref" config is resolved
+// through the exact same resolveStatValue()/statSourceForComponentType()
+// machinery a normal row uses, so a mock sourced from a real component
+// can itself be a derived stat, recursive formulas included
+// (context.resolving is threaded through so a cycle reached via a mock is
+// still caught, not just one reached via a plain stat_ref chain). Returns
+// null on any failure (a literal that isn't actually a number, a
+// component_ref whose target has vanished, or one whose own value is
+// itself null) -- callers decide what null means for missingMocks
+// themselves, since a single specific-stat mock and one entry of an
+// aggregate list report it differently.
+//
+// `consumerRow` is the REAL row this mock was configured against (e.g. the
+// actual Syn chassis row a shield was mocked onto) -- carried into the
+// nested context as `ambientRow` (see resolveMockValue()'s own comment) so
+// a mock_ref inside the mocked component's OWN formula (e.g. the shield's
+// Post Mod capacity needing "chassis:shield_capacity_modifier") can fall
+// back to that real enclosing component instead of requiring a redundant
+// explicit mock of it.
+function resolveMockConfigValue(config, componentType, statId, context, consumerRow) {
+  if (!config) return null;
+  if (config.type === "literal") return typeof config.value === "number" ? config.value : null;
+  if (config.type === "component_ref") {
+    const targetDef = lookupStatDef(componentType, statId);
+    const targetRow = statSourceForComponentType(componentType).get(config.wareId);
+    if (!targetDef || !targetRow) return null;
+    // row/statSet/mockTrace ride along so a mock component's OWN mock
+    // lookups (e.g. a mocked turret's missile) are gated by compatibility
+    // against that mock component, can see tab/table-scope mocks, and
+    // show up in the same cell trace. `component: config` is this mock's
+    // own entry object (the same `{type: "component_ref", wareId,
+    // appliedMods, blockGlobalMod}` the Mod Lab button on its own row
+    // writes to, see buildMockEntryRow()) -- lets a mod_modifier_ref
+    // formula variable on the mocked component resolve against THIS
+    // mock's own applied mod via resolveEffectiveAppliedMod(). `table` is
+    // deliberately NOT the consumer's own context.table here (that would
+    // wrongly let a mod_modifier_ref fall back to the CONSUMER's own
+    // table.globalMods.standard whenever this mock has neither
+    // appliedMods nor blockGlobalMod set -- a global default belonging to
+    // an unrelated table has no business applying to this mock at all) --
+    // there's no real "table" a standalone mock belongs to, so it's
+    // always null here, same as a Component Analyzer table's own
+    // row-scoped Mod Lab launcher leaves it for a component with no
+    // local override.
+    return resolveStatValue(targetDef, targetRow, {
+      componentType,
+      row: targetRow,
+      table: null,
+      component: config,
+      statSet: context?.statSet,
+      resolving: context?.resolving ?? new Set(),
+      missingMocks: context?.missingMocks,
+      mockTrace: context?.mockTrace,
+      ambientRow: context?.componentType
+        ? {
+            componentType: context.componentType,
+            row: consumerRow,
+            table: context.table,
+            statSet: context.statSet,
+            component: context.component,
+            next: context.ambientRow,
+          }
+        : context?.ambientRow,
+    });
+  }
+  return null;
+}
+
+// Resolves a configured mock to a plain number, for the plain (non-
+// aggregate) mock_ref case -- "assume THE ONE mocked value for this exact
+// stat". Configured at up to 5 levels, most specific wins:
+//   tab-row (statSet.rowStatMocks[wareId]) -- one component, one stat-set tab
+//   row     (table.rowStatMocks[wareId])   -- one component, every tab
+//   tab     (statSet.statMocks)            -- every component in one tab
+//   table   (table.statMocks)              -- every tab of one table
+//   global  (globalStatMocks)              -- every table, the app-wide default
+// The table/statSet-level maps live directly on the table/statSet objects
+// (already persisted wholesale via componentAnalyzerTables) -- only the
+// global level needs its own persisted top-level state field.
+//
+// At each level, a specific-stat key (mockId itself) is checked first,
+// then a full-component list for that componentType as a fallback (its
+// FIRST entry only -- "the" representative component for a plain
+// reference, same as before this list shape existed; see
+// resolveAggregateVariable() for the "every entry" counterpart) -- so a
+// level's own specific mock always beats its own full-component one, but
+// a full-component mock at a MORE specific level still beats a specific
+// mock at a LESS specific one, same "most specific level wins outright"
+// contract as always. Every path that ends up with no usable number --
+// nothing configured at any scope, or a config that fails to resolve --
+// records `mockId` into context.missingMocks (see that field's own
+// comment on the table-render call site) before returning null, so the
+// cell renderer can name exactly which mock(s) left this formula
+// unresolved instead of just showing a bare blank.
+// The 5 scope levels a mock can live at, most specific first, each with
+// its own config map (undefined when that level has nothing to look at for
+// this context) and the scope object scopeLabel() understands -- shared by
+// the plain and aggregate resolvers below, and by the cell "e" popover.
+function mockScopeLevels(context) {
+  const wareId = context?.component?.ware_id;
+  const { table, statSet } = context ?? {};
+  return [
+    {
+      level: "tabRow",
+      scope: { level: "tabRow", table, statSet, wareId },
+      map: wareId !== undefined ? statSet?.rowStatMocks?.[wareId] : undefined,
+    },
+    {
+      level: "row",
+      scope: { level: "row", table, wareId },
+      map: wareId !== undefined ? table?.rowStatMocks?.[wareId] : undefined,
+    },
+    { level: "tab", scope: { level: "tab", table, statSet }, map: statSet?.statMocks },
+    { level: "table", scope: { level: "table", table }, map: table?.statMocks },
+    { level: "global", scope: { level: "global" }, map: globalStatMocks },
+  ];
+}
+
+// ---- Mock compatibility ----
+// A mocked component only applies to a consumer it could really be fitted
+// to, so a priority list can hold e.g. an L, an M and an S engine and each
+// ship class picks the first one that fits it:
+//   - missile mock -> weapon/turret/launcher row: the row's ammunition_tags
+//     must contain the missile's compatibility (dumbfire/guided/size).
+//   - engine/thruster/shield/weapon/turret mock <-> chassis row (either
+//     direction): the size + slot-compatibility check the ship builder
+//     already does, via GET /api/ship_component_compatibility.
+// Literal mocks and any pairing not listed here are always compatible.
+const SHIP_FIT_COMPONENT_TYPES = new Set(["engine", "thruster", "shield", "weapon", "turret"]);
+const shipFitCache = new Map(); // "<type>:<ware_id>" -> Set of ship ware_ids that can mount it
+const shipFitRequested = new Set();
+let shipFitRerenderTimer = null;
+
+// The cached fit set, or null while it is still loading (treated as
+// compatible for now; a re-render is scheduled once it arrives).
+function shipFitSet(componentType, wareId) {
+  const key = `${componentType}:${wareId}`;
+  if (shipFitCache.has(key)) return shipFitCache.get(key);
+  if (!shipFitRequested.has(key)) {
+    shipFitRequested.add(key);
+    fetch(`/api/ship_component_compatibility?ware_id=${encodeURIComponent(wareId)}&component_type=${componentType}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!data || !Array.isArray(data.ship_ware_ids)) return;
+        shipFitCache.set(key, new Set(data.ship_ware_ids));
+        clearTimeout(shipFitRerenderTimer);
+        shipFitRerenderTimer = setTimeout(() => renderComponentAnalyzerTables(), 50);
+      })
+      .catch(() => {});
+  }
+  return null;
+}
+
+// { ok: true } or { ok: false, reason: "ammo" | "ship" }
+function mockCompatibility(config, mockType, consumerType, consumerRow) {
+  if (config?.type !== "component_ref" || !consumerRow) return { ok: true };
+  if (mockType === "missile" && consumerRow.ammunition_tags) {
+    const mockRow = statSourceForComponentType("missile").get(config.wareId);
+    if (!mockRow) return { ok: true };
+    const tags = String(consumerRow.ammunition_tags).split(",");
+    return tags.includes(mockRow.compatibility) ? { ok: true } : { ok: false, reason: "ammo" };
+  }
+  if (consumerType === "chassis" && SHIP_FIT_COMPONENT_TYPES.has(mockType)) {
+    const fits = shipFitSet(mockType, config.wareId);
+    return !fits || fits.has(consumerRow.ware_id) ? { ok: true } : { ok: false, reason: "ship" };
+  }
+  if (mockType === "chassis" && SHIP_FIT_COMPONENT_TYPES.has(consumerType) && consumerRow.ware_id) {
+    const fits = shipFitSet(consumerType, consumerRow.ware_id);
+    return !fits || fits.has(config.wareId) ? { ok: true } : { ok: false, reason: "ship" };
+  }
+  return { ok: true };
+}
+
+// ---- Component groups (GET /api/ships/{id}/groups), for "group mode"
+// full-component mocks ----
+// A chassis's own REAL hardpoint groups -- group_name/component_type/
+// slot_count, the exact same shape the Fleet Planner's own equipping UI
+// already fetches (see `currentShip`'s own comment up top) -- reused here
+// so a "group mode" mock (see asConfigList()'s own comment on
+// groupMode/perGroupCount/groupCount) can allocate itself across a
+// consuming chassis row's own REAL groups instead of an assumed flat slot
+// count. Same lazy-fetch-then-rerender shape as shipFitSet() just above,
+// for the same reason (resolution happens synchronously mid-render, so a
+// cache miss has to return null now and trigger a background fetch +
+// later re-render rather than block).
+// Batched, not one GET per ware_id -- a table with many rows (the whole
+// point of the S/M/L/XL quick-link files) would otherwise fire one request
+// PER DISTINCT CHASSIS just to resolve a single group-mode stat, since
+// chassisGroupsFor() below gets called once per row every render. Every
+// call within the same synchronous render pass piles its own wareId into
+// `chassisGroupsPending` and keeps pushing `chassisGroupsFlushTimer` back
+// out (same clear-then-reschedule debounce idiom shipFitSet()'s own
+// rerender timer already uses just above) -- since nothing yields to the
+// event loop mid-render, only the LAST reschedule in that whole pass
+// survives, so the actual POST /api/ships/groups_bulk fires exactly once
+// per render with every newly-needed ware_id batched into it, not once per
+// row.
+const chassisGroupsCache = new Map(); // ware_id -> groups array
+const chassisGroupsPending = new Set(); // ware_ids queued for the next bulk fetch
+const chassisGroupsRequested = new Set(); // ware_ids already fetched or in flight
+let chassisGroupsFlushTimer = null;
+let chassisGroupsRerenderTimer = null;
+
+function flushChassisGroupsBatch() {
+  const ids = [...chassisGroupsPending];
+  chassisGroupsPending.clear();
+  if (ids.length === 0) return;
+  fetch("/api/ships/groups_bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ware_ids: ids }),
+  })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data) return;
+      for (const id of ids) chassisGroupsCache.set(id, data[id] ?? []);
+      clearTimeout(chassisGroupsRerenderTimer);
+      chassisGroupsRerenderTimer = setTimeout(() => renderComponentAnalyzerTables(), 50);
+    })
+    .catch(() => {});
+}
+
+function chassisGroupsFor(wareId) {
+  if (!wareId) return null;
+  if (chassisGroupsCache.has(wareId)) return chassisGroupsCache.get(wareId);
+  if (!chassisGroupsRequested.has(wareId)) {
+    chassisGroupsRequested.add(wareId);
+    chassisGroupsPending.add(wareId);
+    clearTimeout(chassisGroupsFlushTimer);
+    chassisGroupsFlushTimer = setTimeout(flushChassisGroupsBatch, 0);
+  }
+  return null;
+}
+
+// This chassis's own real groups of `componentType` ("shield" or
+// "turret"), ordered for "group mode" allocation: for shields specifically
+// (per the user's own spec), every group PROTECTING an engine group comes
+// before every group protecting a turret group -- a shield group shares
+// its own group_name with the engine/turret group it protects (see
+// query_ship_groups()'s own docstring), so "which family is this shield
+// group in" is answered by checking whether that same group_name also
+// appears with component_type "engine" or "turret" elsewhere in the same
+// flat list. Within each family, and for turret-componentType mocks
+// (which have no such split -- a turret group only ever protects itself),
+// groups stay in the server's own returned order. Anything that matches
+// neither family (shouldn't happen for shield/turret, but doesn't crash
+// if it does) sorts last rather than being dropped.
+//
+// For shields specifically, a chassis's own MAIN shield slots (e.g. an
+// L/XL hull's 4 hull-integrated shield_1-4 groups) are excluded entirely,
+// not just sorted last -- "Avg. Group Shield" is defined over BONUS/
+// group-attached shields only (see shield_bonus_groups' own comment in
+// generate_ships_table.py), a completely separate pool from the main-slot
+// Shield (MJ)/Recharge Rate/Delay stats' own mock pool. A main slot is
+// distinguished from a bonus one by the real equipment_compatibility_class
+// tag "hittable" (exact tag, not substring -- "unhittable" contains that
+// substring, same gotcha as the Python-side version of this check).
+// Without this exclusion, a group-mode/flat shield mock sized for the
+// hull's own MAIN slots (e.g. an L shield on an L/XL hull with L main
+// slots but only M bonus groups) could wrongly "fit" a bonus slot it was
+// never actually compatible with, once every real bonus group was already
+// claimed and allocation fell through to the main slots.
+function orderedChassisGroups(wareId, componentType) {
+  const groups = chassisGroupsFor(wareId);
+  if (!groups) return null;
+  let matching = groups.filter((g) => g.component_type === componentType);
+  if (componentType !== "shield") return matching;
+  matching = matching.filter((g) => String(g.compatibility ?? "").split(",").includes("hittable"));
+  const namesByType = new Map();
+  for (const g of groups) {
+    if (g.component_type === "engine" || g.component_type === "turret") namesByType.set(g.group_name, g.component_type);
+  }
+  const familyRank = (g) => (namesByType.get(g.group_name) === "engine" ? 0 : namesByType.get(g.group_name) === "turret" ? 1 : 2);
+  return matching
+    .map((g, index) => ({ g, index }))
+    .sort((a, b) => familyRank(a.g) - familyRank(b.g) || a.index - b.index)
+    .map(({ g }) => g);
+}
+
+// Resolves a configured mock to a plain number, for the plain (non-
+// aggregate) mock_ref case. Mocks are PRIORITY LISTS: walking the 5 scope
+// levels most specific first, each level's candidates are tried in order --
+// that level's specific-stat list (`<type>:<stat>`) first, then its
+// full-component list (`<type>`) -- and the first candidate that is
+// compatible with the consumer row (see mockCompatibility()) and resolves
+// to a real value wins. A level with nothing usable falls through to the
+// next, less specific one. With nothing usable anywhere, `mockId` is
+// recorded into context.missingMocks so the cell can name what is missing
+// -- UNLESS `optional` is set, in which case this is a real, well-defined
+// default (e.g. heat_per_second's own weapon_heat_modifier: "most ships
+// carry no modifier at all", see that stat's own comment), not a gap to
+// flag, so nothing is added and this returns null silently (the formula's
+// own `? :` ternary supplies the real default). This covers BOTH the case
+// a compatible candidate existed but resolved to null (handled directly
+// below, in the main loop) AND the much more common case of zero
+// candidates existing anywhere at all -- the two used to only be handled
+// in that first, narrower case, which meant every optional mock_ref with
+// nothing configured for it ANYWHERE (the common case -- nobody mocks
+// "chassis" on a plain weapon table) silently added itself to
+// missingMocks regardless, triggering a spurious ⚠ warning on every such
+// cell in the entire app. `optional` on its own is enough here -- no
+// candidate-type check needed for this terminal case, since there's no
+// candidate to check a type on at all.
+// When the caller supplies context.mockTrace (an array), every lookup also
+// records what it picked and which candidates it skipped and why -- the
+// data behind a cell's "e" popover.
+function resolveMockValue(mockId, context, row, optional) {
+  const [componentType, statId] = mockId.split(":");
+  const consumerRow = row ?? context?.row;
+  const skipped = [];
+  for (const { level, scope, map } of mockScopeLevels(context)) {
+    if (!map) continue;
+    const candidates = [
+      ...asConfigList(map[mockId]).map((config, index) => ({ config, index, key: mockId })),
+      ...asConfigList(map[componentType]).map((config, index) => ({ config, index, key: componentType })),
+    ];
+    for (const candidate of candidates) {
+      const compat = mockCompatibility(candidate.config, componentType, context?.componentType, consumerRow);
+      if (!compat.ok) {
+        skipped.push({ level, scope, ...candidate, reason: compat.reason });
+        continue;
+      }
+      const value = resolveMockConfigValue(candidate.config, componentType, statId, context, consumerRow);
+      if (value === null || value === undefined) {
+        // An `optional` variable (one the formula itself null-checks, e.g.
+        // a missile's clip reload -- a 1-shot missile legitimately has
+        // none) accepts a compatible mock's own null as the answer: no
+        // missing-mock warning, and no falling through to another mock.
+        if (optional && candidate.config?.type === "component_ref") {
+          context?.mockTrace?.push({ mockId, level, scope, ...candidate, value: null, skipped });
+          return null;
+        }
+        skipped.push({ level, scope, ...candidate, reason: "no_value" });
+        continue;
+      }
+      context?.mockTrace?.push({ mockId, level, scope, ...candidate, value, skipped });
+      return value;
+    }
+  }
+  // Nothing configured at any of the 5 mock scopes -- before giving up,
+  // check whether this exact componentType is already sitting in scope as
+  // a REAL (non-mock) row somewhere up the nesting chain, e.g. a shield
+  // mocked onto an actual Syn chassis row needing "chassis:
+  // shield_capacity_modifier": the chassis isn't a mock here, it's the
+  // real table row the shield was mocked ONTO, so there is nothing to
+  // configure a mock for -- the real value is already sitting right there
+  // in `ambientRow` (see resolveMockConfigValue()'s own comment on how
+  // this chain gets built). An explicit mock at any of the 5 scopes above
+  // still wins outright (lets a standalone table test a hypothetical
+  // chassis without one), this is only the last resort.
+  for (let ambient = context?.ambientRow; ambient; ambient = ambient.next) {
+    if (ambient.componentType !== componentType) continue;
+    const value = resolveStatValue(lookupStatDef(componentType, statId), ambient.row, {
+      componentType,
+      table: ambient.table,
+      statSet: ambient.statSet,
+      component: ambient.component,
+      resolving: context?.resolving ?? new Set(),
+      missingMocks: context?.missingMocks,
+      mockTrace: context?.mockTrace,
+      ambientRow: ambient.next,
+    });
+    if (typeof value === "number") {
+      // `config`/`index`/`key` are synthesized (there's no real mock config
+      // here) purely so buildMockTraceLines()'s own grouping/display code --
+      // built around a real mock list entry -- can still name the real
+      // component instead of showing a bare "?".
+      context?.mockTrace?.push({
+        mockId,
+        level: "ambient",
+        scope: { level: "ambient" },
+        config: { type: "component_ref", wareId: ambient.row?.ware_id },
+        index: 0,
+        key: componentType,
+        value,
+        skipped,
+      });
+      return value;
+    }
+  }
+  if (!optional) context?.missingMocks?.add(mockId);
+  context?.mockTrace?.push({ mockId, level: null, value: null, skipped });
+  return null;
+}
+
+// The usable full-component mock LIST for `componentType`: the first scope
+// level (most specific first) holding at least one candidate that is
+// compatible with the consumer row wins outright, and only its compatible
+// entries (in list order) count -- lists are never merged across levels.
+// Never looks at a specific-stat key (an aggregate reads across whole
+// "assume this component" entries). Returns { level, scope, entries: [{config,
+// index}], skipped }; entries is [] when nothing is configured or usable.
+function pickMockConfigList(componentType, context, row) {
+  const consumerRow = row ?? context?.row;
+  const skipped = [];
+  for (const { level, scope, map } of mockScopeLevels(context)) {
+    if (!map || map[componentType] === undefined) continue;
+    const entries = [];
+    asConfigList(map[componentType]).forEach((config, index) => {
+      const compat = mockCompatibility(config, componentType, context?.componentType, consumerRow);
+      if (compat.ok) entries.push({ config, index });
+      else skipped.push({ level, scope, config, index, key: componentType, reason: compat.reason });
+    });
+    if (entries.length > 0) return { level, scope, entries, skipped };
+  }
+  return { level: null, scope: null, entries: [], skipped };
+}
+
+// Plain-array view of pickMockConfigList() for callers that only need the
+// usable configs.
+function resolveMockConfigList(componentType, context, row) {
+  return pickMockConfigList(componentType, context, row).entries.map((entry) => entry.config);
+}
+
+// Resolves one aggregate_ref variable (see crossComponentFormula()'s own
+// comment). The row actually being evaluated joins the aggregate as its
+// own real data point FIRST, whenever it's the same component type this
+// aggregate reads (`context.componentType === ref.componentType`) --
+// e.g. a "sum of every shield's capacity" stat viewed from one of the
+// ship's own real Shield rows counts that row's own capacity as one
+// already-mounted instance, with any configured mocks standing in for
+// whichever OTHER instances aren't a real row here (see
+// resolveMockConfigList()). This is also what makes an aggregate with
+// ZERO configured mocks degenerate to exactly the same value a plain
+// (non-aggregate) same-type stat_ref would produce -- "sum of one value"
+// is that value, "average of one value" is that value, "count of one
+// value" is 1 -- rather than reporting a missing mock the way it used to.
+// A DIFFERENT component type (the original cross-component case, e.g.
+// this same stat viewed from a Chassis row) has no row of that type to
+// contribute at all, so the aggregate is built purely from configured
+// mocks, unchanged from before.
+//
+// `ref.statId` is pulled off every full-component mock configured for
+// `ref.componentType` in scope (via resolveMockConfigList()), capped to
+// the first `limitValue` of them when a limit was given, MINUS however
+// many slots the row's own value already used (so "sum of 3, one of them
+// the row" with limitValue 3 pulls only 2 more from the mock list, not
+// 3) -- a fractional or negative limit is floored/clamped rather than
+// erroring, since it's just another formula-resolved number that could be
+// mid-typo while authoring. Then combines whatever actually resolved:
+//   count     -- how many total values (row included) are real, non-null
+//                numbers. Never "missing" -- 0 is a perfectly meaningful
+//                count (e.g. "0 heat-generating weapons mounted"), not an
+//                error.
+//   sum       -- their total.
+//   average   -- their mean.
+// sum/average with zero resolvable values (no matching row AND no usable
+// mocks) report a missing mock (`componentType:statId`, the same shape a
+// plain mock_ref would use for this pairing) and return null instead of a
+// misleading 0 -- consistent with resolveMockValue()'s own "nothing
+// configured" case.
+//
+// ref.limit is normally a STRING naming another variable in the same
+// formula, resolved against that formula's own already-computed `scope`
+// (e.g. "weapon_slots") -- but a handful of slot counts are a fixed
+// number regardless of which ship is being viewed (a thruster slot, for
+// instance, is always exactly 1 on every real ship -- see
+// ECONOMY_EQUIPPED_COST_STATS' own thruster_sum), with no real chassis
+// column to point a named variable at. A plain number here is used
+// as-is instead of a scope lookup for that case.
+function aggregateLimitValue(ref, scope) {
+  if (typeof ref.limit === "number") return ref.limit;
+  return ref.limit ? scope[ref.limit] : undefined;
+}
+
+function resolveAggregateVariable(ref, row, context, limitValue) {
+  // "group_sum"/"group_average" are a completely different shape (per
+  // real hardpoint GROUP, not per raw unit) -- see
+  // resolveGroupAggregateVariable()'s own comment for why, and
+  // `limitValue` plays no part in it (a group-mode mock's own groupCount
+  // already says how many groups it claims; there's no separate ship-wide
+  // slot-count cap the way shields/weapons/turrets' flat aggregates need).
+  if (ref.aggregation === "group_sum" || ref.aggregation === "group_average") {
+    return resolveGroupAggregateVariable(ref, row, context);
+  }
+  // `zeroLimitIsZero`: when this ref's own `limit` variable resolves to
+  // exactly 0, return a clean 0 (sum/count) instead of falling into the
+  // "zero resolvable values -> missing mock" path below. Opt-in (most
+  // existing aggregates, e.g. the "weapons"-limited main weapon sum, keep
+  // their established behavior of showing a missing-mock warning on a
+  // 0-slot ship, like Raptor's own 0 main weapons) -- added for the
+  // "bonus_l_weapons" pool (see burst_weapon_damage_ship_test and
+  // friends): EVERY ship except the Asgard has 0 bonus L weapon slots, so
+  // without this, a second "bonus L" sum variable added to those formulas
+  // would show a spurious missing-mock warning (and null out the whole
+  // "main + bonus_l" expression) on every other weapon-bearing ship in the
+  // game, not just flag the one slot type that's actually empty.
+  //
+  // Checked as "not a positive number", not just "=== 0": ships_base.
+  // bonus_l_weapons is NULL (not the number 0) for every ship that has no
+  // such slots at all (confirmed live -- Erlking's own real limitValue
+  // here is null) -- `limitValue === 0` alone missed that, falling through
+  // into the normal path below, where a null limit means "no limit at
+  // all" (an Infinity budget), not "zero slots". That let the bonus_l sum
+  // search for compatible entries anyway, find none after sizeFilter (an
+  // xl-sized main weapon mock does not match the "l"-only bonus pool), and
+  // report ITS OWN missing-mock -- silently poisoning the whole
+  // "main + bonus_l" expression even though the main pool itself resolved
+  // fine.
+  if (ref.zeroLimitIsZero && !(typeof limitValue === "number" && limitValue > 0)) {
+    return ref.aggregation === "count" || ref.aggregation === "sum" ? 0 : null;
+  }
+
+  const values = [];
+  if (context?.componentType === ref.componentType) {
+    const rowValue = resolveStatValue(lookupStatDef(ref.componentType, ref.statId), row, context);
+    if (typeof rowValue === "number") values.push(rowValue);
+  }
+
+  const picked = pickMockConfigList(ref.componentType, context, row);
+  // `sizeFilter` restricts which mock entries this aggregate can draw
+  // from, by comparing each entry's own ware `size` against either a
+  // literal size string (e.g. "l") or, with the special value "chassis",
+  // the consuming row's own `size` -- needed wherever a ship's real
+  // groups of the SAME componentType come in more than one size (e.g. the
+  // Asgard's 1 XL main weapon group + 2 L "bonus" weapon groups): without
+  // it, mockCompatibility()'s own ship-level fit check (see
+  // pickMockConfigList()) happily lets an L-sized weapon mock fill the
+  // ship-wide "weapons" (XL-slot) budget, since it only asks "does this
+  // ship have a matching-size slot ANYWHERE", not "does THIS pool's own
+  // slot size match" -- the exact bug reported live (an L main battery
+  // mock filling the Asgard's XL main gun slot instead of its 2 real L
+  // slots).
+  const list = ref.sizeFilter
+    ? picked.entries.filter((entry) => {
+        const wareSize = statSourceForComponentType(ref.componentType).get(entry.config?.wareId)?.size;
+        const targetSize = ref.sizeFilter === "chassis" ? row?.size : ref.sizeFilter;
+        return !wareSize || !targetSize || wareSize === targetSize;
+      })
+    : picked.entries;
+  // A budget in UNITS, not entries -- a full-component mock's own `count`
+  // (see asConfigList()'s own comment) lets one entry stand in for several
+  // identical instances at once (e.g. "3x this Mass Driver" instead of
+  // three separate mocks), so each entry can consume more than 1 of the
+  // budget. Infinity when there's no limit at all -- list.length would
+  // have undercounted once a single entry could be worth more than 1 unit.
+  const mockBudget =
+    typeof limitValue === "number" && Number.isFinite(limitValue) ? Math.max(0, Math.floor(limitValue) - values.length) : Infinity;
+  const usedEntries = [];
+  let remainingBudget = mockBudget;
+  for (const entry of list) {
+    if (remainingBudget <= 0) break;
+    const value = resolveMockConfigValue(entry.config, ref.componentType, ref.statId, context, row);
+    if (typeof value !== "number") continue;
+    const configuredCount = entryUnitCount(entry.config);
+    const usedCount = Math.min(configuredCount, remainingBudget);
+    for (let i = 0; i < usedCount; i++) values.push(value);
+    remainingBudget -= usedCount;
+    usedEntries.push({ ...entry, value, count: usedCount });
+  }
+  if (usedEntries.length > 0 || picked.skipped.length > 0) {
+    context?.mockTrace?.push({
+      mockId: `${ref.componentType}:${ref.statId}`,
+      aggregation: ref.aggregation,
+      level: picked.level,
+      scope: picked.scope,
+      entries: usedEntries,
+      skipped: picked.skipped,
+    });
+  }
+
+  if (ref.aggregation === "count") return values.length;
+  if (values.length === 0) {
+    // Opt-in (see ref.zeroLimitIsZero's own comment for the sibling case
+    // this doesn't cover: THAT fires on a zero-valued *limit*, before a
+    // mock search even runs; this fires when the search itself came back
+    // empty -- no limit was given at all here). Added for
+    // ECONOMY_EQUIPPED_COST_STATS: "sum of avg price across every mocked
+    // component" must not go missing just because this ONE sub-type (say,
+    // crew, or missiles) happens to have nothing mocked onto this
+    // particular ship -- that sub-type simply contributes 0 to the total,
+    // same as a real ship with no countermeasures equipped has $0 of
+    // countermeasures, not an undefined cost.
+    if (ref.treatMissingAsZero && (ref.aggregation === "sum" || ref.aggregation === "average")) return 0;
+    context?.missingMocks?.add(`${ref.componentType}:${ref.statId}`);
+    return null;
+  }
+  if (ref.aggregation === "sum") return values.reduce((a, b) => a + b, 0);
+  if (ref.aggregation === "average") return values.reduce((a, b) => a + b, 0) / values.length;
+  return null;
+}
+
+// Resolves a "group_sum"/"group_average" aggregate_ref -- the GROUP-aware
+// counterpart to resolveAggregateVariable() just above, for stats whose
+// real mechanic is "per real hardpoint GROUP, not per raw mocked unit"
+// (Avg. Group Shield MJ/Rate/Delay, Avg./Total Turret Output). A real
+// Boron Guppy loadout (see memory/project_shield_main_slot_aggregate_and_mock_count.md)
+// proved the flat version wrong the moment a loadout deliberately stacks
+// more than one unit into a single real group: 6 BOR M Shield Generator
+// Mk3 all sharing one 6-slot engine-protecting group reads as ONE data
+// point here (that group's own value, 8.8s delay / 8400 MJ each), not six
+// separate ones -- exactly matching the real in-game number, where the
+// flat sum/average of 6 individual units did not.
+//
+// Needs the consuming row's own REAL groups (orderedChassisGroups()) to
+// know how many groups exist, in what order, and how big each one is --
+// returns null (not a wrong number) while that fetch is still in flight,
+// same as any other not-yet-resolvable input, via missingMocks.
+//
+// Each configured full-component mock entry claims some of the row's own
+// real groups, walked in the usual scope-priority list order:
+//   - a "group mode" entry (see asConfigList()'s own comment on
+//     groupMode/perGroupCount/groupCount) explicitly claims `groupCount`
+//     fresh (not yet touched) groups, each holding min(perGroupCount, that
+//     REAL group's own slot_count) units of its own ware -- lets one entry
+//     represent e.g. "6 groups of 1" or "1 group of 6", matching however
+//     the real loadout is actually organized.
+//   - a plain (non-group-mode) entry claims `count` UNITS, one per fresh
+//     group first; once every real (size-matching) group has been touched
+//     at least once, any remaining units wrap back onto already-touched
+//     groups round-robin instead of being silently dropped -- this is what
+//     a real over-subscribed loadout (more units mounted than the hull has
+//     real groups for) actually does: a real Raptor + 26x SPL M Shield
+//     Generator Mk2 against its own 20 real bonus groups reads 6411.6 MJ,
+//     which is (26 x 4932) / 20 -- EVERY unit's value counted, divided by
+//     DISTINCT GROUPS TOUCHED (capped at 20), not by the Raptor's own 26
+//     mounted-unit count. Dropping the overflow 6 units (the original
+//     version of this function, which just stopped once real groups ran
+//     out) instead produced 4932 flat -- caught by this same live
+//     regression check, not a new report.
+// A touched group's own group_average "value" is fixed the FIRST time it
+// is touched (by a fresh claim, group-mode or flat) and never changes on
+// a later overflow wrap -- matching the real mechanic, where a group can
+// only ever hold one ware at a time, so its own Delay contribution is that
+// one ware's value regardless of how many "extra" units of possibly
+// different wares get folded into group_sum's running total afterward (an
+// approximation already implicit in the old flat MIN(count,groups)
+// formula this replaced, not a new one).
+//
+// An entry only claims a group whose own `size` matches its ware's own
+// size -- an L shield mock physically cannot occupy an M-sized bonus
+// group, even though mockCompatibility()'s own ship-level fit check (see
+// pickMockConfigList()) already passed it through, since that check only
+// asks "does this ship have a matching-size slot ANYWHERE" (e.g. an L/XL
+// hull's own main slots), not "does THIS specific group match".
+function resolveGroupAggregateVariable(ref, row, context) {
+  const orderedGroups = orderedChassisGroups(row?.ware_id, ref.componentType);
+  if (orderedGroups === null) {
+    context?.missingMocks?.add(`${ref.componentType}:${ref.statId}`);
+    return null;
+  }
+  const picked = pickMockConfigList(ref.componentType, context, row);
+  const list = picked.entries;
+
+  const touched = new Array(orderedGroups.length).fill(false);
+  const groupValue = new Array(orderedGroups.length).fill(null); // set once, on first touch
+  let totalValueSum = 0;
+  let touchedCount = 0;
+  const usedEntries = [];
+
+  const sizeMatches = (group, wareSize) => !wareSize || !group.size || group.size === wareSize;
+
+  for (const entry of list) {
+    const value = resolveMockConfigValue(entry.config, ref.componentType, ref.statId, context, row);
+    if (typeof value !== "number") continue;
+    const wareSize = statSourceForComponentType(ref.componentType).get(entry.config?.wareId)?.size;
+    const isGroupMode = entry.config?.groupMode === true;
+    const groupsWanted = isGroupMode
+      ? Math.max(1, Math.floor(entry.config?.groupCount ?? 1))
+      : Math.max(1, Math.floor(entry.config?.count ?? 1));
+    const perGroup = isGroupMode ? Math.max(1, Math.floor(entry.config?.perGroupCount ?? 1)) : 1;
+    let claimedThisEntry = 0;
+
+    for (let i = 0; i < orderedGroups.length && claimedThisEntry < groupsWanted; i++) {
+      if (touched[i] || !sizeMatches(orderedGroups[i], wareSize)) continue;
+      touched[i] = true;
+      touchedCount++;
+      groupValue[i] = value;
+      const filled = Math.min(perGroup, orderedGroups[i].slot_count ?? perGroup);
+      totalValueSum += value * filled;
+      claimedThisEntry++;
+    }
+
+    // Flat-entry overflow: once every matching-size group has been
+    // touched, remaining units wrap onto already-touched matching-size
+    // groups (see this function's own comment) -- group_sum's own math
+    // only needs the running total and the (unchanged) touched count, not
+    // which specific group an overflow unit lands on, so this just adds
+    // each remaining unit's value without tracking a landing index.
+    // Group-mode entries intentionally do NOT overflow this way, since
+    // their groupCount is an explicit, deliberate packing instruction, not
+    // a raw unit count that could naturally run short of real estate.
+    if (!isGroupMode && claimedThisEntry < groupsWanted) {
+      const hasMatchingTouched = orderedGroups.some((g, i) => touched[i] && sizeMatches(g, wareSize));
+      if (hasMatchingTouched) {
+        totalValueSum += value * (groupsWanted - claimedThisEntry);
+        claimedThisEntry = groupsWanted;
+      }
+    }
+
+    if (claimedThisEntry > 0) usedEntries.push({ ...entry, value, groupsClaimed: claimedThisEntry });
+  }
+
+  if (usedEntries.length > 0 || picked.skipped.length > 0) {
+    context?.mockTrace?.push({
+      mockId: `${ref.componentType}:${ref.statId}`,
+      aggregation: ref.aggregation,
+      level: picked.level,
+      scope: picked.scope,
+      entries: usedEntries,
+      skipped: picked.skipped,
+    });
+  }
+
+  if (touchedCount === 0) {
+    context?.missingMocks?.add(`${ref.componentType}:${ref.statId}`);
+    return null;
+  }
+  if (ref.aggregation === "group_sum") return totalValueSum / touchedCount;
+  if (ref.aggregation === "group_average") return groupValue.filter((v) => v !== null).reduce((a, b) => a + b, 0) / touchedCount;
+  return null;
+}
+
+// Resolves one formula variable's own {type, ...} reference to a plain
+// number (or null -- e.g. an unconfigured mock, or a circular reference
+// caught by `context.resolving`).
+function resolveFormulaVariable(ref, row, context) {
+  if (!ref) return null;
+  if (ref.type === "mock_ref") return resolveMockValue(ref.mockId, context, row, ref.optional);
+  if (ref.type === "constant_ref") return resolveConstantValue(ref.constantId, context?.resolving);
+  // The real, currently-applied Mod Lab modifier for one real_column on
+  // THIS row (e.g. recharge_max_modifier_mod -- see SHIELD_STAT_DEFINITIONS'
+  // own comment) -- bridges into the Mod Lab's own already-built
+  // modEffectValueForColumn()/resolveEffectiveAppliedMod() machinery
+  // (the same modEffectValueForColumn() modTouchesColumn() also calls, to
+  // know which stats a mod should highlight) instead of duplicating that
+  // logic here, running it against
+  // `ref.neutralValue` (1 for a "multiply" stat, 0 for "add") rather than
+  // the stat's own real base value, so what comes out is the bare
+  // modifier ratio/delta itself, not already combined with anything --
+  // this variable type exists so that combination can instead happen
+  // explicitly, in the open, in a formula a user can read (e.g.
+  // recharge_max_post_mod) -- see GitHub issue #26's own "it feels a bit
+  // hacky to change the input fields with a function call" rejection of
+  // an earlier, hidden-flag version of this. Deliberately the "standard"
+  // slot only, never "chassis" -- a chassis-integrated modifier's own
+  // contribution (e.g. weapon's own heat_initial_modifier_chassis) is
+  // sourced directly from its own real ships_base column via an ordinary
+  // chassis mock_ref, not through this mod-application path, so combining
+  // both here would double-count it. (Shield's own capacity/rate/delay
+  // modifiers mock_ref that same chassis column directly inside their own
+  // Post Mod formula instead of through a separate sibling stat -- see
+  // SHIELD_STAT_DEFINITIONS' own comment on why that intermediate stat
+  // was removed -- but the "never combine chassis into THIS variable
+  // type" rule still holds for both shapes.)
+  // `context.table`/`context.component` are only real DOM-backed objects
+  // at the live render call site (see buildComponentAnalyzerTableElement()'s
+  // own statContext) -- anywhere else (aggregate/mock resolution, the
+  // scratchpad test scripts' own synthetic contexts) they're undefined,
+  // which resolveEffectiveAppliedMod() already treats as "no mod applied"
+  // (falls through to its own `?? null`), so this degrades to
+  // `ref.neutralValue` there rather than erroring.
+  if (ref.type === "mod_modifier_ref") {
+    return modEffectValueForColumn(
+      resolveEffectiveAppliedMod(context?.table, context?.component, "standard"),
+      ref.realColumn,
+      ref.neutralValue,
+    );
+  }
+  if (ref.type === "stat_ref") {
+    const resolutionKey = `${ref.componentType}:${ref.statId}`;
+    if (context?.resolving?.has(resolutionKey)) {
+      console.error(`Statistics Lab: circular stat reference detected at ${resolutionKey}`);
+      return null;
+    }
+    const targetDef = lookupStatDef(ref.componentType, ref.statId);
+    const targetRow = resolveRowFor(ref.componentType, row, context);
+    if (!targetDef || !targetRow) return null;
+    const nextResolving = new Set(context?.resolving);
+    nextResolving.add(resolutionKey);
+    return resolveStatValue(targetDef, targetRow, { ...context, resolving: nextResolving });
+  }
+  return null;
+}
+
+// The row to actually read `componentType`'s own stats from -- `row`
+// itself when it's already that same type (the common case: a formula
+// referencing another stat on the same component). A stat_ref naming a
+// DIFFERENT component type (e.g. an engine stat referencing a ship stat)
+// has no real row to read in this table at all -- by design, that case is
+// what a mock_ref variable (see resolveMockValue() above) is for instead,
+// not something a plain stat_ref ever resolves on its own -- so this
+// returns null rather than guessing at a row.
+function resolveRowFor(componentType, row, context) {
+  if (context?.componentType === componentType) return row;
+  return null;
+}
+
 // componentType -> Map(ware_id -> full stat-carrying object) -- looked up
 // fresh at render time (see buildComponentAnalyzerTableElement()), never
 // snapshotted onto table.components itself, so a selected stat always
@@ -7050,17 +12412,1059 @@ function renderComponentAnalyzerTables() {
   }
 }
 
+// ---- Proving Grounds: Ship Trials ------------------------------------------
+// Phase 1 (2026-10-28): page shell + the Trials list itself (add/remove/
+// rename/minimize, persisted) -- intentionally no ship columns or stat rows
+// yet (see TODO.md's own Proving Grounds entry for the full roadmap). A
+// "trial" is deliberately the SAME underlying shape a Component Analyzer
+// table already is (componentType/components/statSets/activeStatSetIndex),
+// just rendered TRANSPOSED once Phase 2 lands (ships as columns, stats as
+// rows, statSets switching which ROWS show instead of which columns) --
+// this reuse is viable because resolveStatValue() and every stat formula
+// already operate on {def, row, context} triples with zero assumption
+// about row/column orientation, and statSets[].selectedStats is already
+// just "which stats are visible in this tab", independent of how they're
+// drawn. The one genuinely new piece Phase 2+ adds is `shipMocks`
+// (per-ship-column mock config, keyed by each component's own
+// `instanceId` rather than `ware_id`) -- deliberately NOT sharing
+// table.rowStatMocks' existing ware_id-keyed scheme, so comparing two
+// different loadouts of the same hull works as two independent columns
+// without touching (or risking regressing) the existing Component
+// Analyzer row-mock architecture at all. "Multi identical component"
+// support for Component Analyzer tables themselves was explicitly scoped
+// OUT of this (user call) -- a later, separate task.
+let shipTrials = [];
+let nextShipTrialId = 1;
+let nextShipTrialInstanceId = 1;
+let provingGroundsActiveTab = "ship-trials";
+
+function makeShipTrial() {
+  return {
+    id: nextShipTrialId++,
+    title: "",
+    componentType: "chassis",
+    components: [],
+    statSets: [makeStatSet()],
+    activeStatSetIndex: 0,
+    minimized: false,
+    shipMocks: {},
+    // instanceId -> {standard: {mod_id, values, selectedAdditional}} | undefined
+    // -- a ship's own Chassis Mod (see "Chassis Mod" in the real Ship
+    // Builder, shipModLabSlots' own "chassis" key). Kept separate from
+    // shipMocks[instanceId] (componentType -> mock entries) rather than
+    // folded into it, since this is the chassis ROW's own mod, not a mock
+    // of some other equipped component -- shipTrialColumnContext() reads
+    // it to build a real `component` for resolveEffectiveAppliedMod() to
+    // find, the same mechanism any Component Analyzer chassis table row's
+    // own appliedMods already uses.
+    shipChassisAppliedMods: {},
+    // Which column (a component.instanceId, or null for "no baseline") the
+    // comparison diffs below every other number are measured against -- see
+    // setShipTrialBaseline()'s own comment. Deliberately NOT "column 0"
+    // (the Ware Cost List's own convention, appendComparisonCell()) --
+    // user call: the baseline is whichever column was last clicked, and
+    // clicking one never reorders the columns around it.
+    baselineInstanceId: null,
+  };
+}
+
+// Phases 2/3/4 (2026-10-28): the real transposed table -- ships as columns
+// (added via "Add Ship", sourced from importedLoadoutsResult.ships, the
+// Loadout Manager's own saved-loadouts working set -- user call for the
+// v1 data source, not the live Fleet Planner cart), stat rows via the
+// reused Select Stats modal against the "chassis" catalog, and a vertical
+// stat-set tab stack switching which rows show (user call: "left aligned
+// and stacked on top of each other", unlike Component Analyzer's own
+// horizontal bar -- see .ship-trial-tabs-vertical in style.css).
+//
+// shipMocks[instanceId] is built once, when a ship is added, straight from
+// that loadout's own real selections/missileAmounts/droneAmounts/
+// deployableAmounts/countermeasureAmounts/crewAmounts (see
+// buildShipMocksFromLoadout()) -- every equipment group's own selections
+// key already encodes its real componentType (see groupKey(): "<group_name>
+// ::<component_type>"), so no extra chassis-group lookup is needed to sort
+// a loadout's selections by type. Resolved per cell through a SYNTHETIC,
+// never-rendered "table" object whose own `statMocks` is just that one
+// ship's shipMocks (see shipTrialColumnContext()) -- reuses the exact same
+// table-level mock-scope resolveStatValue() already knows how to read
+// (mockScopeLevels()'s own "table" level), with no ware_id row-keying at
+// all, which is what makes two different loadouts of the same hull work
+// as two independent columns with zero risk to the existing Component
+// Analyzer row-mock architecture.
+//
+// Applying a Mod Lab mod to one Trial ship's own equipment is wired in
+// (see loadout.appliedMods below) -- the ship's own Chassis Mod is the
+// one exception, that's shipChassisAppliedMods/shipTrialColumnContext()'s
+// own job instead (there's no "component_ref" mock entry for the chassis
+// itself to carry it on).
+
+// "missile_launcher" (a real equipment group's own component_type -- see
+// query_ship_groups()) is folded into "weapon", since the launcher ITSELF
+// is a weapon-type ware (confirmed by its own ware_id prefix); every other
+// group component_type (engine/shield/weapon/turret/thruster/software)
+// already matches this app's own componentType ids as-is.
+const SHIP_GROUP_TYPE_TO_MOCK_TYPE = { missile_launcher: "weapon" };
+
+// loadout.appliedMods is a flat {slotKey: {mod_id, values, selectedAdditional}}
+// map (see shipModLabSlot()'s own comment in the real Ship Builder for
+// every slotKey this can hold) -- this picks the right one for one
+// specific group, matching exactly how the Ship Builder's own mod buttons
+// are scoped: "engine" covers both the engine AND thruster sections (one
+// combined mod, user call -- there's no separate thruster mod in-game
+// either), "shield" is the one combined mod for every MAIN shield slot,
+// and `bonus_shield::<group_name>` (checked first, falling back to the
+// combined "shield" entry when absent) is a specific BONUS shield's own
+// separate mod -- the two are told apart purely by which key happens to
+// be set, no extra "is this group a bonus shield" bookkeeping needed.
+// turret/weapon (missile_launcher included, same real-game weapon-mod
+// category SHIP_GROUP_TYPE_TO_MOCK_TYPE above already folds it into) are
+// each their own group_name-keyed entry, one per equipped item.
+function appliedModsForGroup(loadout, rawType, groupName) {
+  const applied = loadout.appliedMods;
+  if (!applied) return undefined;
+  switch (rawType) {
+    case "engine":
+    case "thruster":
+      return applied.engine;
+    case "shield":
+      return applied[`bonus_shield::${groupName}`] ?? applied.shield;
+    case "turret":
+      return applied[`turret::${groupName}`];
+    case "weapon":
+    case "missile_launcher":
+      return applied[`weapon::${groupName}`];
+    default:
+      return undefined;
+  }
+}
+
+function buildShipMocksFromLoadout(loadout) {
+  const mocks = {};
+  const push = (componentType, wareId, count, appliedMod) => {
+    if (!wareId) return;
+    const entry = count && count !== 1 ? { type: "component_ref", wareId, count } : { type: "component_ref", wareId };
+    if (appliedMod) entry.appliedMods = { standard: appliedMod };
+    (mocks[componentType] ??= []).push(entry);
+  };
+  for (const [key, wareId] of Object.entries(loadout.selections ?? {})) {
+    const [groupName, rawType] = key.split("::");
+    push(SHIP_GROUP_TYPE_TO_MOCK_TYPE[rawType] ?? rawType, wareId, 1, appliedModsForGroup(loadout, rawType, groupName));
+  }
+  for (const [wareId, count] of Object.entries(loadout.missileAmounts ?? {})) push("missile", wareId, count);
+  for (const [wareId, count] of Object.entries(loadout.droneAmounts ?? {})) push("drone", wareId, count);
+  for (const [wareId, count] of Object.entries(loadout.deployableAmounts ?? {})) push("deployable", wareId, count);
+  for (const [wareId, count] of Object.entries(loadout.countermeasureAmounts ?? {})) push("countermeasure", wareId, count);
+  for (const [wareId, count] of Object.entries(loadout.crewAmounts ?? {})) push("crew", wareId, count);
+  return mocks;
+}
+
+function addShipToTrial(trial, loadout) {
+  const instanceId = nextShipTrialInstanceId++;
+  const chassisRow = statSourceForComponentType("chassis").get(loadout.shipWareId);
+  trial.components.push({
+    instanceId,
+    ware_id: loadout.shipWareId,
+    name: loadout.name ? `${chassisRow?.name ?? loadout.shipName} (${loadout.name})` : chassisRow?.name ?? loadout.shipName,
+    icon: chassisRow?.icon ?? null,
+    // A plain-data snapshot of the loadout this ship was added from --
+    // the shape loadImportedGameLoadout() already knows how to consume --
+    // kept around purely so openShipTrialBuilderModal() can re-populate
+    // the real Ship Builder for this one column later (its own "Edit"
+    // button). shipMocks above is a derived, flattened-by-componentType
+    // view built for stat formulas and loses each group's own group_name,
+    // so it can't be used to reconstruct the groups view -- this keeps the
+    // original group_name::component_type keying intact instead.
+    loadout: { ...loadout },
+    // A SEPARATE, never-touched-again snapshot of the loadout this ship
+    // was ORIGINALLY added with (same shape as `loadout` above, but
+    // frozen at add-time regardless of source -- a saved loadout, a Fleet
+    // List ship, or a from-scratch Builder ship all converge on this one
+    // function) -- updateShipInTrial() compares the live `loadout` against
+    // this to decide `edited` (see that function's own comment).
+    originalLoadout: { ...loadout },
+    edited: false,
+  });
+  trial.shipMocks[instanceId] = buildShipMocksFromLoadout(loadout);
+  setShipChassisAppliedMods(trial, instanceId, loadout);
+  saveState();
+  renderShipTrials();
+}
+
+// Shared by addShipToTrial()/updateShipInTrial() -- see makeShipTrial()'s
+// own comment on why the chassis's own mod lives in this separate
+// instanceId-keyed map instead of folded into shipMocks[instanceId].
+function setShipChassisAppliedMods(trial, instanceId, loadout) {
+  const chassisMod = loadout.appliedMods?.chassis;
+  if (chassisMod) {
+    trial.shipChassisAppliedMods[instanceId] = chassisMod;
+  } else {
+    delete trial.shipChassisAppliedMods[instanceId];
+  }
+}
+
+function removeShipFromTrial(trial, instanceId) {
+  trial.components = trial.components.filter((component) => component.instanceId !== instanceId);
+  delete trial.shipMocks[instanceId];
+  delete trial.shipChassisAppliedMods[instanceId];
+  // A removed ship can't go on being the comparison baseline -- see
+  // setShipTrialBaseline()'s own comment.
+  if (trial.baselineInstanceId === instanceId) trial.baselineInstanceId = null;
+  saveState();
+  renderShipTrials();
+}
+
+// Sets (instanceId) or clears (null) which column every OTHER column's own
+// stat numbers are diffed against (see appendStatComparisonDiff()).
+// Clicking a column's own header (see buildShipTrialBody()'s own
+// selectArea) toggles it: a different column SETS it as the new baseline,
+// the column that's already the baseline instead clears it back to null --
+// no separate "Clear Comparison Baseline" control. Deliberately never
+// reorders trial.components -- user call: unlike the Ware Cost List's own
+// "column 0 is always the baseline" convention (which sorts the active
+// fleet into that slot), a Trial's baseline column stays exactly where it
+// already was.
+function setShipTrialBaseline(trial, instanceId) {
+  trial.baselineInstanceId = instanceId;
+  saveState();
+  renderShipTrials();
+}
+
+const shipTrialBuilderModalOverlay = document.getElementById("ship-trial-builder-modal-overlay");
+const shipTrialBuilderModalBox = document.getElementById("ship-trial-builder-modal-box");
+const shipTrialBuilderModalTitle = document.getElementById("ship-trial-builder-modal-title");
+const shipTrialBuilderMount = document.getElementById("ship-trial-builder-mount");
+const shipTrialBuilderCloseBtn = document.getElementById("ship-trial-builder-close-btn");
+const shipTrialBuilderCloseXBtn = document.getElementById("ship-trial-builder-close-x-btn");
+
+// Whatever the Fleet Planner's own Ship Builder (the real #picker-section
+// node, relocated into this modal below) had loaded BEFORE this modal was
+// opened -- null if nothing was loaded. Restored by
+// closeShipTrialBuilderModal() so opening/closing this modal has no
+// lasting effect on the Fleet Planner page underneath it. Selections live
+// in the live <select> elements inside #groups-container, not in any JS
+// object (see applyGroupSelections()'s own comment), so capturing them
+// means reading the DOM directly, the same way addSelectedShipToCart()
+// and friends already do.
+let shipTrialBuilderPreviousState = null;
+
+// shipTrialBuilderContext itself is declared up near the top of the file
+// (see its own comment there) -- set here, read by setAddToCartBtnLabel()
+// (relabels the reused Add To Fleet List button to Add to Trial/Update
+// Trial while this is set) and saveShipTrialBuilderChanges() (the
+// button's actual click behavior).
+
+function captureCurrentGroupSelections() {
+  const selections = {};
+  for (const row of groupsContainer.querySelectorAll(".group-row")) {
+    const wareId = row.querySelector(".group-select").value;
+    if (wareId) selections[row.dataset.groupKey] = wareId;
+  }
+  return selections;
+}
+
+function snapshotShipBuilderState() {
+  return currentShip
+    ? {
+        currentShip,
+        editingIndex,
+        selections: captureCurrentGroupSelections(),
+        missileAmounts: { ...missileAmounts },
+        droneAmounts: { ...droneAmounts },
+        deployableAmounts: { ...deployableAmounts },
+        countermeasureAmounts: { ...countermeasureAmounts },
+        crewAmounts: { ...crewAmounts },
+        noteValue: shipNoteInput.value,
+        // A plain reference, not a clone -- safe because
+        // openShipTrialBuilderModal()/openShipTrialBuilderModalForNewShip()
+        // always call resetShipModLabSlots() right after this snapshot is
+        // taken, which POINTS shipModLabSlots at a brand new {} rather
+        // than mutating the one captured here, so nothing touches this
+        // object while the Trial modal is open.
+        shipModLabSlots,
+      }
+    : null;
+}
+
+// Shared by openShipTrialBuilderModal()/openShipTrialBuilderModalForNewShip()
+// below -- snapshots whatever the Fleet Planner's own builder currently
+// has loaded, relocates the real #picker-section into this modal, and
+// shows it. Populating it (from a loadout, or left blank for a fresh
+// pick) is the caller's own job, same as its own post-population
+// scroll-reset.
+function openShipTrialBuilderModalShell(trial, instanceId, titleText) {
+  shipTrialBuilderPreviousState = snapshotShipBuilderState();
+  shipTrialBuilderContext = { trial, instanceId };
+  shipTrialBuilderModalTitle.textContent = titleText;
+  shipTrialBuilderMount.appendChild(pickerSection);
+  shipTrialBuilderModalOverlay.classList.remove("hidden");
+}
+
+// loadImportedGameLoadout() (and, for the blank/new-ship case, nothing at
+// all) ends with shipDetail.scrollIntoView() -- on the real Fleet Planner
+// page that scrolls the ship past the picker/filters above it, but
+// #picker-section is now the modal's own scroll container's only real
+// content, so the same call instead scrolls this modal box down past its
+// own title and the close button in the corner. Snapping it back to the
+// top puts both back in view immediately rather than fighting that
+// scroll's own "smooth" animation.
+function resetShipTrialBuilderModalScroll() {
+  shipTrialBuilderModalBox.scrollTop = 0;
+}
+
+// Opens the real Ship Builder -- not a second copy of it -- inside a modal
+// over the Proving Grounds page, populated via loadImportedGameLoadout()
+// from this one ship column's own loadout snapshot (see addShipToTrial()).
+async function openShipTrialBuilderModal(trial, component) {
+  if (!component.loadout) return;
+  openShipTrialBuilderModalShell(
+    trial,
+    component.instanceId,
+    t("proving_grounds.ship_builder_modal_title", { name: component.name }),
+  );
+  await loadImportedGameLoadout(component.loadout);
+  resetShipTrialBuilderModalScroll();
+}
+
+// "Add Builder Ship" -- the same modal, opened with nothing loaded, so the
+// relocated #picker-section's own chassis list/filters/Load button (not
+// just #ship-detail) are what the user sees and uses to build a new ship
+// from scratch, then "Add to Trial" (see saveShipTrialBuilderChanges())
+// adds it as a new column.
+function openShipTrialBuilderModalForNewShip(trial) {
+  openShipTrialBuilderModalShell(trial, null, t("proving_grounds.ship_builder_modal_title_new"));
+  resetShipPicker();
+  resetShipTrialBuilderModalScroll();
+}
+
+function closeShipTrialBuilderModal() {
+  shipTrialBuilderModalOverlay.classList.add("hidden");
+  pickerSectionHomeParent.insertBefore(pickerSection, pickerSectionHomeNextSibling);
+  shipTrialBuilderContext = null;
+
+  const previous = shipTrialBuilderPreviousState;
+  shipTrialBuilderPreviousState = null;
+  if (!previous) {
+    resetShipPicker();
+    return;
+  }
+  currentShip = previous.currentShip;
+  editingIndex = previous.editingIndex;
+  // Restored by direct reassignment, same reasoning as
+  // snapshotShipBuilderState()'s own comment -- renderShipDetail() just
+  // below reads this back in as it rebuilds each mod button.
+  shipModLabSlots = previous.shipModLabSlots;
+  // shipTrialBuilderContext is already cleared above, so this goes back
+  // to its normal "Add To Fleet List"/"Update Fleet List" behavior --
+  // nothing else in this restore sequence calls setAddToCartBtnLabel(),
+  // so without this explicit call the button would be left showing
+  // whatever Trial-flavored text it had right before this modal closed.
+  setAddToCartBtnLabel(t(editingIndex !== null ? "ship_builder.update_fleet_list" : "ship_builder.add_to_fleet_list"));
+  renderShipOptions();
+  applyShipSelection(currentShip.ware_id);
+  renderShipDetail(currentShip);
+  applyGroupSelections(previous.selections);
+  missileAmounts = previous.missileAmounts;
+  renderAmmunitionSection();
+  droneAmounts = previous.droneAmounts;
+  renderDroneSection();
+  deployableAmounts = previous.deployableAmounts;
+  renderDeployableSection();
+  countermeasureAmounts = previous.countermeasureAmounts;
+  renderCountermeasureSection();
+  crewAmounts = previous.crewAmounts;
+  renderCrewSection();
+  shipNoteInput.value = previous.noteValue;
+  renderShipLoadoutNameField();
+}
+
+shipTrialBuilderCloseBtn.addEventListener("click", closeShipTrialBuilderModal);
+shipTrialBuilderCloseXBtn.addEventListener("click", closeShipTrialBuilderModal);
+
+// The reused Add To Fleet List button's click handler while this modal is
+// open (see handleAddToCartBtnClick()) -- runs the exact same gathering/
+// capacity-validation pass as a real "Add To Fleet List" (see
+// gatherCurrentShipLoadoutData()'s own comment on why that's shared), then
+// either updates the Trial ship being edited in place or adds a brand new
+// one, instead of touching a real Fleet List. Closes the modal on success,
+// same as this button normally returning you to a clean builder.
+function saveShipTrialBuilderChanges() {
+  const data = gatherCurrentShipLoadoutData();
+  if (!data) return;
+  const {
+    selections,
+    note,
+    missileAmountsSnapshot,
+    droneAmountsSnapshot,
+    deployableAmountsSnapshot,
+    countermeasureAmountsSnapshot,
+    crewAmountsSnapshot,
+    appliedMods,
+  } = data;
+
+  const loadout = {
+    name: note,
+    shipWareId: currentShip.ware_id,
+    shipName: currentShip.name,
+    shipIcon: currentShip.icon,
+    selections,
+    missileAmounts: missileAmountsSnapshot,
+    droneAmounts: droneAmountsSnapshot,
+    deployableAmounts: deployableAmountsSnapshot,
+    countermeasureAmounts: countermeasureAmountsSnapshot,
+    crewAmounts: crewAmountsSnapshot,
+    appliedMods,
+    warnings: [],
+    rawXml: "",
+  };
+
+  const { trial, instanceId } = shipTrialBuilderContext;
+  if (instanceId !== null) {
+    updateShipInTrial(trial, instanceId, loadout);
+  } else {
+    addShipToTrial(trial, loadout);
+  }
+  // closeShipTrialBuilderModal() would otherwise restore whatever was
+  // loaded before this modal opened -- correct, but it also means the
+  // just-saved ship/loadout's own name-building (see updateShipInTrial()/
+  // addShipToTrial()) already happened against a known-good loadout
+  // object, independent of whatever the builder reverts back to.
+  closeShipTrialBuilderModal();
+}
+
+// Updates an EXISTING Trial ship's own loadout/name/icon/shipMocks in
+// place (same component.instanceId, same column position) -- the
+// edit-update counterpart to addShipToTrial()'s own fresh-column add,
+// sharing its exact name-building convention (chassis name, plus the
+// loadout's own name in parens when it has one).
+function updateShipInTrial(trial, instanceId, loadout) {
+  const component = trial.components.find((c) => c.instanceId === instanceId);
+  if (!component) return;
+  const chassisRow = statSourceForComponentType("chassis").get(loadout.shipWareId);
+  component.ware_id = loadout.shipWareId;
+  component.name = loadout.name ? `${chassisRow?.name ?? loadout.shipName} (${loadout.name})` : chassisRow?.name ?? loadout.shipName;
+  component.icon = chassisRow?.icon ?? null;
+  component.loadout = { ...loadout };
+  // A component saved by an earlier session (before originalLoadout
+  // existed) has no real baseline to compare against -- backfilled here
+  // from whatever it already is, so it starts "not edited" and tracks
+  // divergence from THIS point on rather than erroring or guessing.
+  if (!component.originalLoadout) component.originalLoadout = { ...loadout };
+  component.edited = loadoutEquipmentSignature(component.loadout) !== loadoutEquipmentSignature(component.originalLoadout);
+  trial.shipMocks[instanceId] = buildShipMocksFromLoadout(loadout);
+  setShipChassisAppliedMods(trial, instanceId, loadout);
+  saveState();
+  renderShipTrials();
+}
+
+const shipTrialAddShipModalOverlay = document.getElementById("ship-trial-add-ship-modal-overlay");
+const shipTrialAddShipChassisSearch = document.getElementById("ship-trial-add-ship-chassis-search");
+const shipTrialAddShipNameSearch = document.getElementById("ship-trial-add-ship-name-search");
+const shipTrialAddShipFiltersBtn = document.getElementById("ship-trial-add-ship-filters-btn");
+const shipTrialAddShipFiltersPanel = document.getElementById("ship-trial-add-ship-filters-panel");
+const shipTrialAddShipFiltersGrid = document.getElementById("ship-trial-add-ship-filters-grid");
+const shipTrialAddShipList = document.getElementById("ship-trial-add-ship-list");
+const shipTrialAddShipCancelBtn = document.getElementById("ship-trial-add-ship-cancel-btn");
+
+// Same row shape as openSelectGameLoadoutModal()'s own generic ("every
+// imported loadout") branch -- name/ship name/chassis icon -- just with
+// its own click behavior (adds a column to `trial` instead of loading
+// into the Ship Builder) and its own overlay/list elements (see
+// index.html's own comment on why this is a separate modal rather than a
+// generalized version of that one). Also carries its own independent
+// chassis filter panel (buildChassisFilterPanel()), same
+// Size/Purpose/Type/Race/Vendor/Build Method groups as the main Ship
+// Builder's own #ship-filters, scoped to shipTrialAddShipFiltersGrid so it
+// never shares checkbox state with #ship-filters or any other modal's own
+// copy (see shipPassesCurrentFilters()'s own `root` docstring), plus two
+// free-text filters (chassis name, loadout name) -- all three narrow the
+// same list together (AND-combined, not either/or).
+function renderShipTrialAddShipList(trial) {
+  shipTrialAddShipList.innerHTML = "";
+  const shipByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
+  const chassisQuery = shipTrialAddShipChassisSearch.value.trim().toLowerCase();
+  const nameQuery = shipTrialAddShipNameSearch.value.trim().toLowerCase();
+  const allEntries = importedLoadoutsResult?.ships ?? [];
+  const entries = allEntries.filter((entry) => {
+    const ship = shipByWareId.get(entry.shipWareId);
+    if (ship && !shipPassesCurrentFilters(ship, shipTrialAddShipFiltersGrid)) return false;
+    if (chassisQuery && !(entry.shipName ?? "").toLowerCase().includes(chassisQuery)) return false;
+    if (nameQuery && !(entry.name ?? "").toLowerCase().includes(nameQuery)) return false;
+    return true;
+  });
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent =
+      allEntries.length === 0 ? t("proving_grounds.no_saved_loadouts") : t("proving_grounds.no_loadouts_match_filters");
+    shipTrialAddShipList.appendChild(empty);
+  }
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "select-game-loadout-row";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "select-game-loadout-row-name";
+    nameSpan.textContent = entry.name || t("proving_grounds.unnamed_loadout");
+    row.appendChild(nameSpan);
+
+    const shipSpan = document.createElement("span");
+    shipSpan.className = "select-game-loadout-row-ship";
+    shipSpan.textContent = entry.shipName;
+    row.appendChild(shipSpan);
+
+    const ship = shipByWareId.get(entry.shipWareId);
+    if (ship?.icon) row.appendChild(buildIconImg(ship.icon, "ship-icon"));
+
+    row.addEventListener("click", () => {
+      addShipToTrial(trial, entry);
+      closeShipTrialAddShipModal();
+    });
+    shipTrialAddShipList.appendChild(row);
+  }
+}
+
+function openShipTrialAddShipModal(trial) {
+  shipTrialAddShipChassisSearch.value = "";
+  shipTrialAddShipNameSearch.value = "";
+  shipTrialAddShipFiltersPanel.classList.add("hidden"); // always starts collapsed
+  shipTrialAddShipFiltersGrid.innerHTML = "";
+  buildChassisFilterPanel(shipTrialAddShipFiltersGrid, () => renderShipTrialAddShipList(trial));
+  shipTrialAddShipChassisSearch.oninput = () => renderShipTrialAddShipList(trial);
+  shipTrialAddShipNameSearch.oninput = () => renderShipTrialAddShipList(trial);
+  renderShipTrialAddShipList(trial);
+  shipTrialAddShipModalOverlay.classList.remove("hidden");
+}
+
+function closeShipTrialAddShipModal() {
+  shipTrialAddShipModalOverlay.classList.add("hidden");
+}
+
+shipTrialAddShipFiltersBtn.addEventListener("click", () => {
+  shipTrialAddShipFiltersPanel.classList.toggle("hidden");
+});
+shipTrialAddShipCancelBtn.addEventListener("click", closeShipTrialAddShipModal);
+
+// ---- "Add Fleet List Ship" (TODO.md item 4) ----
+const shipTrialFleetShipModalOverlay = document.getElementById("ship-trial-fleet-ship-modal-overlay");
+const shipTrialFleetShipModalTitle = document.getElementById("ship-trial-fleet-ship-modal-title");
+const shipTrialFleetShipFleetStep = document.getElementById("ship-trial-fleet-ship-fleet-step");
+const shipTrialFleetShipFleetList = document.getElementById("ship-trial-fleet-ship-fleet-list");
+const shipTrialFleetShipShipStep = document.getElementById("ship-trial-fleet-ship-ship-step");
+const shipTrialFleetShipShipList = document.getElementById("ship-trial-fleet-ship-ship-list");
+const shipTrialFleetShipBackBtn = document.getElementById("ship-trial-fleet-ship-back-btn");
+const shipTrialFleetShipCancelBtn = document.getElementById("ship-trial-fleet-ship-cancel-btn");
+
+// Which Trial this modal is currently adding into -- set fresh by
+// openShipTrialAddFleetShipModal() on every open, same "not sticky
+// beyond one open" spirit as the other Trial modals' own target state.
+let shipTrialFleetShipTargetTrial = null;
+
+function openShipTrialAddFleetShipModal(trial) {
+  shipTrialFleetShipTargetTrial = trial;
+  shipTrialFleetShipModalTitle.textContent = t("proving_grounds.fleet_ship_pick_fleet_title");
+  renderShipTrialFleetShipFleetList();
+  shipTrialFleetShipFleetStep.classList.remove("hidden");
+  shipTrialFleetShipShipStep.classList.add("hidden");
+  shipTrialFleetShipModalOverlay.classList.remove("hidden");
+}
+
+function closeShipTrialAddFleetShipModal() {
+  shipTrialFleetShipModalOverlay.classList.add("hidden");
+  shipTrialFleetShipTargetTrial = null;
+}
+
+// Step 1: one row per real Fleet Planner fleet -- deliberately NOT
+// buildFleetTabButton() itself (that hardcodes setActiveFleet() on click,
+// a real app-state write this read-only picker must never trigger, plus
+// its own delete "×" and Build Method Priority line, neither wanted
+// here) -- reuses its own standalone sub-pieces instead
+// (buildFleetTabShipIcon()/SELECTION_BOX_CORNER_CLASSES are both already
+// self-contained, no setActiveFleet() involved) so the icon/active-box
+// look matches exactly with no risk to the real tab bar's own behavior.
+// "Active" here just means "currently expanded in THIS modal" -- entirely
+// local to this picker, independent of the real activeFleetIndex.
+function renderShipTrialFleetShipFleetList() {
+  shipTrialFleetShipFleetList.innerHTML = "";
+  if (fleets.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = t("proving_grounds.fleet_ship_no_fleets");
+    shipTrialFleetShipFleetList.appendChild(empty);
+    return;
+  }
+  fleets.forEach((fleet, fleetIndex) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "fleet-list-tab-btn ship-trial-fleet-picker-row";
+
+    const firstShipIcon = fleet.cart[0]?.shipIcon;
+    if (firstShipIcon) row.appendChild(buildFleetTabShipIcon(firstShipIcon, false));
+
+    const nameStack = document.createElement("span");
+    nameStack.className = "fleet-list-tab-name-stack";
+    nameStack.appendChild(document.createTextNode(fleet.name.trim() || defaultNewFleetLabel()));
+    row.appendChild(nameStack);
+
+    const countSpan = document.createElement("span");
+    countSpan.className = "ship-trial-fleet-picker-row-count";
+    countSpan.textContent = t("proving_grounds.fleet_ship_count", { count: fleet.cart.length });
+    row.appendChild(countSpan);
+
+    row.addEventListener("click", () => showShipTrialFleetShipShipList(fleetIndex));
+    shipTrialFleetShipFleetList.appendChild(row);
+  });
+}
+
+// Step 2: that one fleet's own ships -- same icon/name/note look as the
+// real Fleet Lists section's own cart-table rows (see renderCart()), but
+// read-only: no qty control, no Edit/Remove, just a Select button per
+// row. Clicking Select converts that ONE cart entry (never mutated, only
+// read) into a loadout-shaped object and adds it to the Trial the same
+// way addShipToTrial() already handles a saved loadout.
+function showShipTrialFleetShipShipList(fleetIndex) {
+  const fleet = fleets[fleetIndex];
+  shipTrialFleetShipModalTitle.textContent = t("proving_grounds.fleet_ship_pick_ship_title", {
+    fleet: fleet.name.trim() || defaultNewFleetLabel(),
+  });
+  shipTrialFleetShipShipList.innerHTML = "";
+
+  if (fleet.cart.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = t("proving_grounds.fleet_ship_no_ships");
+    shipTrialFleetShipShipList.appendChild(empty);
+  }
+
+  fleet.cart.forEach((entry) => {
+    const rowWrap = document.createElement("div");
+    rowWrap.className = "ship-trial-fleet-picker-ship-row-wrap";
+
+    const row = document.createElement("div");
+    row.className = "select-game-loadout-row ship-trial-fleet-picker-ship-row";
+
+    if (entry.shipIcon) row.appendChild(buildIconImg(entry.shipIcon, "ship-icon cart-ship-icon"));
+
+    const nameStack = document.createElement("span");
+    nameStack.className = "ship-trial-fleet-picker-ship-name-stack";
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "select-game-loadout-row-name";
+    nameSpan.textContent = entry.shipName;
+    nameStack.appendChild(nameSpan);
+    if (entry.note) {
+      const noteDiv = document.createElement("div");
+      noteDiv.className = "cart-ship-note";
+      noteDiv.textContent = entry.note;
+      nameStack.appendChild(noteDiv);
+    }
+    row.appendChild(nameStack);
+
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.textContent = t("proving_grounds.fleet_ship_select_btn");
+    selectBtn.addEventListener("click", () => addShipFromFleetCartEntry(entry));
+    row.appendChild(selectBtn);
+
+    rowWrap.appendChild(row);
+
+    // Same collapsible loadout breakdown (weapons/shields/turrets/etc.,
+    // same colors) the real Fleet Lists cart table shows for this exact
+    // entry -- but NOT its qty stepper or Edit/Remove (this picker has
+    // neither, by design: it only ever reads a fleet, never edits one).
+    // A closure-local `minimized` flag, not entry.loadoutMinimized itself
+    // -- see renderLoadoutCell()'s own comment on why collapsing/
+    // expanding it here must never write back onto the real fleet.
+    let minimized = false;
+    const loadoutCell = document.createElement("div");
+    loadoutCell.className = "ship-trial-fleet-picker-ship-loadout";
+    renderLoadoutCell(loadoutCell, entry, {
+      getMinimized: () => minimized,
+      setMinimized: (value) => (minimized = value),
+    });
+    rowWrap.appendChild(loadoutCell);
+
+    shipTrialFleetShipShipList.appendChild(rowWrap);
+  });
+
+  shipTrialFleetShipFleetStep.classList.add("hidden");
+  shipTrialFleetShipShipStep.classList.remove("hidden");
+}
+
+// cart entries and loadouts are two independently-evolved shapes that
+// happen to carry almost the same fields under slightly different names
+// (note vs. name, no id/warnings/rawXml) -- see addShipToTrial()'s own
+// loadout-shape comment. Built fresh from `entry` every time, nothing on
+// `entry` itself is ever written to, so the source fleet's own cart stays
+// completely untouched (user call: this picker is read-only).
+function cartEntryToLoadout(entry) {
+  return {
+    name: entry.note ?? "",
+    shipWareId: entry.shipWareId,
+    shipName: entry.shipName,
+    shipIcon: entry.shipIcon,
+    selections: { ...(entry.selections ?? {}) },
+    missileAmounts: { ...(entry.missileAmounts ?? {}) },
+    droneAmounts: { ...(entry.droneAmounts ?? {}) },
+    deployableAmounts: { ...(entry.deployableAmounts ?? {}) },
+    countermeasureAmounts: { ...(entry.countermeasureAmounts ?? {}) },
+    crewAmounts: { ...(entry.crewAmounts ?? {}) },
+    appliedMods: { ...(entry.appliedMods ?? {}) },
+    warnings: [],
+    rawXml: "",
+  };
+}
+
+function addShipFromFleetCartEntry(entry) {
+  if (!shipTrialFleetShipTargetTrial) return;
+  addShipToTrial(shipTrialFleetShipTargetTrial, cartEntryToLoadout(entry));
+  closeShipTrialAddFleetShipModal();
+}
+
+shipTrialFleetShipBackBtn.addEventListener("click", () => {
+  shipTrialFleetShipModalTitle.textContent = t("proving_grounds.fleet_ship_pick_fleet_title");
+  shipTrialFleetShipShipStep.classList.add("hidden");
+  shipTrialFleetShipFleetStep.classList.remove("hidden");
+});
+shipTrialFleetShipCancelBtn.addEventListener("click", closeShipTrialAddFleetShipModal);
+
+const shipTrialsListContainer = document.getElementById("ship-trials-list");
+const shipTrialsAddTrialBtn = document.getElementById("ship-trials-add-trial-btn");
+
+function renderShipTrials() {
+  shipTrialsListContainer.innerHTML = "";
+  for (const trial of shipTrials) {
+    shipTrialsListContainer.appendChild(buildShipTrialElement(trial));
+  }
+}
+
+// A synthetic, never-rendered "table" carrying only `componentType`/
+// `statMocks` -- see this section's own top comment on why a per-ship-
+// column mock scope is modeled this way instead of table.rowStatMocks.
+function shipTrialColumnContext(trial, component, statSet) {
+  const syntheticTable = { componentType: "chassis", statMocks: trial.shipMocks[component.instanceId] ?? {} };
+  // A real `component` (not null) only when this ship has its own Chassis
+  // Mod -- resolveEffectiveAppliedMod()/modEffectValueForColumn() read
+  // component.appliedMods.standard exactly the same way a real Component
+  // Analyzer chassis table row's own applied mod already does, so this is
+  // the only piece needed to make a chosen Chassis Mod actually change a
+  // Post Mod chassis stat here (see shipChassisAppliedMods' own comment on
+  // makeShipTrial()).
+  const chassisMod = trial.shipChassisAppliedMods?.[component.instanceId];
+  const syntheticComponent = chassisMod ? { appliedMods: { standard: chassisMod } } : null;
+  return { componentType: "chassis", table: syntheticTable, statSet, component: syntheticComponent, resolving: new Set() };
+}
+
+// One Trial's own header + body -- same header control set as
+// buildComponentAnalyzerTableElement() (minimize/title/remove), reusing
+// its exact CSS classes so a Trial looks identical to a Component
+// Analyzer table at a glance, plus its own "Add Ship" control in place of
+// that function's type-select/Select Components (a Trial's componentType
+// is always "chassis").
+function buildShipTrialElement(trial) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "component-analyzer-table";
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "component-analyzer-table-header";
+
+  // Minimize/maximize -- same convention buildComponentAnalyzerTableElement()
+  // itself uses (see that function's own comment on cart-loadout-toggle-btn).
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "cart-loadout-toggle-btn component-analyzer-table-minimize-btn";
+  minimizeBtn.textContent = trial.minimized ? "+" : "−";
+  minimizeBtn.title = t(
+    trial.minimized ? "proving_grounds.expand_trial_tooltip" : "proving_grounds.collapse_trial_tooltip",
+  );
+  minimizeBtn.addEventListener("click", () => {
+    trial.minimized = !trial.minimized;
+    saveState();
+    renderShipTrials();
+  });
+
+  const titleField = buildEditableNameField(
+    () => trial.title,
+    t("proving_grounds.trial_title_placeholder"),
+    (value) => {
+      trial.title = value;
+    },
+    "component-analyzer-table-title-field",
+    renderShipTrials,
+  );
+
+  const addLoadoutShipBtn = document.createElement("button");
+  addLoadoutShipBtn.type = "button";
+  addLoadoutShipBtn.textContent = t("proving_grounds.add_loadout_ship_btn");
+  addLoadoutShipBtn.title = t("proving_grounds.add_loadout_ship_tooltip");
+  addLoadoutShipBtn.addEventListener("click", () => openShipTrialAddShipModal(trial));
+
+  const addBuilderShipBtn = document.createElement("button");
+  addBuilderShipBtn.type = "button";
+  addBuilderShipBtn.textContent = t("proving_grounds.add_builder_ship_btn");
+  addBuilderShipBtn.title = t("proving_grounds.add_builder_ship_tooltip");
+  addBuilderShipBtn.addEventListener("click", () => openShipTrialBuilderModalForNewShip(trial));
+
+  // Third source of ships for a Trial (TODO.md item 4, "Add Ship source:
+  // Fleet Lists") -- opens a picker: pick one of the user's own Fleet
+  // Planner fleets (vertical list, same ship-icon/active-box styling as
+  // that page's own horizontal fleet tabs), then pick a ship within it
+  // (same look as that fleet's own cart-table rows). Read-only -- see
+  // openShipTrialAddFleetShipModal()'s own comment on why it never calls
+  // setActiveFleet() or touches the fleet's own cart.
+  const addFleetListShipBtn = document.createElement("button");
+  addFleetListShipBtn.type = "button";
+  addFleetListShipBtn.textContent = t("proving_grounds.add_fleet_list_ship_btn");
+  addFleetListShipBtn.title = t("proving_grounds.add_fleet_list_ship_tooltip");
+  addFleetListShipBtn.addEventListener("click", () => openShipTrialAddFleetShipModal(trial));
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "component-analyzer-table-remove-btn";
+  removeBtn.textContent = "×";
+  removeBtn.title = t("proving_grounds.remove_trial");
+  removeBtn.addEventListener("click", () => {
+    const trialName = trial.title.trim() || t("proving_grounds.default_trial_name");
+    if (!confirm(t("proving_grounds.remove_trial_confirm", { trial: trialName }))) return;
+    shipTrials = shipTrials.filter((other) => other.id !== trial.id);
+    saveState();
+    renderShipTrials();
+  });
+
+  headerRow.append(minimizeBtn, titleField, addLoadoutShipBtn, addBuilderShipBtn, addFleetListShipBtn, removeBtn);
+  wrapper.appendChild(headerRow);
+
+  if (!trial.minimized) {
+    if (trial.components.length === 0) {
+      const emptyMsg = document.createElement("div");
+      emptyMsg.className = "ship-trial-placeholder-body";
+      emptyMsg.textContent = t("proving_grounds.no_ships_placeholder");
+      wrapper.appendChild(emptyMsg);
+    } else {
+      wrapper.appendChild(buildShipTrialBody(trial));
+    }
+  }
+
+  return wrapper;
+}
+
+// A column's own chassis icon, with the exact same 4-corner "selection box"
+// overlay the Fleet Planner's own active fleet tab shows (see
+// buildFleetTabShipIcon()/SELECTION_BOX_CORNER_CLASSES) when `isBaseline`
+// -- unlike that function, this always uses the Trial's own plain,
+// untinted icon (buildIconImg(), the same one every other ship symbol in
+// this app uses), never the fleet tab's own green-tinted "player_location"
+// variant -- only the corner-bracket decoration itself is being reused
+// here, not that function's whole icon-coloring scheme.
+function buildShipTrialColumnIcon(icon, isBaseline) {
+  const wrap = document.createElement("span");
+  wrap.className = "ship-trial-baseline-icon-wrap";
+  if (isBaseline) {
+    for (const cornerClass of SELECTION_BOX_CORNER_CLASSES) {
+      const corner = document.createElement("img");
+      corner.src = "/images/nav_icons/selection_box_corner.png";
+      corner.alt = "";
+      corner.className = cornerClass;
+      wrap.appendChild(corner);
+    }
+  }
+  if (icon) wrap.appendChild(buildIconImg(icon, "ship-icon"));
+  return wrap;
+}
+
+// The real transposed comparison: a vertical stat-set tab stack (left,
+// switches which stat ROWS show -- see buildStatSetTabBar()'s own
+// `extraClass` param) beside a table with one column per added ship
+// (chassis icon + name, like the Cost Analyzer's own ship display) and
+// one row per stat selected for the active tab.
+function buildShipTrialBody(trial) {
+  const body = document.createElement("div");
+  body.className = "ship-trial-body";
+
+  body.appendChild(buildStatSetTabBar(trial, renderShipTrials, "ship-trial-tabs-vertical"));
+
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "component-analyzer-table-wrapper ship-trial-table-wrapper";
+
+  const selectStatsRow = document.createElement("div");
+  selectStatsRow.className = "component-analyzer-stat-set-row";
+  const selectStatsBtn = document.createElement("button");
+  selectStatsBtn.type = "button";
+  selectStatsBtn.textContent = t("component_analyzer.select_stats_btn");
+  selectStatsBtn.addEventListener("click", () => openStatSelectModal(trial));
+  selectStatsRow.appendChild(selectStatsBtn);
+  tableWrap.appendChild(selectStatsRow);
+
+  const activeStatSet = trial.statSets[trial.activeStatSetIndex];
+  const catalog = statCatalogForComponentType(trial.componentType);
+  const selectedStatDefs = (activeStatSet.selectedStats ?? [])
+    .map((key) => catalog?.definitions.find((def) => def.key === key))
+    .filter(Boolean);
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headTr = document.createElement("tr");
+  const cornerTh = document.createElement("th");
+  cornerTh.className = "ship-trial-stats-col";
+  cornerTh.textContent = t("proving_grounds.stats_column_header");
+  headTr.appendChild(cornerTh);
+
+  for (const component of trial.components) {
+    const th = document.createElement("th");
+    // The flex layout (icon on top, name below) has to live on an INNER
+    // wrapper, not the <th> itself -- a <th>/<td> only lays out side by
+    // side with its row siblings as long as its own `display` stays
+    // table-cell (the UA default); overriding that straight to `flex`
+    // pulls it out of table layout entirely, which is what was making
+    // every ship column render as its own full-width stacked band instead
+    // of sitting next to the others.
+    const headerWrap = document.createElement("div");
+    headerWrap.className = "ship-trial-column-header";
+    // Icon + name + edited badge live in their own clickable area, separate
+    // from actionsRow below (Edit/Remove) -- clicking anywhere in it sets
+    // this column as the comparison baseline (setShipTrialBaseline()),
+    // without that click also reaching into Edit/Remove's own handlers.
+    // Clicking the column that's ALREADY the baseline clears it instead --
+    // the only way back to "no baseline" (no separate Clear button).
+    const isCurrentBaseline = trial.baselineInstanceId === component.instanceId;
+    const selectArea = document.createElement("div");
+    selectArea.className = "ship-trial-column-select-area";
+    selectArea.title = t(isCurrentBaseline ? "proving_grounds.clear_baseline_tooltip" : "proving_grounds.set_baseline_tooltip");
+    selectArea.addEventListener("click", () =>
+      setShipTrialBaseline(trial, isCurrentBaseline ? null : component.instanceId),
+    );
+    selectArea.appendChild(buildShipTrialColumnIcon(component.icon, isCurrentBaseline));
+    const nameDiv = document.createElement("div");
+    nameDiv.textContent = component.name;
+    selectArea.appendChild(nameDiv);
+    // Set by updateShipInTrial() comparing the live loadout against the
+    // one this ship was originally added with (see addShipToTrial()'s own
+    // originalLoadout comment) -- never shown for a ship that's never
+    // been through the Edit flow at all (edited stays false, not merely
+    // falsy-but-unset, until a real comparison has actually run).
+    if (component.edited) {
+      const editedBadge = document.createElement("span");
+      editedBadge.className = "ship-trial-edited-badge";
+      editedBadge.textContent = t("proving_grounds.edited_badge");
+      editedBadge.title = t("proving_grounds.edited_tooltip");
+      selectArea.appendChild(editedBadge);
+    }
+    headerWrap.appendChild(selectArea);
+    const actionsRow = document.createElement("div");
+    actionsRow.className = "ship-trial-column-actions";
+    const editShipBtn = document.createElement("button");
+    editShipBtn.type = "button";
+    editShipBtn.className = "ship-trial-edit-ship-btn";
+    editShipBtn.textContent = t("proving_grounds.edit_ship_btn");
+    if (component.loadout) {
+      editShipBtn.title = t("proving_grounds.edit_ship_tooltip");
+      editShipBtn.addEventListener("click", () => openShipTrialBuilderModal(trial, component));
+    } else {
+      // Ships added before this loadout snapshot existed have nothing to
+      // populate the modal from -- see addShipToTrial()'s own comment.
+      editShipBtn.disabled = true;
+      editShipBtn.title = t("proving_grounds.edit_ship_unavailable_tooltip");
+    }
+    actionsRow.appendChild(editShipBtn);
+    const removeShipBtn = document.createElement("button");
+    removeShipBtn.type = "button";
+    removeShipBtn.className = "ship-trial-remove-ship-btn";
+    removeShipBtn.textContent = "×";
+    removeShipBtn.title = t("proving_grounds.remove_ship");
+    removeShipBtn.addEventListener("click", () => removeShipFromTrial(trial, component.instanceId));
+    actionsRow.appendChild(removeShipBtn);
+    headerWrap.appendChild(actionsRow);
+    th.appendChild(headerWrap);
+    headTr.appendChild(th);
+  }
+  thead.appendChild(headTr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  if (selectedStatDefs.length === 0) {
+    const emptyRow = document.createElement("tr");
+    const emptyTd = document.createElement("td");
+    emptyTd.textContent = t("proving_grounds.no_stats_selected");
+    emptyTd.className = "component-analyzer-empty-cell";
+    emptyTd.colSpan = 1 + trial.components.length;
+    emptyRow.appendChild(emptyTd);
+    tbody.appendChild(emptyRow);
+  } else {
+    const baselineComponent = trial.baselineInstanceId
+      ? trial.components.find((c) => c.instanceId === trial.baselineInstanceId)
+      : null;
+    for (const def of selectedStatDefs) {
+      const tr = document.createElement("tr");
+      const labelTd = document.createElement("td");
+      labelTd.className = "component-analyzer-name-cell ship-trial-stats-col";
+      labelTd.textContent = statDefLabel(def);
+      tr.appendChild(labelTd);
+
+      // Resolved once per row (not per cell) -- every non-baseline column
+      // in this row diffs against this same value (see
+      // appendStatComparisonDiff()).
+      let baselineValue;
+      if (baselineComponent) {
+        const baselineChassisRow = statSourceForComponentType("chassis").get(baselineComponent.ware_id);
+        const baselineContext = shipTrialColumnContext(trial, baselineComponent, activeStatSet);
+        baselineValue = resolveStatValue(def, baselineChassisRow, {
+          ...baselineContext,
+          missingMocks: new Set(),
+          mockTrace: [],
+        });
+      }
+
+      for (const component of trial.components) {
+        const statTd = document.createElement("td");
+        const chassisRow = statSourceForComponentType("chassis").get(component.ware_id);
+        const missingMocks = new Set();
+        const mockTrace = [];
+        const context = shipTrialColumnContext(trial, component, activeStatSet);
+        const value = resolveStatValue(def, chassisRow, { ...context, missingMocks, mockTrace });
+        renderStatCellValue(statTd, def, value, missingMocks, mockTrace, trial.componentType);
+        appendStatComparisonDiff(statTd, def, value, baselineValue, component.instanceId === baselineComponent?.instanceId);
+        tr.appendChild(statTd);
+      }
+      tbody.appendChild(tr);
+    }
+  }
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  body.appendChild(tableWrap);
+
+  return body;
+}
+
+shipTrialsAddTrialBtn.addEventListener("click", () => {
+  shipTrials.unshift(makeShipTrial());
+  saveState();
+  renderShipTrials();
+});
+
+// Ship Trials / Fleet Trials -- see .proving-grounds-legend-tabs' own CSS
+// comment for why these buttons live inside the page's own <legend>
+// instead of a separate tab bar below it.
+function showProvingGroundsTab(tabId) {
+  for (const btn of document.querySelectorAll(".proving-grounds-tab-btn")) {
+    btn.classList.toggle("active", btn.dataset.provingGroundsTab === tabId);
+  }
+  for (const content of document.querySelectorAll(".proving-grounds-tab-content")) {
+    content.classList.toggle("hidden", content.id !== `proving-grounds-${tabId}`);
+  }
+  provingGroundsActiveTab = tabId;
+  saveState();
+}
+
+for (const btn of document.querySelectorAll(".proving-grounds-tab-btn")) {
+  btn.addEventListener("click", () => showProvingGroundsTab(btn.dataset.provingGroundsTab));
+}
+
 // One stat-set tab -- same look/behavior as the Fleet Lists tab bar's own
 // buildFleetTabButton() (reuses its exact .fleet-list-tab-btn/
 // .fleet-list-tab-name-stack/.fleet-list-tab-remove-btn classes, per the
 // user's own "should look like the fleet lists tabs" spec), minus that
 // button's ship icon/Build Priority sub-button, neither of which apply
-// here. Renaming happens via the edit-button field below the tab bar (see
-// buildComponentAnalyzerTableElement()), which commits on blur/Enter with
-// a full renderComponentAnalyzerTables() rather than live per-keystroke --
-// so this tab always just reads statSet.name fresh, no live text-node
-// wiring needed.
-function buildStatSetTabButton(table, statSet, index) {
+// here. Renaming happens via the pencil button on the tab itself (swaps
+// nameStack for an input in place, commits on blur/Enter, Escape
+// reverts) -- there's no separate name field anywhere else, per the
+// user's own "only place we see the tab title is on the tab directly"
+// spec, so this is the one and only place statSet.name is read or written.
+function buildStatSetTabButton(table, statSet, index, rerender = renderComponentAnalyzerTables) {
   const isActive = index === table.activeStatSetIndex;
   const tab = document.createElement("button");
   tab.type = "button";
@@ -7069,13 +13473,53 @@ function buildStatSetTabButton(table, statSet, index) {
     if (table.activeStatSetIndex === index) return;
     table.activeStatSetIndex = index;
     saveState();
-    renderComponentAnalyzerTables();
+    rerender();
   });
 
   const nameStack = document.createElement("span");
   nameStack.className = "fleet-list-tab-name-stack";
   nameStack.textContent = statSet.name.trim() || defaultNewStatSetLabel();
   tab.appendChild(nameStack);
+
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "fleet-list-tab-edit-btn";
+  editBtn.textContent = "✎";
+  editBtn.title = t("component_analyzer.rename_tooltip");
+  editBtn.addEventListener("click", (event) => {
+    // Stops this from also bubbling up to `tab`'s own click handler, which
+    // would switch the active stat set (and re-render, discarding the
+    // input) out from under an edit that targets a non-active tab.
+    event.stopPropagation();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "fleet-list-tab-name-input";
+    input.placeholder = t("component_analyzer.stat_set_name_placeholder");
+    input.value = statSet.name;
+    // Any click while editing (placing the cursor, selecting text) is
+    // still a click on `tab` -- stop it here too, for the same reason as
+    // editBtn's own stopPropagation above.
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    const commit = () => {
+      statSet.name = input.value;
+      saveState();
+      rerender();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        input.blur();
+      } else if (e.key === "Escape") {
+        input.removeEventListener("blur", commit);
+        rerender();
+      }
+    });
+    nameStack.replaceWith(input);
+    input.focus();
+    input.select();
+  });
+  tab.appendChild(editBtn);
 
   if (table.statSets.length > 1) {
     const removeBtn = document.createElement("button");
@@ -7085,7 +13529,7 @@ function buildStatSetTabButton(table, statSet, index) {
     removeBtn.title = t("component_analyzer.delete_stat_set_tooltip");
     removeBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      deleteStatSet(table, index);
+      deleteStatSet(table, index, rerender);
     });
     tab.appendChild(removeBtn);
   }
@@ -7093,7 +13537,7 @@ function buildStatSetTabButton(table, statSet, index) {
   return tab;
 }
 
-function deleteStatSet(table, statSetIndex) {
+function deleteStatSet(table, statSetIndex, rerender = renderComponentAnalyzerTables) {
   if (table.statSets.length <= 1) return;
   table.statSets.splice(statSetIndex, 1);
   if (statSetIndex === table.activeStatSetIndex) {
@@ -7102,18 +13546,18 @@ function deleteStatSet(table, statSetIndex) {
     table.activeStatSetIndex -= 1;
   }
   saveState();
-  renderComponentAnalyzerTables();
+  rerender();
 }
 
 // Builds the whole tab strip -- one .fleet-list-tab-btn per stat set plus
 // a trailing "+" (.fleet-list-tab-add-btn, same class as the Fleet Lists
 // tab bar's own).
-function buildStatSetTabBar(table) {
+function buildStatSetTabBar(table, rerender = renderComponentAnalyzerTables, extraClass = "") {
   const nav = document.createElement("nav");
-  nav.className = "fleet-list-tabs";
+  nav.className = extraClass ? `fleet-list-tabs ${extraClass}` : "fleet-list-tabs";
 
   table.statSets.forEach((statSet, index) => {
-    nav.appendChild(buildStatSetTabButton(table, statSet, index));
+    nav.appendChild(buildStatSetTabButton(table, statSet, index, rerender));
   });
 
   const addBtn = document.createElement("button");
@@ -7125,7 +13569,7 @@ function buildStatSetTabBar(table) {
     table.statSets.push(makeStatSet(nextNewStatSetName(table)));
     table.activeStatSetIndex = table.statSets.length - 1;
     saveState();
-    renderComponentAnalyzerTables();
+    rerender();
   });
   nav.appendChild(addBtn);
 
@@ -7143,7 +13587,7 @@ function buildStatSetTabBar(table) {
 // editing is now a deliberate discrete action, not continuous typing, so
 // there's no need to avoid a full re-render on commit the way a live
 // per-keystroke input would have.
-function buildEditableNameField(getValue, placeholder, setValue, className) {
+function buildEditableNameField(getValue, placeholder, setValue, className, rerender = renderComponentAnalyzerTables) {
   const wrap = document.createElement("span");
   wrap.className = className;
 
@@ -7162,7 +13606,7 @@ function buildEditableNameField(getValue, placeholder, setValue, className) {
     const commit = () => {
       setValue(input.value);
       saveState();
-      renderComponentAnalyzerTables();
+      rerender();
     };
     input.addEventListener("blur", commit);
     input.addEventListener("keydown", (event) => {
@@ -7170,7 +13614,7 @@ function buildEditableNameField(getValue, placeholder, setValue, className) {
         input.blur();
       } else if (event.key === "Escape") {
         input.removeEventListener("blur", commit);
-        renderComponentAnalyzerTables();
+        rerender();
       }
     });
 
@@ -7185,6 +13629,603 @@ function buildEditableNameField(getValue, placeholder, setValue, className) {
 
   wrap.append(editBtn, nameText);
   return wrap;
+}
+
+// A saved mod selection ({mod_id, values, selectedAdditional}, the same
+// shape both table.globalMods[slot] and component.appliedMods[slot]
+// store) resolved to its own real mod object, for MOD_QUALITY_COLORS[mod.mod_level]
+// -- the standard-mod highlight's own color (see
+// standardStatColumnHighlightForComponent()). Returns null for no
+// selection or an unresolvable mod_id (stale data).
+function resolvedModForSelection(saved) {
+  if (!saved) return null;
+  return allEquipmentMods.find((candidate) => candidate.mod_id === saved.mod_id) ?? null;
+}
+
+// Whether `saved`'s mod touches real column `key` AT ALL -- same
+// "touched" signal modEffectValueForColumn() already computes internally
+// to decide whether to round/reformat its own result, exposed here
+// without needing a real baseValue to run it against. A unique sentinel
+// object as the "baseValue" means the only way the result can differ
+// from it is modEffectValueForColumn() actually having set `touched`
+// (its own untouched path always returns baseValue completely
+// unchanged) -- cheaper and clearer than duplicating that function's own
+// matching loop a second time just to get a boolean out of it.
+function modTouchesColumn(saved, key) {
+  const sentinel = {};
+  return modEffectValueForColumn(saved, key, sentinel) !== sentinel;
+}
+
+// Every stat in `definitions` whose own formula reads the live Mod Lab
+// selection DIRECTLY (a mod_modifier_ref variable, see
+// modifierModStatDef()/resolveFormulaVariable()'s own comments) for a
+// realColumn `saved`'s mod actually touches. This is the only place a
+// highlight chain is ever allowed to START from -- a "mod"-kind stat is
+// the one kind of stat whose value is genuinely live, client-side-only
+// state, so it's the only direct "this mod changed this" fact there is;
+// everything else that ends up highlighted (see
+// expandModAffectedStatKeysByDependency() below) only does so because it
+// depends on one of these, directly or transitively.
+function directlyModAffectedStatKeys(definitions, saved) {
+  const keys = new Set();
+  if (!saved) return keys;
+  for (const def of definitions) {
+    for (const variable of Object.values(def.formula?.variables ?? {})) {
+      if (variable.type === "mod_modifier_ref" && modTouchesColumn(saved, variable.realColumn)) {
+        keys.add(def.key);
+        break;
+      }
+    }
+  }
+  return keys;
+}
+
+// Expands `seedKeys` (see directlyModAffectedStatKeys() above) to every
+// OTHER stat in `definitions` that depends on one of them, directly or
+// transitively -- e.g. recharge_max_post_mod's own formula reads
+// recharge_max_modifier_mod (one of its stat_ref variables, same
+// componentType -- a cross-component mock_ref/aggregate_ref never
+// counts here, see below), so it joins the set the moment that one does;
+// anything that in turn depends on recharge_max_post_mod would join on
+// the next pass, and so on, repeating until a full pass adds nothing
+// new. This is how "color the generated value a mod changes directly,
+// then every downstream stat containing that value" actually works --
+// recharge_max (the BASE stat) is never swept in by this, since nothing
+// here ever follows a dependency backward from a formula to its own
+// inputs, only forward from an input to whatever reads it.
+//
+// Deliberately restricted to `stat_ref` edges (same componentType,
+// same row) -- a `mock_ref`/`aggregate_ref` variable reads a DIFFERENT
+// component type's own row entirely, which has its own independent
+// effective mod and its own independent highlight computed separately
+// for its own table, not something this row's mod should reach across
+// into.
+function expandModAffectedStatKeysByDependency(definitions, seedKeys) {
+  const affected = new Set(seedKeys);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const def of definitions) {
+      if (affected.has(def.key)) continue;
+      for (const variable of Object.values(def.formula?.variables ?? {})) {
+        if (variable.type === "stat_ref" && affected.has(variable.statId)) {
+          affected.add(def.key);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  return affected;
+}
+
+// The full set of this componentType's own stat keys a given mod
+// selection should highlight -- directly-affected "mod"-kind stats plus
+// every stat downstream of one. `componentType` is a Component Analyzer
+// table's own type (e.g. "turret"/"thruster"), looked up against
+// STAT_CATALOG_BY_TYPE directly -- unlike the old column-based approach
+// this replaced, there's no need to translate through
+// MOD_LAB_COMPONENT_TYPE_MAP here at all: every candidate stat is
+// identified by walking this exact catalog's own formulas, not by
+// guessing which real_column a mod's own (component_type, target_stat)
+// pair maps onto up front.
+function modAffectedStatColumnKeysForSelection(componentType, saved) {
+  const definitions = STAT_CATALOG_BY_TYPE[componentType]?.definitions ?? [];
+  return expandModAffectedStatKeysByDependency(definitions, directlyModAffectedStatKeys(definitions, saved));
+}
+
+// table.globalMods.standard -- the table-wide default, nothing row-
+// specific -- for the header's own always-full-strength bar. color isn't
+// fixed -- it depends on whichever tier (basic/enhanced/exceptional) the
+// global default actually is, hence returning {keys, color} instead of a
+// bare Set. color is null alongside an empty keys Set whenever there's no
+// global standard mod set or its own mod_id no longer resolves.
+function modAffectedStandardStatColumnKeysAndColor(table) {
+  const mod = resolvedModForSelection(table.globalMods?.standard);
+  const keys = modAffectedStatColumnKeysForSelection(table.componentType, table.globalMods?.standard);
+  return { keys, color: mod ? MOD_QUALITY_COLORS[mod.mod_level] : null, level: mod?.mod_level ?? null };
+}
+
+// "#rrggbb" -> "rgba(r, g, b, alpha)" -- lets the column-highlight bar dim
+// itself without a second hardcoded color, keeping MOD_QUALITY_COLORS the
+// single source of truth for every quality color everywhere it's used.
+function hexToRgba(hex, alpha) {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// The visual itself: a soft accent hugging a highlighted stat column's own
+// LEFT edge, fading rightward toward transparent -- the standard mod's
+// own highlight bar (a chassis-integrated-mod bar used to share this
+// column from the opposite edge; removed alongside that feature, see
+// modsForComponentType()'s own comment). Applied identically to every
+// cell in the column (header and every body row alike) -- since the
+// gradient only varies horizontally, stacking that same image behind each
+// row reads as one continuous vertical bar running the full height of the
+// column rather than a seam at every row boundary.
+function modColumnHighlightBackground(color) {
+  const rgba = hexToRgba(color, 1);
+  return `linear-gradient(to right, ${rgba} 0, ${rgba} 4px, transparent 40%)`;
+}
+
+// One row's own actual standard-slot highlight: {keys, color} -- this is
+// exactly resolveEffectiveAppliedMod()'s own "eventual apply to a
+// displayed stat" use case finally arriving -- a row's own local override
+// (if it has one) wins outright, otherwise the table's own global default
+// applies UNLESS the "override global to empty" checkbox blocks it
+// (component.blockGlobalMod?.standard), in which case nothing does.
+// Whichever mod ends up effective supplies both its own affected columns
+// and its own tier color (MOD_QUALITY_COLORS[mod.mod_level] -- green/
+// blue/purple for basic/enhanced/exceptional) -- clearing a local
+// override without touching anything else naturally reverts a row
+// straight back to the global default's own color, since there's nothing
+// local left for resolveEffectiveAppliedMod() to prefer.
+function standardStatColumnHighlightForComponent(table, component) {
+  const effective = resolveEffectiveAppliedMod(table, component, "standard");
+  const mod = resolvedModForSelection(effective);
+  const keys = modAffectedStatColumnKeysForSelection(table.componentType, effective);
+  return { keys, color: mod ? MOD_QUALITY_COLORS[mod.mod_level] : null, level: mod?.mod_level ?? null };
+}
+
+// The highest MOD_QUALITY_COLORS tier contributed by any CROSS-component
+// mock this one cell's own formula actually resolved through while
+// computing its value -- e.g. an Engine table's own Max Speed reading a
+// mocked chassis's physics_drag_forward_post_mod, where that MOCK ENTRY
+// itself (not this table's own row) carries an applied mod via its own
+// Mod Lab button (see buildMockEntryRow()'s own "Lets a full-component
+// mock carry its own applied mod" comment, and
+// resolveMockConfigValue()'s own `component: config` wiring -- that's
+// what already makes the VALUE come out right; this is the matching
+// piece for the highlight, which `standardStatColumnHighlightForComponent()`
+// above never reaches since it only ever looks at THIS table's own
+// componentType/row).
+//
+// Walks the FULL `mockTrace` (every level resolveMockValue() recursed
+// through for this one cell, not just its own top-level mock_ref -- see
+// resolveStatValue()'s own mockTrace threading), since the mod can be
+// several cross-component hops away (a mocked chassis's own Post Mod stat
+// depending on a further mocked shield, say). For each trace entry that
+// resolved to a real mock config (not an ambient real row, which has no
+// "mod on this specific mock" concept of its own -- that row's mod
+// belongs to whatever OTHER table it's really in, already highlighted
+// there on its own terms) carrying its own applied "standard" mod, checks
+// whether modAffectedStatColumnKeysForSelection() -- the same same-
+// component-type dependency walk a real row's own highlight already uses
+// -- actually flags that exact mocked stat as touched by that exact mod;
+// if several qualify, the HIGHEST mod_level tier wins (per-request: "If
+// there is a conflict as in multiple mods change the same cell, choose
+// the highest level mod color to apply").
+//
+// Handles both trace shapes resolveStatValue() can push: a plain mock_ref
+// entry (`{mockId, config, ...}`, one single mocked component) and an
+// aggregate_ref/group_sum/group_average entry (`{mockId, entries: [{config,
+// value, ...}, ...], ...}`, resolveAggregateVariable()/
+// resolveGroupAggregateVariable()'s own summary push covering every unit
+// that contributed to the sum/average) -- an aggregate's own `mockId` is
+// still just `<componentType>:<statId>`, the same shape a plain mock_ref
+// uses, so every contributing unit's own config is checked against that
+// same single target stat.
+function crossComponentMockModHighlight(mockTrace) {
+  let best = null;
+  const consider = (componentType, statId, saved) => {
+    if (!saved) return;
+    const mod = resolvedModForSelection(saved);
+    if (!mod) return;
+    if (!modAffectedStatColumnKeysForSelection(componentType, saved).has(statId)) return;
+    if (!best || mod.mod_level > best.level) best = { level: mod.mod_level, color: MOD_QUALITY_COLORS[mod.mod_level] };
+  };
+  for (const entry of mockTrace ?? []) {
+    const [componentType, statId] = entry.mockId.split(":");
+    if (entry.config?.type === "component_ref") consider(componentType, statId, entry.config.appliedMods?.standard);
+    for (const sub of entry.entries ?? []) {
+      if (sub.config?.type === "component_ref") consider(componentType, statId, sub.config.appliedMods?.standard);
+    }
+  }
+  return best;
+}
+
+// One stat's own real roll value, exactly the fallback
+// buildModLabReadOnlyStatRow()/buildModLabLoadedStatRow() already use: a
+// fixed stat (min_value === max_value, see this feature's own "no input at
+// all" design) always just uses its own min_value regardless of what
+// `values` holds for it (nothing ever writes into values for a stat with
+// no input to type into); anything else falls back to min_value too if,
+// for whatever reason, this specific saved selection never actually wrote
+// a value for it.
+function resolvedModStatUnderlyingValue(stat, values) {
+  if (stat.min_value === stat.max_value) return stat.min_value;
+  return values?.[stat.target_stat] ?? stat.min_value;
+}
+
+// Runs one saved mod selection's own effects against a single column's
+// current running value, honoring each stat's real
+// equipment_mod_target_mappings.json operation (see modStatOperation()'s
+// own comment): "multiply" scales the running value by the mod's own
+// rolled ratio; "add" adds the mod's own rolled delta straight on;
+// "add_ceiling_bool" ignores the running value entirely and forces it to 1
+// (true) -- these mods (region_damage_immune/illegal_cargo_concealed, see
+// CHASSIS_STAT_DEFINITIONS' own comments on why those columns exist at
+// all) have nothing to roll, they just grant a boolean trait outright. A
+// single mod touching the same column more than once (not expected in
+// real data, but not assumed against either) applies every one of those
+// stats in sequence rather than only the first. Rounded to 3 decimals
+// (same precision modStatDisplayNumber() already uses) only when
+// something actually changed -- an untouched value passes through exactly
+// as stored, no incidental reformatting.
+function modEffectValueForColumn(saved, key, baseValue) {
+  if (!saved) return baseValue;
+  const mod = allEquipmentMods.find((candidate) => candidate.mod_id === saved.mod_id);
+  if (!mod) return baseValue;
+  const selectedAdditional = new Set(saved.selectedAdditional ?? []);
+  const activeStats = mod.stats.filter((stat) => !stat.is_additional_stat || selectedAdditional.has(stat.target_stat));
+  let value = baseValue;
+  let touched = false;
+  for (const stat of activeStats) {
+    for (const mapping of equipmentModTargetMappings[stat.component_type]?.[stat.target_stat] ?? []) {
+      if (mapping.real_column !== key) continue;
+      touched = true;
+      if (mapping.operation === "add_ceiling_bool") {
+        value = 1;
+        continue;
+      }
+      const rolled = resolvedModStatUnderlyingValue(stat, saved.values);
+      const numericBase = typeof value === "number" ? value : 0;
+      value = mapping.operation === "add" ? numericBase + rolled : numericBase * rolled;
+    }
+  }
+  return touched && typeof value === "number" ? Math.round(value * 1000) / 1000 : value;
+}
+
+// One stat cell's own text -- just the plain formatted value. A BASE
+// stat's own raw database value never changes just because a mod is
+// active (see this session's own "lean into coloring dependent stats"
+// design note) -- only a "mod"-kind stat (and anything downstream of
+// one, e.g. a Post Mod stat) ever shows a different number when a mod is
+// active, and that already happened upstream, inside resolveStatValue()
+// itself (via the mod_modifier_ref formula variable reading the live Mod
+// Lab selection directly) -- by the time a value reaches here it's
+// already final, there is no separate "apply the mod to this cell" step
+// left to do, and no before/after pair to show: the "before" is just
+// whatever the Base column already displays on its own.
+// `missingMocks` -- see resolveMockValue()'s own comment -- is optional
+// (undefined for any caller that never threads a context.missingMocks Set
+// through resolveStatValue() at all, e.g. gatherComponentAnalyzerExportSheets()'s
+// own CSV/XLSX path, which has no hover UI to show a tooltip in anyway).
+function renderStatCellValue(statTd, def, value, missingMocks, mockTrace, componentType) {
+  statTd.textContent = formatStatValue(def, value);
+  if (missingMocks && missingMocks.size > 0) statTd.appendChild(buildMissingMocksWarningIcon(missingMocks));
+  const mockTraceIcon = buildMockTraceIcon(mockTrace, componentType);
+  if (mockTraceIcon) statTd.appendChild(mockTraceIcon);
+}
+
+// Layers a Cost Analyzer-style "(raw diff, percent diff)" annotation onto a
+// stat cell renderStatCellValue() already filled in (value text plus any
+// missing-mock/mock-trace icons) -- reuses that same function's own
+// .ware-cost-list-diff/-up/-down/-none classes and diff math (see
+// appendComparisonCell()) so a Ship Trial's own comparison reads exactly
+// like the Ware Cost List's, just appended onto an existing cell instead of
+// owning the whole thing.
+//
+// Called unconditionally for every numeric cell, baseline set or not --
+// when there's nothing real to show (no baseline, this IS the baseline
+// column, or the baseline's own value isn't numeric), it still appends an
+// invisible placeholder of the exact same line height instead of appending
+// nothing at all. Without that, a row's own height would shrink the moment
+// the baseline is cleared (or grow back the moment one is set) since the
+// diff line simply wouldn't exist either way -- user call: clicking a
+// column on/off as the baseline should never make the whole table jump.
+// Does nothing at all (not even a placeholder) for a non-numeric stat
+// (booleans, compatibility tags, race/vendor codes, ...) -- those never had
+// a diff line to reserve regardless of baseline state.
+function appendStatComparisonDiff(statTd, def, value, baselineValue, isBaselineColumn) {
+  if (typeof value !== "number") return;
+  const diffSpan = document.createElement("span");
+  diffSpan.className = "ware-cost-list-diff";
+
+  if (isBaselineColumn || typeof baselineValue !== "number") {
+    diffSpan.classList.add("ware-cost-list-diff-placeholder");
+    diffSpan.textContent = " ";
+    statTd.appendChild(diffSpan);
+    return;
+  }
+
+  const rawDiff = round2(value - baselineValue);
+  const sign = rawDiff > 0 ? "+" : "";
+  const rawText = `${sign}${formatStatValue(def, rawDiff)}`;
+  const pctText = baselineValue === 0 ? "N/A" : `${sign}${((rawDiff / baselineValue) * 100).toFixed(1)}%`;
+
+  diffSpan.classList.add(
+    rawDiff > 0 ? "ware-cost-list-diff-up" : rawDiff < 0 ? "ware-cost-list-diff-down" : "ware-cost-list-diff-none",
+  );
+  diffSpan.textContent = `(${rawText}, ${pctText})`;
+  statTd.appendChild(diffSpan);
+}
+
+// "<componentType>: <stat label>" for one mockId -- shared by the Mocks
+// page's own card headers and this warning icon's tooltip, so the two
+// always name a mock the exact same way.
+function mockLabel(mockId) {
+  const [componentType, statId] = mockId.split(":");
+  const def = lookupStatDef(componentType, statId);
+  return `${t(componentTypeI18nKey(componentType))}: ${def ? statDefLabel(def) : statId}`;
+}
+
+// Groups a list of mockIds by their own componentType -- one entry per
+// type, each carrying just that type's own stat labels (not the type name
+// repeated per stat), e.g. [{typeName: "Engines", labels: ["Forward Thrust"]},
+// {typeName: "Ship Chassis", labels: ["Mass", "Forward Drag"]}] instead of
+// a flat "Engines: Forward Thrust, Ship Chassis: Mass, Ship Chassis: ..."
+// list. Shared by the missing-mock warning icon's own tooltip and the
+// Statistics Lab's own "Missing Mocks" summary (see
+// collectMissingMocksByTable()), so both group the exact same way.
+function groupMockLabelsByType(mockIds) {
+  const byType = new Map();
+  for (const mockId of mockIds) {
+    const [componentType, statId] = mockId.split(":");
+    const def = lookupStatDef(componentType, statId);
+    if (!byType.has(componentType)) byType.set(componentType, []);
+    byType.get(componentType).push(def ? statDefLabel(def) : statId);
+  }
+  return [...byType.entries()].map(([componentType, labels]) => ({
+    typeName: t(componentTypeI18nKey(componentType)),
+    labels,
+  }));
+}
+
+// "- <type>: <label>, <label>" per type, one line each -- the plain-text
+// shape both a native `title` tooltip (which does respect \n) and the
+// Statistics Lab's own "Missing Mocks" summary render as.
+function formatMissingMocksList(mockIds) {
+  return groupMockLabelsByType(mockIds)
+    .map((group) => `- ${group.typeName}: ${group.labels.join(", ")}`)
+    .join("\n");
+}
+
+// A small warning glyph appended after a cell's own value (blank, in
+// practice, since a formula that's missing a mock has nothing else to
+// show -- see resolveMockValue()'s own comment) -- a plain title tooltip
+// names exactly which mock(s) left it unresolved, grouped by component
+// type (see formatMissingMocksList()). Mouseover only, not a click
+// target, since this is diagnostic information, not a control (see the
+// Statistics Lab's own Mocks page for actually fixing it).
+function buildMissingMocksWarningIcon(missingMocks) {
+  const icon = document.createElement("span");
+  icon.className = "component-analyzer-missing-mock-icon";
+  icon.textContent = "⚠";
+  icon.title = t("component_analyzer.missing_mocks_tooltip", { list: formatMissingMocksList([...missingMocks]) });
+  return icon;
+}
+
+// ---- Cell "e" popover: exactly which mocks a cell's value came from ----
+// A small circled "e" (same look as the stat info "i") appended to any cell
+// whose formula consulted a mock. Clicking it opens a popover naming, per
+// mock lookup, the scope + list position that won, the value it supplied,
+// and every candidate that was skipped (incompatible with the component, or
+// without a value for that stat). The data is the `mockTrace` array the
+// resolvers fill in while the cell is evaluated (see resolveMockValue()).
+let mockTracePopoverEl = null;
+
+function closeMockTracePopover() {
+  mockTracePopoverEl?.remove();
+  mockTracePopoverEl = null;
+}
+
+document.addEventListener("click", (event) => {
+  if (!mockTracePopoverEl) return;
+  if (mockTracePopoverEl.contains(event.target) || event.target.closest?.(".stat-mock-icon")) return;
+  closeMockTracePopover();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMockTracePopover();
+});
+
+function formatMockTraceValue(value) {
+  if (typeof value !== "number") return String(value);
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 1000) / 1000);
+}
+
+// `count` overrides the config's own stored count (used by an aggregate
+// entry line, where the ACTUAL number consumed may be less than configured
+// -- see resolveAggregateVariable()'s own budget-clipping comment);
+// omitted, it falls back to the config's own `count`. 1 (or absent, the
+// same thing) renders with no number at all -- only a real "more than one"
+// count is worth calling out.
+function mockTraceComponentName(mockType, config, count) {
+  if (config?.type === "literal") return t("component_analyzer.mock_trace_literal", { value: config.value });
+  const row = statSourceForComponentType(mockType).get(config?.wareId);
+  const name = row?.name ?? config?.wareId ?? "?";
+  const n = count ?? config?.count ?? 1;
+  return n > 1 ? t("component_analyzer.mock_trace_component_count", { count: n, name }) : name;
+}
+
+function mockTraceScopeLabel(scope) {
+  try {
+    return scopeLabel(scope);
+  } catch {
+    return scope?.level ?? "";
+  }
+}
+
+// The popover's own lines: [{ text, kind: "used" | "header" | "entry" |
+// "skipped" | "missing" }], de-duplicated (a stat that chains through
+// several others asks the same mock more than once). `componentType` is
+// the CONSUMING table's own type (e.g. "chassis" for a Ship Chassis table,
+// "engine" for an Engines table) -- threaded through just for
+// mock_trace_skipped_ship's own "it can't be fitted to this
+// {{componentType}}" (see componentTypeSingularLabel()); every other
+// trace line ignores it.
+function buildMockTraceLines(trace, componentType) {
+  const lines = [];
+  const seen = new Set();
+  const add = (text, kind) => {
+    const key = `${kind}|${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    lines.push({ text, kind });
+  };
+  // Plain lookups that landed on the same list entry collapse into one
+  // line ("Medium Dumbfire Rocket (Global, #2): Explosion Damage = 780;
+  // ...") instead of one line per stat.
+  const groups = new Map();
+  const statLabelOf = (mockId) => {
+    const [type, statId] = mockId.split(":");
+    const def = lookupStatDef(type, statId);
+    return def ? statDefLabel(def) : statId;
+  };
+  for (const item of trace) {
+    const [mockType] = item.mockId.split(":");
+    if (item.entries) {
+      if (item.entries.length > 0) {
+        add(
+          t("component_analyzer.mock_trace_aggregate_header", {
+            label: mockLabel(item.mockId),
+            aggregation: t(`stat_lab_modal.aggregation_${item.aggregation}`),
+            scope: mockTraceScopeLabel(item.scope),
+          }),
+          "header",
+        );
+        for (const entry of item.entries) {
+          add(
+            t("component_analyzer.mock_trace_aggregate_entry", {
+              position: entry.index + 1,
+              name: mockTraceComponentName(mockType, entry.config, entry.count),
+              value: formatMockTraceValue(entry.value),
+            }),
+            "entry",
+          );
+        }
+      }
+    } else if (item.level) {
+      const groupKey = `${item.level}|${item.key}|${item.index}|${item.config?.wareId ?? item.config?.value}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          item,
+          mockType,
+          stats: new Map(),
+        });
+      }
+      groups.get(groupKey).stats.set(item.mockId, item.value === null ? "-" : formatMockTraceValue(item.value));
+    } else {
+      add(t("component_analyzer.mock_trace_missing", { label: mockLabel(item.mockId) }), "missing");
+    }
+    for (const skip of item.skipped ?? []) {
+      add(
+        t(`component_analyzer.mock_trace_skipped_${skip.reason}`, {
+          name: mockTraceComponentName(mockType, skip.config),
+          componentType: componentTypeSingularLabel(componentType),
+        }),
+        "skipped",
+      );
+    }
+  }
+  const usedLines = [...groups.values()].map(({ item, mockType, stats }) => ({
+    kind: "used",
+    text: t("component_analyzer.mock_trace_used", {
+      name: mockTraceComponentName(mockType, item.config),
+      scope: mockTraceScopeLabel(item.scope),
+      position: item.index + 1,
+      stats: [...stats.entries()].map(([mockId, value]) => `${statLabelOf(mockId)} = ${value}`).join("; "),
+    }),
+  }));
+  return [...usedLines, ...lines];
+}
+
+function showMockTracePopover(anchor, trace, componentType) {
+  closeMockTracePopover();
+  const popover = document.createElement("div");
+  popover.className = "mock-trace-popover";
+  const title = document.createElement("div");
+  title.className = "mock-trace-popover-title";
+  title.textContent = t("component_analyzer.mock_trace_title");
+  popover.appendChild(title);
+  for (const { text, kind } of buildMockTraceLines(trace, componentType)) {
+    const line = document.createElement("div");
+    line.className = `mock-trace-popover-line mock-trace-popover-line-${kind}`;
+    line.textContent = text;
+    popover.appendChild(line);
+  }
+  document.body.appendChild(popover);
+  const rect = anchor.getBoundingClientRect();
+  const width = popover.offsetWidth;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  popover.style.left = `${left}px`;
+  popover.style.top = `${rect.bottom + 4}px`;
+  mockTracePopoverEl = popover;
+}
+
+function buildMockTraceIcon(trace, componentType) {
+  if (!trace || trace.length === 0) return null;
+  const icon = document.createElement("span");
+  icon.className = "stat-mock-icon";
+  icon.textContent = "m";
+  icon.setAttribute("role", "button");
+  icon.tabIndex = 0;
+  const tooltip = t("component_analyzer.mock_trace_tooltip");
+  icon.title = tooltip;
+  icon.setAttribute("aria-label", tooltip);
+  const open = (event) => {
+    event.stopPropagation();
+    showMockTracePopover(icon, trace, componentType);
+  };
+  icon.addEventListener("click", open);
+  icon.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      open(event);
+    }
+  });
+  return icon;
+}
+
+// Draws one stat cell's own highlight (header or body td alike) -- a bar
+// hugging the left edge whenever the standard mod currently in effect
+// touches this column (see standardStatColumnHighlightForComponent()/
+// modAffectedStandardStatColumnKeysAndColor()), OR a cross-component mock
+// feeding this exact cell carries its own applied mod (see
+// crossComponentMockModHighlight()) -- whichever of the two actually
+// applies to this cell wins; if BOTH do, the higher mod_level tier wins
+// (same "highest tier wins" rule crossComponentMockModHighlight() itself
+// already applies across multiple cross-component sources). `crossMock`
+// is omitted entirely for the header row (a table-wide legend bar, not
+// any one row's own resolved cell -- there's no mockTrace to read a
+// cross-component mod from without actually resolving a value). Leaves
+// the element's own backgroundImage untouched (not explicitly cleared to
+// "none") when nothing applies -- cells are always freshly created per
+// render, never reused, so there's nothing stale to clear.
+function applyModColumnHighlight(cell, key, { standard, crossMock }) {
+  const standardHit = standard?.color && standard.keys.has(key) ? standard : null;
+  const best =
+    standardHit && crossMock
+      ? (standardHit.level ?? 0) >= crossMock.level
+        ? standardHit
+        : crossMock
+      : standardHit || crossMock;
+  if (best?.color) {
+    cell.style.backgroundImage = modColumnHighlightBackground(best.color);
+  }
 }
 
 function buildComponentAnalyzerTableElement(table) {
@@ -7233,6 +14274,11 @@ function buildComponentAnalyzerTableElement(table) {
   removeBtn.textContent = "×";
   removeBtn.title = t("component_analyzer.remove_table");
   removeBtn.addEventListener("click", () => {
+    // Same "own title, falling back to the type's display name" resolution
+    // scopeLabel() already uses for a table -- so this names the table the
+    // same way the Statistics Lab's own Mocks view would.
+    const tableName = table.title.trim() || t(componentTypeI18nKey(table.componentType));
+    if (!confirm(t("component_analyzer.remove_table_confirm", { table: tableName }))) return;
     componentAnalyzerTables = componentAnalyzerTables.filter((other) => other.id !== table.id);
     saveState();
     renderComponentAnalyzerTables();
@@ -7268,28 +14314,40 @@ function buildComponentAnalyzerTableElement(table) {
     const statSetRow = document.createElement("div");
     statSetRow.className = "component-analyzer-stat-set-row";
 
-    const statSetNameField = buildEditableNameField(
-      () => activeStatSet.name,
-      t("component_analyzer.stat_set_name_placeholder"),
-      (value) => {
-        activeStatSet.name = value;
-      },
-      "component-analyzer-stat-set-name-field",
-    );
-    statSetRow.appendChild(statSetNameField);
-
-    // Only shown for a type with a real stat catalog (currently just
-    // chassis -- see STAT_CATALOG_BY_TYPE).
-    if (STAT_CATALOG_BY_TYPE[table.componentType]) {
+    // Only shown for a type with a real stat catalog, built-in or custom
+    // (see statCatalogForComponentType()).
+    if (statCatalogForComponentType(table.componentType)) {
       const selectStatsBtn = document.createElement("button");
       selectStatsBtn.type = "button";
       selectStatsBtn.textContent = t("component_analyzer.select_stats_btn");
       selectStatsBtn.addEventListener("click", () => openStatSelectModal(table));
       statSetRow.appendChild(selectStatsBtn);
+
+      // Opens on this table's own componentType, but the Stat Lab itself
+      // shows/edits the global catalog (see customStatFamilies' own
+      // comment) -- a stat created here is immediately visible from any
+      // other table of the same type too, not scoped to this one.
+      const statLabBtn = document.createElement("button");
+      statLabBtn.type = "button";
+      statLabBtn.className = "component-analyzer-stat-lab-btn";
+      statLabBtn.textContent = t("component_analyzer.stat_lab_btn");
+      statLabBtn.addEventListener("click", () => openStatLabModal(table.componentType));
+      statSetRow.appendChild(statLabBtn);
+
+      // A shortcut straight to the Stat Lab's own Mocks view (see
+      // openStatLabModal()'s own `view` parameter) -- the same
+      // destination stat-select-mocked-stats-btn/stat-lab-mocks-btn open,
+      // just reachable without detouring through Browse first.
+      const mockedStatsBtn = document.createElement("button");
+      mockedStatsBtn.type = "button";
+      mockedStatsBtn.className = "component-analyzer-mocked-stats-btn";
+      mockedStatsBtn.textContent = t("stat_lab_modal.mocked_stats_btn");
+      mockedStatsBtn.addEventListener("click", () => openStatLabModal(table.componentType, "mocks"));
+      statSetRow.appendChild(mockedStatsBtn);
     }
     wrapper.appendChild(statSetRow);
 
-    const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+    const catalog = statCatalogForComponentType(table.componentType);
     const selectedStatDefs = (activeStatSet.selectedStats ?? [])
       .map((key) => catalog?.definitions.find((def) => def.key === key))
       .filter(Boolean);
@@ -7302,12 +14360,31 @@ function buildComponentAnalyzerTableElement(table) {
     // (below) and the row-value lookups.
     const statSource = statSourceForComponentType(table.componentType);
 
+    // Shared across every resolveStatValue() call this render makes (see
+    // that function's own comment) -- safe to reuse the same `resolving`
+    // Set across many independent top-level calls despite never clearing
+    // it, since resolveFormulaVariable() only ever copies-and-extends it
+    // going down into a recursive stat_ref chain, never mutates this
+    // shared root in place. `component` is null here (mock resolution
+    // falls back to table/tab/global scope for the header/sort-comparator
+    // uses of this base context) -- the per-row render loop below clones
+    // this with each row's own `component` set, so a row-/tab-row-level
+    // mock override only ever applies to that one row's own cells.
+    const statContext = { componentType: table.componentType, table, statSet: activeStatSet, component: null, resolving: new Set() };
+
+    // See modAffectedStandardStatColumnKeysAndColor()'s own comment --
+    // purely table.globalMods-driven, computed once per render here (not
+    // per cell) since it doesn't vary across rows.
+    const standardHeaderHighlight = modAffectedStandardStatColumnKeysAndColor(table);
+
     const componentTable = document.createElement("table");
     const thead = document.createElement("thead");
     const headTr = document.createElement("tr");
     headTr.appendChild(buildNameColumnHeader(table));
     for (const def of selectedStatDefs) {
-      headTr.appendChild(buildStatColumnHeader(table, def, statSource));
+      const th = buildStatColumnHeader(table, def, statSource);
+      applyModColumnHighlight(th, def.key, { standard: standardHeaderHighlight });
+      headTr.appendChild(th);
     }
     thead.appendChild(headTr);
     componentTable.appendChild(thead);
@@ -7338,16 +14415,28 @@ function buildComponentAnalyzerTableElement(table) {
         const nameSpan = document.createElement("span");
         nameSpan.textContent = component.name;
         nameTd.appendChild(nameSpan);
-        const rowModLabBtn = buildModLabButton(component.name);
+        const rowModLabBtn = buildModLabButton(component.name, table.componentType, component.ware_id, table, component);
         rowModLabBtn.classList.add("component-analyzer-mod-lab-btn-row");
         nameTd.appendChild(rowModLabBtn);
         tr.appendChild(nameTd);
 
         const sourceRow = statSource.get(component.ware_id);
+        const rowStandardHighlight = standardStatColumnHighlightForComponent(table, component);
+        const rowContext = { ...statContext, component };
         for (const def of selectedStatDefs) {
           const statTd = document.createElement("td");
-          const value = sourceRow ? sourceRow[def.key] : undefined;
-          statTd.textContent = formatStatValue(def, value);
+          // Fresh per cell, not shared across the row -- two different
+          // stat columns can easily need two different mocks, and reusing
+          // one Set across both would wrongly blame one column's cell for
+          // another column's own missing mock.
+          const missingMocks = new Set();
+          const mockTrace = [];
+          const baseValue = resolveStatValue(def, sourceRow, { ...rowContext, missingMocks, mockTrace });
+          renderStatCellValue(statTd, def, baseValue, missingMocks, mockTrace, table.componentType);
+          applyModColumnHighlight(statTd, def.key, {
+            standard: rowStandardHighlight,
+            crossMock: crossComponentMockModHighlight(mockTrace),
+          });
           tr.appendChild(statTd);
         }
         tbody.appendChild(tr);
@@ -7396,7 +14485,7 @@ function compareStatValues(a, b) {
 // not recomputed per pairwise comparison. Returns {th, headerContent} so
 // buildNameColumnHeader() can append its own extra control (the
 // Modifications Lab button) into the same flex row.
-function buildSortableColumnHeader(table, sortKey, labelText, getValue) {
+function buildSortableColumnHeader(table, sortKey, labelText, getValue, def = null) {
   const th = document.createElement("th");
   const headerContent = document.createElement("span");
   headerContent.className = "component-analyzer-stat-header";
@@ -7404,6 +14493,8 @@ function buildSortableColumnHeader(table, sortKey, labelText, getValue) {
   const labelSpan = document.createElement("span");
   labelSpan.textContent = labelText;
   headerContent.appendChild(labelSpan);
+  const infoIcon = def ? buildStatInfoIcon(labelSpan, def) : null;
+  if (infoIcon) headerContent.appendChild(infoIcon);
 
   const isActive = table.sortKey === sortKey;
   const sortBtn = document.createElement("button");
@@ -7430,25 +14521,86 @@ function buildSortableColumnHeader(table, sortKey, labelText, getValue) {
   return { th, headerContent };
 }
 
+// What effectively applies to one slot right now -- a row's own real local
+// mod (component.appliedMods[slot], only ever present when it's a genuine
+// mod object -- see saveModLabAppliedMods()'s own comment for why "no
+// local mod" is never itself stored there anymore) if it has one,
+// otherwise table.globalMods[slot] UNLESS component.blockGlobalMod[slot]
+// says this row's own "override global to empty" checkbox is on, in which
+// case the fallback is suppressed and this resolves to null instead.
+// blockGlobalMod is a wholly independent flag from appliedMods -- checking
+// that box must never read, write, or clear the local mod choice (see
+// toggleModLabOverrideEmpty()'s own "agnostic of local" comment; this was
+// the source of a real bug where checking it wiped out a just-selected
+// local mod at save time). NOT used for the launcher button's own icon
+// (see buildModLabButton()'s own comment for why that's deliberately
+// local-only) -- kept for the eventual "apply to a displayed stat" logic,
+// which does need this exact fallback (a row with no local override of its
+// own still gets the table's own global default applied to its stats,
+// unless blocked, even though its button symbol stays neutral). Also not
+// used by hydrateModLabLoaded() (the loaded-panel editor itself also
+// starts blank for an untouched slot, see that function's own comment) or
+// resolveModSlotState()'s other caller, the read-only global-fallback
+// display.
+function resolveEffectiveAppliedMod(table, component, slot) {
+  if (component?.appliedMods?.[slot]) return component.appliedMods[slot];
+  if (component?.blockGlobalMod?.[slot]) return null;
+  return table?.globalMods?.[slot] ?? null;
+}
+
 // Shared by both the Name column header's own launcher (whole table, every
 // ware) and each row's half-size launcher (that one ware only) -- see
 // .component-analyzer-mod-lab-btn-row for the row variant's sizing.
 // wareName is null for the table-wide button (opens scoped to "All"),
 // otherwise the specific component's own name (opens scoped to it) -- see
 // openModLabModal()'s own comment for how that scope reaches the modal
-// title. Icon is the neutral/unmodded mod_lab_button.png (see
-// generate_mod_lab_icons.py's own docstring) rather than any one tier's
-// color, since no mod is actually applied yet.
-function buildModLabButton(wareName) {
+// title. componentType is the owning table's own componentType (e.g.
+// "chassis"/"weapon"/"thruster") -- passed straight through to
+// openModLabModal() so it knows which mods are actually relevant; the
+// "All" vs "<ware>" distinction only changes the modal's title, not which
+// mods it lists (see modsForComponentType()'s own comment). `table` is
+// always passed (Confirm needs it to write the table-wide launcher's own
+// selection to table.globalMods -- see saveModLabAppliedMods()); `component`
+// is only passed by the row-scoped launcher (null for the table-wide one)
+// -- both let openModLabModal() know exactly where a later Confirm should
+// write.
+//
+// The icon reflects that state, but deliberately *local only* for a
+// row-scoped button -- component.appliedMods[slot] directly, never
+// falling back to table.globalMods the way resolveEffectiveAppliedMod()
+// does -- per explicit product decision: the symbol shows "does this
+// specific row have its own override", not "what would eventually get
+// applied here" (that's the inherited stat value's own job once real
+// "apply to a displayed stat" logic exists, not this button's). The
+// table-wide header button (component null) is the one exception -- it
+// IS the global editor, so it reads table.globalMods directly, same as
+// resolveEffectiveAppliedMod() would reduce to anyway with no component.
+//
+// Neutral mod_lab_button.png when no standard-tier mod applies, else that
+// tier's own real in-game *color* (mods_grade_circle_0N.png -- not the
+// white variant the picker list's own rows use, see MOD_QUALITY_ICONS --
+// this button IS the mod, not a candidate in a list).
+function buildModLabButton(wareName, componentType, wareId, table, component = null) {
   const modLabBtn = document.createElement("button");
   modLabBtn.type = "button";
   modLabBtn.className = "component-analyzer-mod-lab-btn";
-  const modLabIcon = document.createElement("img");
-  modLabIcon.src = "/images/mod_lab_icons/mod_lab_button.png";
-  modLabIcon.alt = "";
-  modLabBtn.appendChild(modLabIcon);
+
+  const iconWrap = document.createElement("span");
+  iconWrap.className = "component-analyzer-mod-lab-btn-icon-wrap";
+
+  const standardSaved = component ? (component.appliedMods?.standard ?? null) : (table?.globalMods?.standard ?? null);
+  const standardMod = standardSaved ? allEquipmentMods.find((mod) => mod.mod_id === standardSaved.mod_id) : null;
+  const mainIcon = document.createElement("img");
+  mainIcon.className = "component-analyzer-mod-lab-btn-icon component-analyzer-mod-lab-btn-icon-main";
+  mainIcon.src = standardMod
+    ? `/images/mod_lab_icons/mods_grade_circle_0${standardMod.mod_level}.png`
+    : "/images/mod_lab_icons/mod_lab_button.png";
+  mainIcon.alt = "";
+  iconWrap.appendChild(mainIcon);
+
+  modLabBtn.appendChild(iconWrap);
   modLabBtn.title = t("component_analyzer.mod_lab_btn_tooltip");
-  modLabBtn.addEventListener("click", () => openModLabModal(wareName));
+  modLabBtn.addEventListener("click", () => openModLabModal(wareName, componentType, wareId, table, component));
   return modLabBtn;
 }
 
@@ -7456,8 +14608,7 @@ function buildModLabButton(wareName) {
 // component.name directly, same compareStatValues() string path every
 // text stat already uses) plus, right-aligned in the same row (via
 // .component-analyzer-mod-lab-btn's own margin-left: auto), the
-// table-wide Modifications Lab launcher button. Not wired to any real mod
-// logic yet -- see openModLabModal()'s own comment.
+// table-wide Modifications Lab launcher button.
 function buildNameColumnHeader(table) {
   const { th, headerContent } = buildSortableColumnHeader(
     table,
@@ -7465,7 +14616,7 @@ function buildNameColumnHeader(table) {
     t("component_analyzer.component_name_header"),
     (component) => component.name,
   );
-  headerContent.appendChild(buildModLabButton(null));
+  headerContent.appendChild(buildModLabButton(null, table.componentType, null, table));
   return th;
 }
 
@@ -7474,36 +14625,1173 @@ function buildNameColumnHeader(table) {
 // table's own comment) and closed over here rather than rebuilt per
 // comparison.
 function buildStatColumnHeader(table, def, statSource) {
-  return buildSortableColumnHeader(table, def.key, t(def.labelKey), (component) => statSource.get(component.ware_id)?.[def.key]).th;
+  const statSet = table.statSets[table.activeStatSetIndex];
+  return buildSortableColumnHeader(table, def.key, statDefLabel(def), (component) =>
+    resolveStatValue(def, statSource.get(component.ware_id), {
+      componentType: table.componentType,
+      table,
+      statSet,
+      component,
+      resolving: new Set(),
+    }),
+    def,
+  ).th;
 }
 
-// ---- Modifications Lab (shell only) ----
+// ---- Modifications Lab ----
 // Opened from the circular button on any table's own Name column header
 // (whole table, every ware -- wareName null) or a row's own half-size
-// button (see buildModLabButton()) (that one ware only -- wareName set).
-// Purely a placeholder for now, per its own scope: no real mod data/logic
-// exists yet -- this will eventually apply real game mod sets
-// (Basic/Enhanced/Exceptional -- page 20110 "Equipment Mods") or ship
-// chassis modifiers (see ships_base.weapon_heat_modifier and friends) to a
-// component's own displayed stats. One shared modal (not one per table/row)
-// since there's nothing table- or row-specific to show yet either way --
-// only the title's own scope differs.
+// button (see buildModLabButton()) (that one ware only -- wareName set) --
+// either way lists the same mods (see modsForComponentType()'s own
+// comment), only the title's own scope differs. Viewing only for now: picks
+// a quality tab and shows that tier's own applicable mods, colored by real
+// in-game tier color (see MOD_QUALITY_COLORS) -- no selection/application
+// logic yet (that needs equipmentModTargetMappings, not wired in here).
+// One shared modal (not one per table/row) since there's nothing table- or
+// row-specific to show beyond the title either way.
 const modLabModalOverlay = document.getElementById("mod-lab-modal-overlay");
 const modLabModalTitle = document.getElementById("mod-lab-modal-title");
+const modLabTabBar = document.getElementById("mod-lab-tab-bar");
+const modLabModsList = document.getElementById("mod-lab-mods-list");
 const modLabCloseBtn = document.getElementById("mod-lab-close-btn");
+const modLabConfirmBtn = document.getElementById("mod-lab-confirm-btn");
+const modLabLoadedStandardEl = document.getElementById("mod-lab-loaded-standard");
+// Static, right next to the column's own <h4> title (see index.html) --
+// not rebuilt on every render like the rest of the loaded panel, only
+// its own `disabled` state is kept in sync (see updateModLabClearButtons()).
+const modLabClearStandardBtn = document.getElementById("mod-lab-clear-standard-btn");
 
-function openModLabModal(wareName = null) {
+// This modal's own transient state -- which quality tab is active, and the
+// current componentType's own mods (see modsForComponentType()), both set
+// fresh by openModLabModal() and read by renderModLabModsList(). Not part
+// of any table/persisted state -- resets to tab 1 every time the modal is
+// (re)opened, same "modal state isn't sticky across opens" spirit as the
+// Select Components/Select Stats modals.
+let modLabActiveQuality = 1;
+let modLabModsByLevel = { 1: [], 2: [], 3: [] };
+
+// The one "loaded" slot -- at most one standard-tier mod (Basic/Enhanced/
+// Exceptional, clicked from tabs 1-3) at a time, shown in its own column
+// (see renderModLabLoadedPanel()). A chassis-integrated-mod slot used to
+// sit alongside this one, removed once the Chassis Modifier stats started
+// reading a ship's own real column directly via a cross-component mock
+// instead -- see [[project-mod-modified-stats-architecture]]. Either null
+// (nothing loaded) or {mod, values, selectedAdditional}: `values` is
+// target_stat -> the text the user typed into that stat's own input
+// (target_stat is unique within one mod's own stats array, storing the
+// real *underlying* value -- see modStatUnderlyingValue()'s own comment --
+// not the display-space number the input itself shows); `selectedAdditional`
+// is a Set of target_stat for whichever variable changes are currently
+// checked, capped at mod.additional_stats_count (see
+// buildModLabLoadedStatRow()). Reset on every openModLabModal() call --
+// *unless* it's a row-scoped open for a component with its own saved
+// appliedMods, in which case it's hydrated from that instead (see
+// hydrateModLabLoaded()), so reopening the Mod Lab for an already-
+// configured component shows what's already applied rather than a blank
+// slate. Persisted onto the target row(s) by saveModLabAppliedMods() when
+// Confirm is clicked -- still no logic anywhere that actually *applies*
+// these values to a displayed stat table yet, only saves the selection.
+let modLabLoaded = { standard: null };
+
+// Where a later Confirm should write saveModLabAppliedMods()'s own
+// snapshot -- modLabTargetComponent is one specific row (the row-scoped
+// launcher, writes to component.appliedMods, a per-row override) or null
+// (the table-wide "All" launcher, writes to modLabTargetTable.globalMods
+// instead -- see that field's own comment on componentAnalyzerTables for
+// why this is a *fallback* default rather than copied onto every row).
+// Both set fresh by openModLabModal() on every open, mirroring
+// modLabLoaded's own "not sticky beyond one open" spirit.
+let modLabTargetTable = null;
+let modLabTargetComponent = null;
+
+// Whether the user has explicitly acted on the standard slot *this
+// session* (loaded a mod into it, clicked Clear, or clicked "override
+// global to empty" -- see loadModLabMod()/clearModLabSlot()/
+// overrideModLabSlotToEmpty()) as opposed to it just showing a value
+// inherited from modLabTargetTable.globalMods that was never actually
+// touched. This is what lets saveModLabAppliedMods() tell "the user wants
+// this row to explicitly have no mod here, overriding the global
+// fallback" (touched=true, modLabLoaded.standard=null) apart from "the
+// user never made a choice at all, keep inheriting whatever the table
+// default is" (touched=false) -- both look identical in modLabLoaded
+// itself (empty), so they can't be told apart from that alone; nullish
+// coalescing can't distinguish an explicit null override from "nothing
+// recorded" either, hence a separate flag rather than folding this into
+// modLabLoaded. Initialized by initialModLabSlotTouched() on every open
+// (true only when the row already has an explicit appliedMods.standard
+// entry -- even an empty one); irrelevant for the table-wide "All"
+// launcher, which always saves modLabTargetTable.globalMods.standard
+// wholesale.
+let modLabSlotTouched = { standard: false };
+
+// The "override global to empty" checkbox's own state -- entirely
+// independent of modLabLoaded/modLabSlotTouched (the local editor), see
+// renderModLabLoadedColumn()'s own comment for why: it's an always-
+// visible toggle (whenever table.globalMods.standard exists, row-scoped
+// only), not conditioned on or interacting with whatever the local editor
+// currently shows. When checked, it wins outright at save time regardless
+// of the local editor's own state -- see saveModLabAppliedMods()'s own
+// resolution order.
+let modLabOverrideEmptyChecked = { standard: false };
+
+// How many times "Roll" has been clicked this session for the standard
+// slot's own currently-loaded local mod -- purely transient (never saved
+// onto the component/table), reset to 0 alongside modLabLoaded/
+// modLabSlotTouched everywhere those already reset (opening the modal,
+// loading a new mod, clearing the slot, pasting a mod in) since a roll
+// count is meaningless once the mod it was counting rolls for is gone.
+// Drives the "cumulative roll cost" display (see buildModLabModCost()) --
+// each roll re-consumes the same materials/credits a fresh application
+// would (see rollModLabMod()'s own comment), so the running total is just
+// this count times that one-time cost.
+let modLabRollCount = { standard: 0 };
+
+// Every tab is icon-only (see index.html's own .mod-lab-tab-btn-icon
+// buttons -- each tier's own white chevron symbol, no text at all) so
+// only the tooltip title carries the real name, from modQualityNames,
+// fetched once from GET /api/mod_qualities.
+function renderModLabTabs() {
+  for (const tabBtn of modLabTabBar.querySelectorAll(".mod-lab-tab-btn")) {
+    const quality = Number(tabBtn.dataset.quality);
+    tabBtn.title = modQualityNames[quality] ?? tabBtn.title;
+    tabBtn.classList.toggle("active", quality === modLabActiveQuality);
+  }
+}
+
+// One row per mod in the active tab: that tier's own white icon (see
+// MOD_QUALITY_ICONS -- the chevron count shows the tier) plus the mod's
+// own name, colored by MOD_QUALITY_COLORS[mod_level].
+// A stat's own display name -- reuses the same component_analyzer.stat_labels
+// text every Component Analyzer stat column already shows, via
+// equipmentModTargetMappings' own real_column for that (component_type,
+// target_stat) pair (its first entry when there's more than one, e.g.
+// "drag" -> physics_drag_forward -- see that JSON file's own note on why
+// one mod scales all 7 directional drag columns at once; reusing just the
+// first's label is a minor imprecision, not worth a second mapping table
+// for). Falls back to the raw target_stat code for anything unmapped --
+// the "note somewhere that we should add ui side handling which explains
+// an unknown stat" from the original spec, satisfied minimally: nothing
+// crashes and something readable still shows, even though every real
+// mod's target_stat is fully mapped today (see that file's own coverage).
+function modStatLabel(componentType, targetStat) {
+  const mappingEntry = equipmentModTargetMappings[componentType]?.[targetStat]?.[0];
+  const key = mappingEntry ? `component_analyzer.stat_labels.${mappingEntry.real_column}` : null;
+  return key && i18next.exists(key) ? t(key) : targetStat;
+}
+
+// Trims float noise (e.g. 1.0480000000000003) without hiding real
+// precision -- equipmentmods.xml's own values never need more than 3
+// decimal places to read exactly as authored.
+function formatModStatNumber(value) {
+  if (Number.isInteger(value)) return String(value);
+  return String(Math.round(value * 1000) / 1000);
+}
+
+// Same real_column lookup as modStatLabel() -- this stat's own
+// equipment_mod_target_mappings.json operation ("multiply"/"add"/
+// "add_ceiling_bool"), or null for anything unmapped.
+function modStatOperation(componentType, targetStat) {
+  return equipmentModTargetMappings[componentType]?.[targetStat]?.[0]?.operation ?? null;
+}
+
+// The real number a stat's own roll value implies once its operation is
+// accounted for -- "multiply" converts a raw ratio (e.g. 1.05, meaning
+// "multiply the target column by 1.05") into a +/-% change from baseline
+// ((value-1)*100, e.g. 1.05 -> 5, 0.8 -> -20); "add"/unmapped keep the raw
+// signed number unchanged, since it's already the real delta applied to
+// the target column. Not meaningful for "add_ceiling_bool" -- those always
+// evaluate to a fixed boolean regardless of the specific rolled value (see
+// equipment_mod_target_mappings.json's own regiondamage/hidecargochance
+// notes), so callers branch on that operation before ever reaching here
+// (see formatModStatRange()/buildModLabLoadedStatRow()).
+function modStatDisplayNumber(componentType, targetStat, value) {
+  const displayNumber = modStatOperation(componentType, targetStat) === "multiply" ? (value - 1) * 100 : value;
+  // Rounded here (not just at final display time, see formatModStatNumber())
+  // since this value also feeds input.min/input.max directly -- e.g.
+  // (1.348 - 1) * 100 is really 34.80000000000001 in float, which would
+  // otherwise leak into the input's own real constraint-validation bound.
+  return Math.round(displayNumber * 1000) / 1000;
+}
+
+// The exact inverse of modStatDisplayNumber() -- what a user's own typed
+// display-space number (e.g. 20, typed into a "multiply" stat's input
+// showing "+5 to +20") really means as the underlying value that stat's
+// own real_column actually gets (1 + 20/100 = 1.2, the real multiplier).
+// This is what modLabLoaded's own `values` map stores per target_stat --
+// not the raw display-space string the input itself shows -- so it's
+// already in the right units whenever real "apply to the underlying
+// stat" logic gets built. Rounded to 6 decimals to keep float noise
+// (e.g. 1 + 0.2 -> 1.2000000000000002) from leaking into that map.
+function modStatUnderlyingValue(componentType, targetStat, displayValue) {
+  const underlying = modStatOperation(componentType, targetStat) === "multiply" ? 1 + displayValue / 100 : displayValue;
+  return Math.round(underlying * 1e6) / 1e6;
+}
+
+// One value's own display string: a "multiply" stat gets an explicit "+"
+// on a positive change (this is a %-from-baseline delta, not a plain
+// magnitude, so the sign is part of reading it correctly) plus a "%"
+// suffix; "add"/unmapped stay a plain signed number exactly as rolled --
+// per explicit product decision, no forced "+" there (a raw add value,
+// e.g. missile capacity, already reads correctly as-is; a negative one,
+// e.g. radarcloak, keeps its own "-" from formatModStatNumber() either way).
+function formatModStatValue(componentType, targetStat, value) {
+  const operation = modStatOperation(componentType, targetStat);
+  const displayNumber = modStatDisplayNumber(componentType, targetStat, value);
+  if (operation !== "multiply") return formatModStatNumber(displayNumber);
+  const sign = displayNumber > 0 ? "+" : "";
+  return `${sign}${formatModStatNumber(displayNumber)}%`;
+}
+
+// A stat's own min/max as one range string, operation-aware throughout:
+// "add_ceiling_bool" collapses to a fixed "True" (see
+// modStatDisplayNumber()'s own comment for why a numeric range makes no
+// sense there), otherwise both ends go through formatModStatValue() (so a
+// "multiply" stat's range reads e.g. "+5% to +20%", not "1.05 - 1.2") --
+// joined by mod_lab_modal.stat_range rather than a bare " - ", since a
+// literal hyphen reads ambiguously next to already-signed numbers (e.g.
+// "-31.8% - +100%" for a wide reload-time roll) and doesn't localize.
+function formatModStatRange(componentType, targetStat, minValue, maxValue) {
+  if (modStatOperation(componentType, targetStat) === "add_ceiling_bool") {
+    return t("component_analyzer.true_value");
+  }
+  const formattedMin = formatModStatValue(componentType, targetStat, minValue);
+  if (minValue === maxValue) return formattedMin;
+  return t("mod_lab_modal.stat_range", { min: formattedMin, max: formatModStatValue(componentType, targetStat, maxValue) });
+}
+
+// Guaranteed stats (is_additional_stat=0 -- always exactly one for a real
+// mod, but a chassis-integrated mod can have several, e.g. weapon cooling
+// plus all three shield stats at once) each get their own line. Then, only
+// if this mod actually rolls any (additional_stats_count > 0 -- 0 for
+// every chassis mod and any real mod with no <bonus> block at all), a
+// count line, followed by one line per candidate (is_additional_stat=1)
+// showing that candidate's own odds and roll range.
+//
+// The odds shown are each candidate's own weight normalized against this
+// mod's total candidate weight, NOT stat.chance -- every real mod's own
+// <bonus chance=""/> is confirmed always 1.0 (checked the whole raw
+// equipmentmods.xml: 49 bonus blocks, all chance="1.0"), since it means
+// "this bonus system triggers at all", not "this specific candidate is
+// granted". The real randomness is additional_stats_count (max) many
+// candidates drawn from the pool, weighted by each one's own `weight` --
+// e.g. a candidate with weight 4 against 3 siblings at weight 2 each is
+// twice as likely to be one of the ones picked. Confirmed via the DB:
+// weight is null only on mods where additional_stats_count already equals
+// the full candidate count (every candidate always applies, never a mixed
+// weighted/unweighted pool on one mod) -- those get a flat 100%, since
+// there's no competition to weigh.
+function buildModEffectsList(mod) {
+  const container = document.createElement("div");
+  container.className = "mod-lab-mod-effects";
+
+  for (const stat of mod.stats.filter((s) => !s.is_additional_stat)) {
+    const line = document.createElement("div");
+    line.className = "mod-lab-mod-effect-line";
+    line.textContent = `${modStatLabel(stat.component_type, stat.target_stat)}: ${formatModStatRange(stat.component_type, stat.target_stat, stat.min_value, stat.max_value)}`;
+    container.appendChild(line);
+  }
+
+  if (mod.additional_stats_count > 0) {
+    const summary = document.createElement("div");
+    summary.className = "mod-lab-mod-effect-variable-count";
+    summary.textContent = t("mod_lab_modal.effect_variable_count", { count: mod.additional_stats_count });
+    container.appendChild(summary);
+
+    const variableStats = mod.stats.filter((s) => s.is_additional_stat);
+    const totalWeight = variableStats.reduce((sum, s) => sum + (s.weight ?? 0), 0);
+    for (const stat of variableStats) {
+      const line = document.createElement("div");
+      line.className = "mod-lab-mod-effect-line mod-lab-mod-effect-variable";
+      const oddsPercent = stat.weight != null && totalWeight > 0 ? Math.round((stat.weight / totalWeight) * 100) : 100;
+      line.textContent = `${modStatLabel(stat.component_type, stat.target_stat)}: ${oddsPercent}% -- ${formatModStatRange(stat.component_type, stat.target_stat, stat.min_value, stat.max_value)}`;
+      container.appendChild(line);
+    }
+  }
+
+  return container;
+}
+
+function renderModLabModsList() {
+  modLabModsList.replaceChildren();
+  const mods = modLabModsByLevel[modLabActiveQuality] ?? [];
+  if (mods.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "mod-lab-empty";
+    empty.textContent = t("mod_lab_modal.no_mods");
+    modLabModsList.appendChild(empty);
+    return;
+  }
+  for (const mod of mods) {
+    const row = document.createElement("div");
+    row.className = "mod-lab-mod-row";
+    if (modLabLoaded.standard?.mod.mod_id === mod.mod_id) {
+      row.classList.add("mod-lab-mod-row-loaded");
+    }
+    row.addEventListener("click", () => loadModLabMod(mod));
+
+    const header = document.createElement("div");
+    header.className = "mod-lab-mod-header";
+    const icon = document.createElement("img");
+    icon.src = MOD_QUALITY_ICONS[mod.mod_level] ?? MOD_QUALITY_ICONS[1];
+    icon.alt = "";
+    icon.className = "mod-lab-mod-icon";
+    header.appendChild(icon);
+    const name = document.createElement("span");
+    name.className = "mod-lab-mod-name";
+    name.textContent = mod.mod_name;
+    name.style.color = MOD_QUALITY_COLORS[mod.mod_level] ?? "";
+    header.appendChild(name);
+    row.appendChild(header);
+
+    row.appendChild(buildModEffectsList(mod));
+
+    modLabModsList.appendChild(row);
+  }
+}
+
+// Clicking any mod row in the picker list "loads" it into the standard
+// slot -- replaces whatever was previously loaded there, resetting its
+// values/selections, and re-renders both the loaded panel (new content)
+// and the picker list itself (so the newly-loaded row picks up its own
+// highlight -- see renderModLabModsList()'s own mod-lab-mod-row-loaded
+// class -- and any previously-loaded row loses it).
+function loadModLabMod(mod) {
+  modLabLoaded.standard = { mod, values: {}, selectedAdditional: new Set() };
+  modLabSlotTouched.standard = true;
+  modLabRollCount.standard = 0;
+  renderModLabModsList();
+  renderModLabLoadedPanel();
+  updateModLabConfirmState();
+}
+
+// "Clear" -- empties out the *local* editor only (see this feature's own
+// design discussion: it must never touch table.globalMods or the
+// override-empty checkbox, those are separate, independent controls) and
+// marks this slot touched: Clear is itself an explicit choice ("I'm
+// undoing my own local choice here"), so a bare Confirm afterward (with
+// the override-empty checkbox left unchecked) must actually delete
+// component.appliedMods[slot] -- letting this slot fall back to inheriting
+// table.globalMods -- rather than silently leaving whatever local mod was
+// already saved there untouched (modLabSlotTouched=false was the previous,
+// now-stale behavior here: it made saveModLabAppliedMods() skip this slot
+// entirely, so Clear + Confirm never actually cleared a component's
+// already-saved local mod -- a real bug. That reasoning predates
+// blockGlobalMod becoming its own independent field; there's no more
+// "explicit empty override" risk living on appliedMods itself to guard
+// against by staying "untouched").
+function clearModLabSlot(slot) {
+  modLabLoaded[slot] = null;
+  modLabSlotTouched[slot] = true;
+  modLabRollCount[slot] = 0;
+  renderModLabModsList();
+  renderModLabLoadedPanel();
+  updateModLabClearButtons();
+  updateModLabConfirmState();
+}
+
+// The "override global to empty" checkbox's own toggle handler --
+// deliberately agnostic of the local editor's own state (never reads or
+// changes modLabLoaded/modLabSlotTouched): checking it is an independent
+// "always force this slot empty" declaration that wins outright at save
+// time regardless of whatever the local editor happens to show (see
+// saveModLabAppliedMods()'s own resolution order), and the checkbox
+// itself is always visible whenever table.globalMods has a mod for this
+// slot (see renderModLabLoadedColumn()), not conditioned on the local
+// editor being empty.
+function toggleModLabOverrideEmpty(slot, checked) {
+  modLabOverrideEmptyChecked[slot] = checked;
+  updateModLabConfirmState();
+}
+
+// One stat's own line: "<Stat Label>" then its own range on a new line (see
+// this feature's own spec), operation-aware throughout (see
+// modStatDisplayNumber()/formatModStatValue()'s own comments) -- a
+// "multiply" stat's min/max/input all work in +/-% terms instead of the
+// raw ratio. Three columns, aligned across every row in this column (see
+// .mod-lab-loaded-content's own grid rules in style.css): an optional
+// checkbox, the stat's own name plus its range (formatModStatRange()
+// verbatim -- the exact same range text the picker list's own description
+// already shows, see buildModEffectsList()) stacked on two lines, and the
+// input pinned to the right edge -- an "add_ceiling_bool" stat (fixed
+// "True") or a fixed (never-rolled) stat (min_value === max_value, e.g.
+// every chassis-integrated mod's own stats) both correctly get no input
+// at all, since there's nothing to enter for a stat with only one
+// possible outcome. `selectedAdditional` is only passed for a
+// variable/candidate stat (is_additional_stat=1), adding a checkbox on
+// the left capped at mod.additional_stats_count total checked at once (an
+// already-checked box can always be unchecked; a click past the cap is
+// silently reverted rather than replacing an existing pick, since there's
+// no clear "which one to bump" rule to guess at).
+function buildModLabLoadedStatRow(mod, stat, values, selectedAdditional) {
+  const row = document.createElement("div");
+  row.className = "mod-lab-loaded-stat-row";
+
+  // Declared here (not inside the `if (selectedAdditional)` block below)
+  // so the checkbox's own change handler -- built before the input exists
+  // -- can still toggle it once it does; JS closures capture the binding,
+  // not a snapshot, so the handler always sees whatever `input` currently
+  // holds when it actually fires. Stays undefined for a bool/fixed stat
+  // (no input at all, see the early return below), in which case the
+  // checkbox just tracks selection with nothing to enable/disable.
+  let input;
+
+  if (selectedAdditional) {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "mod-lab-loaded-stat-checkbox";
+    checkbox.checked = selectedAdditional.has(stat.target_stat);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        if (selectedAdditional.size >= mod.additional_stats_count) {
+          checkbox.checked = false;
+          return;
+        }
+        selectedAdditional.add(stat.target_stat);
+      } else {
+        selectedAdditional.delete(stat.target_stat);
+      }
+      // An unchecked candidate isn't actually being applied, so its own
+      // input shouldn't block Confirm even if it's empty/out of range --
+      // disabling it removes it from constraint validation entirely (a
+      // disabled control is never "a candidate for constraint
+      // validation", so checkValidity() on it is always true regardless
+      // of content -- see updateModLabConfirmState()'s own comment).
+      if (input) input.disabled = !checkbox.checked;
+      updateModLabConfirmState();
+    });
+    row.appendChild(checkbox);
+  }
+
+  const text = document.createElement("div");
+  text.className = "mod-lab-loaded-stat-text";
+  const label = document.createElement("span");
+  label.className = "mod-lab-loaded-stat-label";
+  label.textContent = modStatLabel(stat.component_type, stat.target_stat);
+  text.appendChild(label);
+  const range = document.createElement("span");
+  range.className = "mod-lab-loaded-stat-range";
+  range.textContent = formatModStatRange(stat.component_type, stat.target_stat, stat.min_value, stat.max_value);
+  text.appendChild(range);
+  row.appendChild(text);
+
+  const operation = modStatOperation(stat.component_type, stat.target_stat);
+  if (operation === "add_ceiling_bool" || stat.min_value === stat.max_value) {
+    return row;
+  }
+
+  // The input works entirely in display-space (e.g. 5 to 20 for a
+  // "multiply" stat shown as "+5% to +20%") -- min/max/step/the value the
+  // user actually sees and types all match formatModStatRange()'s own
+  // numbers above, never the raw underlying ratio. `values[target_stat]`
+  // itself stores the *converted* underlying value though (see
+  // modStatUnderlyingValue()'s own comment for why), so re-populating on
+  // rebuild has to convert back the other way (modStatDisplayNumber()) to
+  // show the same display-space number the user originally typed.
+  const minDisplay = modStatDisplayNumber(stat.component_type, stat.target_stat, stat.min_value);
+  const maxDisplay = modStatDisplayNumber(stat.component_type, stat.target_stat, stat.max_value);
+  input = document.createElement("input");
+  input.type = "number";
+  input.className = "mod-lab-loaded-stat-input";
+  input.min = String(minDisplay);
+  input.max = String(maxDisplay);
+  input.step = "any";
+  input.required = true;
+  if (selectedAdditional) input.disabled = !selectedAdditional.has(stat.target_stat);
+  const storedUnderlying = values[stat.target_stat];
+  input.value = storedUnderlying === undefined ? "" : String(modStatDisplayNumber(stat.component_type, stat.target_stat, storedUnderlying));
+  input.addEventListener("input", () => {
+    const displayValue = Number(input.value);
+    values[stat.target_stat] = input.value === "" || Number.isNaN(displayValue)
+      ? undefined
+      : modStatUnderlyingValue(stat.component_type, stat.target_stat, displayValue);
+    updateModLabConfirmState();
+  });
+  row.appendChild(input);
+
+  return row;
+}
+
+// The read-only counterpart to buildModLabLoadedStatRow() -- no checkbox,
+// no input, just "<Stat Label>" then the one real value on a new line
+// (the exact value that mod actually has, not a range to pick from) --
+// used only for the global-fallback display (see
+// buildModLabFallbackDisplay()), which shows what's already been decided
+// for the table's own default, not something being edited here.
+function buildModLabReadOnlyStatRow(stat, values) {
+  const row = document.createElement("div");
+  row.className = "mod-lab-loaded-stat-row";
+
+  const text = document.createElement("div");
+  text.className = "mod-lab-loaded-stat-text";
+  const label = document.createElement("span");
+  label.className = "mod-lab-loaded-stat-label";
+  label.textContent = modStatLabel(stat.component_type, stat.target_stat);
+  text.appendChild(label);
+  const valueSpan = document.createElement("span");
+  valueSpan.className = "mod-lab-loaded-stat-range";
+  const operation = modStatOperation(stat.component_type, stat.target_stat);
+  if (operation === "add_ceiling_bool") {
+    valueSpan.textContent = t("component_analyzer.true_value");
+  } else {
+    const underlyingValue = stat.min_value === stat.max_value ? stat.min_value : (values[stat.target_stat] ?? stat.min_value);
+    valueSpan.textContent = formatModStatValue(stat.component_type, stat.target_stat, underlyingValue);
+  }
+  text.appendChild(valueSpan);
+  row.appendChild(text);
+
+  return row;
+}
+
+// Serializes a live {mod, values, selectedAdditional} slot state -- the
+// exact shape both buildModLabModDisplay() call sites already hold,
+// whether it's the local editor's own live state or the read-only
+// fallback's resolved snapshot (see resolveModSlotState(), which produces
+// this same shape for both) -- into the plain JSON-safe {mod_id, values,
+// selectedAdditional} shape every real save path already uses
+// (saveModLabAppliedMods(), table.globalMods[slot], modLabAppliedModsSnapshot()).
+// This, not the full mod definition (name/stats/tier -- static data, never
+// user-chosen), is "the mod" as a copyable/pasteable input value.
+function modLabSlotStateToSnapshot(slotState) {
+  return {
+    mod_id: slotState.mod.mod_id,
+    values: { ...slotState.values },
+    selectedAdditional: [...slotState.selectedAdditional],
+  };
+}
+
+// Briefly swaps a button's own label to report success/failure in place,
+// then restores it -- used for Copy (which never re-renders anything, so
+// the same button element survives long enough to see its own label
+// change) and for a failed Paste (same reasoning -- only a *successful*
+// paste re-renders the loaded panel, tearing this exact button down
+// before any flashed label could ever be seen, so success needs no flash
+// at all there: the panel visibly updating to show the pasted mod already
+// is the feedback).
+function flashModLabActionButton(button, text, isError) {
+  const original = button.textContent;
+  button.textContent = text;
+  button.classList.toggle("mod-lab-mod-action-btn-error", !!isError);
+  button.disabled = true;
+  setTimeout(() => {
+    button.textContent = original;
+    button.classList.remove("mod-lab-mod-action-btn-error");
+    button.disabled = false;
+  }, 1200);
+}
+
+// Copy: writes THIS display's own mod -- whichever one it's actually
+// showing, local or fallback -- to the clipboard as
+// modLabSlotStateToSnapshot()'s own JSON, pretty-printed for a human
+// pasting it somewhere else to read.
+async function copyModLabMod(slotState, button) {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(modLabSlotStateToSnapshot(slotState), null, 2));
+    flashModLabActionButton(button, t("mod_lab_modal.copy_mod_done"), false);
+  } catch {
+    flashModLabActionButton(button, t("mod_lab_modal.copy_mod_failed"), true);
+  }
+}
+
+// Paste: always loads into the LOCAL section of `slot`, regardless of
+// which display (local or fallback) hosts the button that was clicked --
+// by explicit design, pasting is "set my own local override to this",
+// never "overwrite the global default". Validates before loading anything:
+// real JSON, a real {mod_id, ...} shape resolveModSlotState() can actually
+// look up (same graceful-on-stale-data handling every other reader of a
+// saved slot already uses), and a mod_id whose own is_chassis_mod matches
+// this slot (a chassis mod pasted into the Standard column, or vice versa,
+// is rejected rather than silently loaded somewhere it doesn't belong).
+// On success this mirrors loadModLabMod()'s own touched/re-render
+// sequence, just with values/selectedAdditional carried over from the
+// paste instead of starting blank.
+async function pasteModLabMod(slot, button) {
+  let text;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    flashModLabActionButton(button, t("mod_lab_modal.paste_mod_invalid"), true);
+    return;
+  }
+  let saved;
+  try {
+    saved = JSON.parse(text);
+  } catch {
+    flashModLabActionButton(button, t("mod_lab_modal.paste_mod_invalid"), true);
+    return;
+  }
+  const state = saved && typeof saved.mod_id === "string" ? resolveModSlotState(saved) : null;
+  if (!state || state.mod.is_chassis_mod) {
+    flashModLabActionButton(button, t("mod_lab_modal.paste_mod_invalid"), true);
+    return;
+  }
+  modLabLoaded[slot] = state;
+  modLabSlotTouched[slot] = true;
+  modLabRollCount[slot] = 0;
+  renderModLabModsList();
+  renderModLabLoadedPanel();
+  updateModLabConfirmState();
+}
+
+function buildModLabPasteButton(slot) {
+  const pasteBtn = document.createElement("button");
+  pasteBtn.type = "button";
+  pasteBtn.className = "mod-lab-mod-action-btn";
+  pasteBtn.textContent = t("mod_lab_modal.paste_mod_btn");
+  pasteBtn.addEventListener("click", () => pasteModLabMod(slot, pasteBtn));
+  return pasteBtn;
+}
+
+// Every "enabled" stat for rolling -- exactly the same set Confirm itself
+// would actually apply (see modEffectValueForColumn()'s own
+// `activeStats` filter): every guaranteed main stat, plus a
+// variable/candidate one only when it's currently checked
+// (selectedAdditional) -- an unchecked candidate is left alone entirely,
+// by explicit request, not just ignored at save time like it already is
+// elsewhere. Also excludes anything with nothing real to randomize: a
+// fixed stat (min_value === max_value -- no input even exists for these,
+// see buildModLabLoadedStatRow()'s own early return) and an
+// "add_ceiling_bool" stat (grants a boolean trait outright, see
+// modEffectValueForColumn()'s own comment -- there's no range to roll).
+function modLabRollableStats(slotState) {
+  const { mod, selectedAdditional } = slotState;
+  return mod.stats.filter((stat) => {
+    if (stat.is_additional_stat && !selectedAdditional.has(stat.target_stat)) return false;
+    if (stat.min_value === stat.max_value) return false;
+    if (modStatOperation(stat.component_type, stat.target_stat) === "add_ceiling_bool") return false;
+    return true;
+  });
+}
+
+// Rolls a fresh uniform-random value (in underlying/roll-space, the same
+// units stat.min_value/max_value themselves are already in -- not
+// display-space, which for a "multiply" stat is a +/-% transform of this)
+// for every stat modLabRollableStats() returns, writing straight into
+// slotState.values -- the exact same map buildModLabLoadedStatRow()'s own
+// input reads from, so a re-render (see rollModLabMod()) picks up the new
+// numbers with no separate DOM update needed. Rounded to 4 decimals --
+// one more digit of precision than the 3-decimal display-space rounding
+// modStatDisplayNumber() already uses elsewhere, since converting back to
+// display space (a *100 for "multiply" stats) would otherwise sometimes
+// reveal a 3-decimal underlying rounding as a visibly coarser display step.
+function rollModLabStatsForSlot(slotState) {
+  for (const stat of modLabRollableStats(slotState)) {
+    const rolled = stat.min_value + Math.random() * (stat.max_value - stat.min_value);
+    slotState.values[stat.target_stat] = Math.round(rolled * 1e4) / 1e4;
+  }
+}
+
+// "Roll" -- rerolls every enabled stat (see modLabRollableStats()) for
+// this slot's own currently-loaded local mod, exactly as if the user had
+// re-applied it from scratch: real X4 charges the same materials +
+// credits to reroll a mod as to apply it the first time, hence
+// incrementing modLabRollCount[slot] here (see its own comment) rather
+// than treating rolling as free. No-ops if nothing is actually loaded in
+// this slot (shouldn't normally happen -- the button only ever renders
+// alongside a real slotState, see buildModLabModActions()).
+function rollModLabMod(slot) {
+  const slotState = modLabLoaded[slot];
+  if (!slotState) return;
+  rollModLabStatsForSlot(slotState);
+  modLabRollCount[slot] = (modLabRollCount[slot] ?? 0) + 1;
+  renderModLabLoadedPanel();
+  updateModLabConfirmState();
+}
+
+function buildModLabRollButton(slot) {
+  const rollBtn = document.createElement("button");
+  rollBtn.type = "button";
+  rollBtn.className = "mod-lab-mod-action-btn";
+  rollBtn.textContent = t("mod_lab_modal.roll_mod_btn");
+  rollBtn.addEventListener("click", () => rollModLabMod(slot));
+  return rollBtn;
+}
+
+// The Copy (+ Paste/Roll, local only) group riding along a loaded mod's
+// own name row (see buildModLabModDisplay()) -- present on every mod
+// actually shown in the builder section, local and fallback alike. Copy
+// is scoped to `slotState` (this exact display's own mod) and always
+// shown; Paste always targets `slot`'s own local section (see
+// pasteModLabMod()'s own comment) so it's only offered here when
+// `includePaste` is set -- the read-only global-fallback display gets
+// Copy only, by explicit request (pasting FROM it already works via
+// Copy-then-Paste-on-the-local-button; a Paste button sitting on a
+// read-only display that silently writes somewhere else was confusing).
+// Roll is gated by its own separate `includeRoll` flag (see
+// buildModLabModDisplay()'s own call site) -- true only for an editable
+// display.
+function buildModLabModActions(slotState, slot, includePaste, includeRoll) {
+  const actions = document.createElement("div");
+  actions.className = "mod-lab-mod-actions";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "mod-lab-mod-action-btn";
+  copyBtn.textContent = t("mod_lab_modal.copy_mod_btn");
+  copyBtn.addEventListener("click", () => copyModLabMod(slotState, copyBtn));
+  actions.appendChild(copyBtn);
+
+  if (includePaste) actions.appendChild(buildModLabPasteButton(slot));
+  if (includeRoll) actions.appendChild(buildModLabRollButton(slot));
+
+  return actions;
+}
+
+// One mod's full display -- name (colored by tier) plus its own Copy
+// button (+ Paste too, only for the editable local display -- see
+// buildModLabModActions()) on the same row, every guaranteed stat
+// (is_additional_stat=0), then -- only if this mod actually rolls any
+// (additional_stats_count > 0) -- a "select N variable change(s)" header
+// followed by one line per candidate. `editable` also picks
+// buildModLabLoadedStatRow() (checkbox + input, every candidate shown,
+// see that function's own docstring) for the local slot being configured,
+// or buildModLabReadOnlyStatRow() (no controls, only the candidates
+// actually selectedAdditional -- what was actually chosen, not every
+// option) for the read-only global-fallback display. `slot` is only
+// needed for the Paste button's own target.
+function buildModLabModDisplay(slotState, editable, slot) {
+  const container = document.createElement("div");
+  // Must participate directly in .mod-lab-loaded-content's own 3-column
+  // grid, same reasoning as .mod-lab-local-section/.mod-lab-fallback-section
+  // (see style.css) -- without this, every stat row's own text+input
+  // breaks out of grid alignment into plain block flow, stacking the
+  // input below instead of aligned to the right on the same row.
+  container.className = "mod-lab-mod-display";
+  const { mod, values, selectedAdditional } = slotState;
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "mod-lab-mod-display-header";
+  const name = document.createElement("div");
+  name.className = "mod-lab-loaded-mod-name";
+  name.textContent = mod.mod_name;
+  name.style.color = MOD_QUALITY_COLORS[mod.mod_level] ?? "";
+  headerRow.appendChild(name);
+  headerRow.appendChild(buildModLabModActions(slotState, slot, editable, editable));
+  container.appendChild(headerRow);
+
+  for (const stat of mod.stats.filter((s) => !s.is_additional_stat)) {
+    container.appendChild(editable ? buildModLabLoadedStatRow(mod, stat, values, null) : buildModLabReadOnlyStatRow(stat, values));
+  }
+
+  if (mod.additional_stats_count > 0) {
+    const header = document.createElement("div");
+    header.className = "mod-lab-loaded-variable-header";
+    header.textContent = t("mod_lab_modal.select_variable_count", { count: mod.additional_stats_count });
+    container.appendChild(header);
+
+    const variableStats = editable
+      ? mod.stats.filter((s) => s.is_additional_stat)
+      : mod.stats.filter((s) => s.is_additional_stat && selectedAdditional.has(s.target_stat));
+    for (const stat of variableStats) {
+      container.appendChild(editable ? buildModLabLoadedStatRow(mod, stat, values, selectedAdditional) : buildModLabReadOnlyStatRow(stat, values));
+    }
+  }
+
+  container.appendChild(buildModLabModCost(mod, editable ? slot : null));
+
+  return container;
+}
+
+// The bottom-of-display cost section for a real (non-chassis) mod -- its
+// own credits price (mod.price_avg, the same avg-price convention/
+// formatPriceValue() the Ware Cost List already uses) plus, when it
+// actually costs any real crafting materials (equipment_mod_costs, see
+// that table's own schema comment -- always true for a real mod today,
+// but stays graceful if that ever isn't the case), a list of exactly
+// which wares and how many of each. Each cost entry's own `ware_name`
+// already arrives fully resolved to the current language straight from
+// GET /api/equipment_mods (these "mod part" wares, e.g.
+// "modpart_enginefuelinjector_t1", aren't covered by the app's general
+// `wareNames` lookup at all -- see that endpoint's own comment) --
+// falling back to the raw ware_id only for the true edge case of a
+// resource with no name resolved at all.
+//
+// `rollSlot` is null for the read-only fallback display (no Roll button
+// exists there, see buildModLabModActions()' own `includeRoll`, so
+// there's nothing to append) or "standard" to check modLabRollCount for
+// on the editable local display -- when that count is
+// still 0 (never rolled this session), nothing extra shows beyond the
+// base cost above; once it's rolled at least once, a "Cumulative Roll
+// Cost" section appends showing count x this same materials/credits cost,
+// since rerolling a mod costs the same as applying it fresh each time
+// (see rollModLabMod()'s own comment).
+function buildModLabModCost(mod, rollSlot) {
+  const section = document.createElement("div");
+  section.className = "mod-lab-mod-cost";
+
+  const price = document.createElement("div");
+  price.className = "mod-lab-mod-cost-price";
+  price.textContent = t("mod_lab_modal.cost_price", { price: formatPriceValue(mod.price_avg) });
+  section.appendChild(price);
+
+  if (mod.costs.length > 0) {
+    const header = document.createElement("div");
+    header.className = "mod-lab-mod-cost-header";
+    header.textContent = t("mod_lab_modal.cost_wares_header");
+    section.appendChild(header);
+
+    const list = document.createElement("ul");
+    list.className = "mod-lab-mod-cost-list";
+    for (const { ware_id, ware_name, amount } of mod.costs) {
+      const item = document.createElement("li");
+      item.textContent = t("mod_lab_modal.cost_ware_line", { amount, ware: ware_name ?? ware_id });
+      list.appendChild(item);
+    }
+    section.appendChild(list);
+  }
+
+  const rollCount = rollSlot ? (modLabRollCount[rollSlot] ?? 0) : 0;
+  if (rollCount > 0) {
+    const rollHeader = document.createElement("div");
+    rollHeader.className = "mod-lab-mod-cost-header";
+    rollHeader.textContent = t("mod_lab_modal.cumulative_roll_cost_header", { count: rollCount });
+    section.appendChild(rollHeader);
+
+    const rollList = document.createElement("ul");
+    rollList.className = "mod-lab-mod-cost-list";
+    for (const { ware_id, ware_name, amount } of mod.costs) {
+      const item = document.createElement("li");
+      item.textContent = t("mod_lab_modal.cost_ware_line", { amount: amount * rollCount, ware: ware_name ?? ware_id });
+      rollList.appendChild(item);
+    }
+    const creditsItem = document.createElement("li");
+    creditsItem.textContent = formatPriceValue(mod.price_avg * rollCount);
+    rollList.appendChild(creditsItem);
+    section.appendChild(rollList);
+  }
+
+  return section;
+}
+
+// The standard column's full content -- the local slot (editable: a
+// loaded mod, or the empty prompt -- its own Clear button is a static
+// element next to the column's own <h4>, see updateModLabClearButtons(),
+// not rebuilt here) on top, and, only for a row-scoped open
+// (modLabTargetComponent set -- the table-wide "All" launcher has no
+// "row vs. its own fallback" concept to show, it IS the fallback being
+// edited) when a global default actually exists, a read-only "Global
+// Fallback Mod" section beneath showing that default's own values, plus
+// the "override global to empty" checkbox -- always shown alongside it
+// regardless of whether the local slot above is empty or has its own mod
+// loaded (see toggleModLabOverrideEmpty()'s own comment on why the two
+// are deliberately independent).
+function renderModLabLoadedColumn() {
+  modLabLoadedStandardEl.replaceChildren();
+  const slot = "standard";
+  const slotState = modLabLoaded.standard;
+
+  const localSection = document.createElement("div");
+  localSection.className = "mod-lab-local-section";
+  if (slotState) {
+    localSection.appendChild(buildModLabModDisplay(slotState, true, slot));
+  } else {
+    // No local mod to show yet -- still offer Paste here (nothing to
+    // Copy, there's no mod loaded), since an empty slot is exactly when
+    // pasting a previously-copied one in is most useful.
+    const emptyRow = document.createElement("div");
+    emptyRow.className = "mod-lab-loaded-empty-row";
+    const empty = document.createElement("div");
+    empty.className = "mod-lab-loaded-empty";
+    empty.textContent = t("mod_lab_modal.loaded_empty");
+    emptyRow.appendChild(empty);
+    const pasteOnlyActions = document.createElement("div");
+    pasteOnlyActions.className = "mod-lab-mod-actions";
+    pasteOnlyActions.appendChild(buildModLabPasteButton(slot));
+    emptyRow.appendChild(pasteOnlyActions);
+    localSection.appendChild(emptyRow);
+  }
+  modLabLoadedStandardEl.appendChild(localSection);
+
+  const globalSaved = modLabTargetComponent ? modLabTargetTable?.globalMods?.standard : null;
+  const globalModState = resolveModSlotState(globalSaved);
+  if (globalModState) {
+    const fallbackSection = document.createElement("div");
+    fallbackSection.className = "mod-lab-fallback-section";
+    const title = document.createElement("h5");
+    title.className = "mod-lab-fallback-title";
+    title.textContent = t("mod_lab_modal.global_fallback_header");
+    fallbackSection.appendChild(title);
+
+    fallbackSection.appendChild(buildModLabModDisplay(globalModState, false, slot));
+
+    const overrideLabel = document.createElement("label");
+    overrideLabel.className = "mod-lab-override-empty-label";
+    const overrideCheckbox = document.createElement("input");
+    overrideCheckbox.type = "checkbox";
+    overrideCheckbox.checked = modLabOverrideEmptyChecked.standard;
+    overrideCheckbox.addEventListener("change", () => toggleModLabOverrideEmpty(slot, overrideCheckbox.checked));
+    overrideLabel.appendChild(overrideCheckbox);
+    overrideLabel.append(t("mod_lab_modal.override_global_empty"));
+    fallbackSection.appendChild(overrideLabel);
+
+    modLabLoadedStandardEl.appendChild(fallbackSection);
+  }
+}
+
+function renderModLabLoadedPanel() {
+  renderModLabLoadedColumn();
+  updateModLabClearButtons();
+}
+
+// A saved {mod_id, values, selectedAdditional} record (from
+// component.appliedMods[slot] or table.globalMods[slot]) turned back into
+// modLabLoaded's own live shape -- looks mod_id back up against
+// allEquipmentMods (already loaded whole) rather than trusting a full mod
+// object stored on the row/table itself, so display data (name/stats/
+// tier/etc.) never goes stale relative to whatever's actually loaded.
+// null (no record, or its own mod_id no longer resolves -- e.g. stale
+// data from an older build) is silently treated as empty rather than
+// crashing, same "graceful, not fatal" spirit as modStatLabel()'s own
+// unmapped-stat fallback.
+function resolveModSlotState(saved) {
+  if (!saved) return null;
+  const mod = allEquipmentMods.find((candidate) => candidate.mod_id === saved.mod_id);
+  if (!mod) return null;
+  return { mod, values: { ...saved.values }, selectedAdditional: new Set(saved.selectedAdditional ?? []) };
+}
+
+// Reconstructs modLabLoaded from this open's own local slot data only --
+// deliberately NOT falling back to table.globalMods for a row-scoped open
+// (component set): the local editor shows only what this row explicitly
+// has of its own (nothing if it has no override recorded), never a
+// silently-preloaded copy of the inherited default -- that's what the
+// separate, always-visible read-only "Global Fallback Mod" section is for
+// (see renderModLabLoadedColumn()). The table-wide "All" launcher
+// (component null) is the one case that DOES load from table.globalMods
+// -- there, the local editor IS the thing being edited.
+function hydrateModLabLoaded(table, component) {
+  if (!component) {
+    return { standard: resolveModSlotState(table?.globalMods?.standard) };
+  }
+  return { standard: resolveModSlotState(component.appliedMods?.standard) };
+}
+
+// Whether each slot's local editor already has its own explicit
+// appliedMods entry (always a real mod object now -- see
+// saveModLabAppliedMods()'s own comment for why "no local mod" is never
+// itself stored there) as opposed to never having been touched at all --
+// see modLabSlotTouched's own comment for why this can't be derived from
+// modLabLoaded alone. Always false for the table-wide "All" launcher
+// (component null) -- it has no "row override vs. inherited" concept,
+// Confirm there always writes both slots of table.globalMods wholesale.
+function initialModLabSlotTouched(component) {
+  return {
+    standard: !!(component?.appliedMods?.standard),
+  };
+}
+
+// The "override global to empty" checkbox's own starting state -- checked
+// only when this row already has component.blockGlobalMod[slot] set,
+// wholly independent of appliedMods (see resolveEffectiveAppliedMod()'s
+// own comment on why the two must never share storage). Always false for
+// the table-wide "All" launcher -- agnostic-of-local semantics only make
+// sense for one specific row.
+function initialModLabOverrideEmptyChecked(component) {
+  return {
+    standard: !!component?.blockGlobalMod?.standard,
+  };
+}
+
+async function openModLabModal(wareName = null, componentType = null, wareId = null, table = null, component = null) {
   modLabModalTitle.textContent = wareName
     ? t("mod_lab_modal.title_ware", { ware: wareName })
     : t("mod_lab_modal.title_all");
+  modLabModsByLevel = modsForComponentType(MOD_LAB_COMPONENT_TYPE_MAP[componentType]);
+  modLabTargetTable = table;
+  modLabTargetComponent = component;
+  modLabLoaded = hydrateModLabLoaded(table, component);
+  modLabSlotTouched = initialModLabSlotTouched(component);
+  modLabOverrideEmptyChecked = initialModLabOverrideEmptyChecked(component);
+  modLabRollCount = { standard: 0 };
+  // Defaults to Basic (1), but lands on whichever tab a rehydrated
+  // standard mod's own tier actually belongs to instead -- otherwise
+  // reopening the Mod Lab for an already-configured row would silently
+  // hide its own loaded mod on a tab the user has to go find by hand.
+  modLabActiveQuality = modLabLoaded.standard?.mod.mod_level ?? 1;
+  renderModLabTabs();
+  renderModLabModsList();
+  renderModLabLoadedPanel();
+  updateModLabConfirmState();
   modLabModalOverlay.classList.remove("hidden");
+}
+
+// A loaded mod's own variable-change requirement is satisfied only when
+// *exactly* additional_stats_count candidates are checked -- not "at
+// most" (the checkbox's own cap, see buildModLabLoadedStatRow(), already
+// prevents checking more; this is the other half, checking fewer isn't
+// a real configuration either). A mod with no bonus roll at all
+// (additional_stats_count === 0, or nothing loaded in this slot)
+// trivially satisfies this -- there's nothing to select.
+function modLabVariableSelectionSatisfied(slotState) {
+  if (!slotState || slotState.mod.additional_stats_count <= 0) return true;
+  return slotState.selectedAdditional.size === slotState.mod.additional_stats_count;
+}
+
+// Puts/removes the same red-box treatment invalid stat inputs get (see
+// style.css's own :invalid rule) on the "Select N variable change(s):"
+// header itself, in whichever loaded column(s) haven't checked exactly N
+// yet -- the header is looked up fresh each call (rather than cached)
+// since renderModLabLoadedColumn() rebuilds it from scratch on every
+// loadModLabMod(), and there's always at most one per column. Scoped to
+// .mod-lab-local-section specifically -- the read-only global-fallback
+// display (see buildModLabModDisplay()) can carry its own identically-
+// classed header too, which must never get flagged invalid (it isn't
+// being edited, there's nothing to check).
+function updateModLabVariableHeaderValidity() {
+  const header = modLabLoadedStandardEl.querySelector(".mod-lab-local-section .mod-lab-loaded-variable-header");
+  if (!header) return;
+  header.classList.toggle("mod-lab-loaded-variable-header-invalid", !modLabVariableSelectionSatisfied(modLabLoaded.standard));
+}
+
+// Confirm is enabled only when every currently-rendered stat input (see
+// buildModLabLoadedStatRow()) reports itself valid via the browser's own
+// number-input constraint validation -- `required` catches an empty
+// guaranteed stat, `min`/`max` catch an out-of-range typed value, both in
+// the same display-space numbers the input itself shows (see
+// modStatDisplayNumber()'s own comment) -- AND exactly as many variable
+// changes are checked as each loaded mod's own additional_stats_count
+// calls for (see modLabVariableSelectionSatisfied()). An unchecked
+// variable stat's own input is disabled rather than removed when its
+// checkbox toggles off -- a disabled control is never "a candidate for
+// constraint validation" per the HTML spec, so checkValidity() on it is
+// always true regardless of its own content, meaning it correctly never
+// blocks Confirm on its own (checking too few of them still blocks via
+// the count check above, independently of whatever's typed into any of
+// their own inputs). Nothing loaded in either slot means no inputs exist
+// and no selection is required at all, vacuously valid -- Confirm stays
+// enabled with nothing configured yet to misconfigure. Not yet wired to
+// do anything with the entered/selected values on click besides closing
+// the modal -- this is still a selection/display-only feature, see
+// openModLabModal()'s own docstring.
+function updateModLabConfirmState() {
+  const inputs = modLabModalOverlay.querySelectorAll(".mod-lab-loaded-stat-input");
+  const inputsValid = [...inputs].every((input) => input.checkValidity());
+  const selectionSatisfied = modLabVariableSelectionSatisfied(modLabLoaded.standard);
+  modLabConfirmBtn.disabled = !(inputsValid && selectionSatisfied);
+  updateModLabVariableHeaderValidity();
+}
+
+// Keeps the column's own static Clear button (see index.html -- right
+// next to the "Standard Mod" title, not rebuilt on every render) in sync
+// with whether there's actually anything local to clear.
+function updateModLabClearButtons() {
+  modLabClearStandardBtn.disabled = !modLabLoaded.standard;
 }
 
 function closeModLabModal() {
   modLabModalOverlay.classList.add("hidden");
 }
 
+for (const tabBtn of modLabTabBar.querySelectorAll(".mod-lab-tab-btn")) {
+  tabBtn.addEventListener("click", () => {
+    modLabActiveQuality = Number(tabBtn.dataset.quality);
+    renderModLabTabs();
+    renderModLabModsList();
+  });
+}
+
 modLabCloseBtn.addEventListener("click", closeModLabModal);
+modLabClearStandardBtn.addEventListener("click", () => clearModLabSlot("standard"));
+
+// A JSON-safe snapshot of modLabLoaded, ready to persist onto row(s) --
+// only the standard slot's own mod_id (not the full mod object, see
+// hydrateModLabLoaded()'s own comment on why) and a plain array instead
+// of selectedAdditional's own Set (Set isn't JSON-serializable, and this
+// needs to round-trip through saveState()'s own localStorage JSON and
+// Export/Import both, same as the rest of table.components already does).
+function modLabAppliedModsSnapshot() {
+  const state = modLabLoaded.standard;
+  return {
+    standard: state
+      ? { mod_id: state.mod.mod_id, values: { ...state.values }, selectedAdditional: [...state.selectedAdditional] }
+      : null,
+  };
+}
+
+// Writes the current selection onto whatever this modal was opened for --
+// the table-wide "All" launcher (modLabTargetComponent null) always
+// overwrites both slots of modLabTargetTable.globalMods wholesale (it IS
+// the table's own fallback default, nothing to partially touch). The
+// row-scoped launcher writes two entirely independent pieces of state per
+// slot, neither one able to affect the other:
+// - component.appliedMods[slot], the LOCAL mod choice: written only when
+//   modLabSlotTouched[slot] (the local editor was explicitly loaded or
+//   cleared this session) -- a real mod object, or the key deleted
+//   entirely if cleared (never an explicit `null`; "no local mod" and
+//   "never decided" are the same thing to a row, both mean "keep
+//   inheriting the global fallback"). Left exactly as it already was if
+//   untouched this session, same "don't clobber a stale entry" reasoning
+//   as before.
+// - component.blockGlobalMod[slot], the override-empty CHECKBOX: written
+//   straight from modLabOverrideEmptyChecked[slot] regardless of
+//   modLabSlotTouched or what modLabLoaded[slot] holds -- checking it can
+//   never touch, clear, or overwrite the local mod (this was a real bug:
+//   the checkbox used to share storage with the local mod via an explicit
+//   `appliedMods[slot] = null`, which silently wiped out a just-selected
+//   local mod at save time whenever both were set together in the same
+//   session).
+// This is why saveModLabAppliedMods() can't just reuse
+// modLabAppliedModsSnapshot() wholesale for a row; that snapshot has no
+// concept of "leave this slot alone".
+//
+// Scoped per table (component row or table default) rather than globally
+// per ware_id (see this feature's own design discussion) -- the same ware
+// can sit modded in one table and stock in another. `modLabTargetComponent`
+// is either a real Component Analyzer row (opened via that table's own
+// row-scoped launcher) or a full-component mock's own
+// `{type: "component_ref", wareId, ...}` entry (opened via
+// buildMockEntryRow()'s own Mod Lab button) -- both shapes take
+// appliedMods/blockGlobalMod identically, see resolveEffectiveAppliedMod()
+// and resolveMockConfigValue()'s own `component: config` comment for how
+// a mock's own mod_modifier_ref formulas pick this up. Every render that
+// could possibly show a modded value is refreshed afterward --
+// renderComponentAnalyzerTables() for the Component Analyzer's own
+// tables, renderStatLabMocksView()/renderStatLabMissingMocksSummary() for
+// the Mocks panel (a mock's own Mod Lab button needs its icon to update
+// immediately, same as buildMockEntryRow()'s own persist() already does
+// after any other edit there) -- cheap no-ops when that panel isn't even
+// showing the affected scope.
+function saveModLabAppliedMods() {
+  const slot = "standard";
+  if (modLabTargetComponent) {
+    const component = modLabTargetComponent;
+    if (!component.appliedMods) component.appliedMods = {};
+    if (!component.blockGlobalMod) component.blockGlobalMod = {};
+    if (modLabSlotTouched.standard) {
+      const state = modLabLoaded.standard;
+      if (state) {
+        component.appliedMods[slot] = { mod_id: state.mod.mod_id, values: { ...state.values }, selectedAdditional: [...state.selectedAdditional] };
+      } else {
+        delete component.appliedMods[slot];
+      }
+    }
+    if (modLabOverrideEmptyChecked.standard) {
+      component.blockGlobalMod[slot] = true;
+    } else {
+      delete component.blockGlobalMod[slot];
+    }
+    if (Object.keys(component.appliedMods).length === 0) delete component.appliedMods;
+    if (Object.keys(component.blockGlobalMod).length === 0) delete component.blockGlobalMod;
+  } else if (modLabTargetTable) {
+    modLabTargetTable.globalMods = modLabAppliedModsSnapshot();
+  } else {
+    return;
+  }
+  saveState();
+  renderComponentAnalyzerTables();
+  renderStatLabMocksView();
+  renderStatLabMissingMocksSummary();
+  refreshShipModLabButtons();
+}
+
+modLabConfirmBtn.addEventListener("click", () => {
+  const inputs = modLabModalOverlay.querySelectorAll(".mod-lab-loaded-stat-input");
+  const inputsValid = [...inputs].every((input) => input.checkValidity());
+  const selectionSatisfied = modLabVariableSelectionSatisfied(modLabLoaded.standard);
+  if (inputsValid && selectionSatisfied) {
+    saveModLabAppliedMods();
+    closeModLabModal();
+  }
+});
 
 componentAnalyzerAddTableBtn.addEventListener("click", () => {
   componentAnalyzerTables.unshift(makeComponentAnalyzerTable());
@@ -7539,7 +15827,7 @@ componentAnalyzerAddTableBtn.addEventListener("click", () => {
 // single ship to name (its own `components` spans every ship currently
 // passing the filters).
 function createFleetPlannerViewTable(componentType, components, chassisName = null) {
-  const catalog = STAT_CATALOG_BY_TYPE[componentType];
+  const catalog = statCatalogForComponentType(componentType);
   const table = makeComponentAnalyzerTable();
   table.componentType = componentType;
   const type = t(componentTypeI18nKey(componentType));
@@ -7549,8 +15837,8 @@ function createFleetPlannerViewTable(componentType, components, chassisName = nu
   table.components = [...components].sort((a, b) => a.name.localeCompare(b.name));
   if (catalog) {
     table.statSets = catalog.groups.map((group) => {
-      const statSet = makeStatSet(t(`component_analyzer.stat_groups.${group}`));
-      statSet.selectedStats = catalog.definitions.filter((def) => def.group === group).map((def) => def.key);
+      const statSet = makeStatSet(statGroupLabel(group));
+      statSet.selectedStats = catalog.definitions.filter((def) => def.group === group.id).map((def) => def.key);
       return statSet;
     });
     table.activeStatSetIndex = 0;
@@ -7623,7 +15911,7 @@ function gatherComponentAnalyzerExportSheets(tableIds) {
   for (const table of componentAnalyzerTables) {
     if (!tableIds.has(table.id)) continue;
     const tableName = table.title.trim() || t(componentTypeI18nKey(table.componentType));
-    const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+    const catalog = statCatalogForComponentType(table.componentType);
     const statSource = statSourceForComponentType(table.componentType);
     for (const statSet of table.statSets) {
       const tabName = statSet.name.trim() || defaultNewStatSetLabel();
@@ -7632,19 +15920,59 @@ function gatherComponentAnalyzerExportSheets(tableIds) {
         .filter(Boolean);
       const headers = [
         t("component_analyzer.component_name_header"),
-        ...selectedStatDefs.map((def) => t(def.labelKey)),
+        ...selectedStatDefs.map((def) => statDefLabel(def)),
       ];
       const rows = table.components.map((component) => {
         const sourceRow = statSource.get(component.ware_id);
+        const statContext = { componentType: table.componentType, table, statSet, component, resolving: new Set() };
         return [
           component.name,
-          ...selectedStatDefs.map((def) => formatStatValue(def, sourceRow ? sourceRow[def.key] : undefined)),
+          ...selectedStatDefs.map((def) => formatStatValue(def, resolveStatValue(def, sourceRow, statContext))),
         ];
       });
       sheets.push({ table_name: tableName, tab_name: tabName, headers, rows });
     }
   }
   return sheets;
+}
+
+// The csv/xlsx export's own accompanying mods.json (see
+// gatherComponentAnalyzerExportSheets()'s own comment -- those sheets only
+// ever hold the already-resolved number a mod produced, never which mod
+// caused it) -- unlike the plain JSON export (buildComponentAnalyzerTablesPayload(),
+// a raw dump of the real table objects that already carries every mod
+// field natively), csv/xlsx have no field for this at all, so it has to be
+// generated as its own small, separate structure instead. One entry per
+// exported table that actually has something applied (a table with
+// neither a global default nor any row-level override is skipped
+// entirely, matching this feature's own "only export what's actually
+// there" spirit), each with that table's own globalMods.standard (null
+// when unset) and, for every component with a real local appliedMods
+// and/or blockGlobalMod, its own ware_id/name paired with those exact
+// fields -- everything saveModLabAppliedMods() itself would need to
+// reconstruct this table's own mod state, nothing derived.
+function buildComponentAnalyzerModsPayload(tableIds) {
+  const tables = [];
+  for (const table of componentAnalyzerTables) {
+    if (!tableIds.has(table.id)) continue;
+    const globalMods = table.globalMods ?? { standard: null };
+    const components = table.components
+      .filter((component) => component.appliedMods || component.blockGlobalMod)
+      .map((component) => ({
+        ware_id: component.ware_id,
+        name: component.name,
+        applied_mods: component.appliedMods ?? null,
+        block_global_mod: component.blockGlobalMod ?? null,
+      }));
+    if (!globalMods.standard && components.length === 0) continue;
+    tables.push({
+      table_name: table.title.trim() || t(componentTypeI18nKey(table.componentType)),
+      component_type: table.componentType,
+      global_mods: globalMods,
+      components,
+    });
+  }
+  return tables;
 }
 
 // Triggers a browser download of `content` (a string, paired with
@@ -7750,10 +16078,11 @@ componentAnalyzerExportConfirmBtn.addEventListener("click", async () => {
     // picks the actual builder off `format` (see its own docstring for the
     // CSV-vs-XLSX file/zip shape).
     const sheets = gatherComponentAnalyzerExportSheets(checkedIds);
+    const mods = buildComponentAnalyzerModsPayload(checkedIds);
     const response = await fetch("/api/export_component_analyzer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ format, sheets }),
+      body: JSON.stringify({ format, sheets, mods_json: JSON.stringify(mods, null, 2) }),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
@@ -7806,22 +16135,32 @@ function reviveImportedComponentAnalyzerTable(rawTable) {
 // "+ Add Table"/createFleetPlannerViewTable(), not a destructive replace,
 // since these are independent, freely-addable units like fleets are.
 // Warms componentListCache for every distinct componentType among the
-// imported tables before rendering -- same reload-persistence fix
-// restorePersistedState() already relies on (see its own docstring): every
-// stat column reads live from that cache, not from each table's own
-// embedded component rows, so a re-import always shows this build's
-// current numbers -- "re-populate the data from underlying data", not
-// trust whatever the export happened to snapshot.
+// imported tables, AND every type any of their own mocks reference (see
+// collectMockRelevantComponentTypes()'s own comment) -- not just each
+// table's own displayed componentType -- before rendering, same
+// reload-persistence fix restorePersistedState() already relies on (see
+// its own docstring): every stat column, and every mock's own
+// component_ref, reads live from that cache rather than from the
+// imported JSON's own snapshot, so a freshly-imported mock shows its real
+// ware name/value on first paint instead of a bare ware_id and a
+// "missing mock" warning until the user happens to open some other
+// picker for that type. The unshift happens FIRST specifically so
+// collectMockRelevantComponentTypes() (which reads the live
+// componentAnalyzerTables array) already sees these new tables' own
+// mocks, not just whatever was configured before the import.
 async function importComponentAnalyzerTables(data) {
   if (!Array.isArray(data) || data.length === 0) return false;
   const tables = data.map(reviveImportedComponentAnalyzerTable);
 
+  componentAnalyzerTables.unshift(...tables);
+
   const typesToWarm = new Set(
-    tables.map((table) => table.componentType).filter((type) => type && type !== "chassis"),
+    [...tables.map((table) => table.componentType), ...collectMockRelevantComponentTypes()].filter(
+      (type) => type && type !== "chassis",
+    ),
   );
   await Promise.all([...typesToWarm].map((type) => fetchComponentList(type)));
 
-  componentAnalyzerTables.unshift(...tables);
   saveState();
   renderComponentAnalyzerTables();
   return true;
@@ -7845,6 +16184,46 @@ componentAnalyzerImportInput.addEventListener("change", async (event) => {
   event.target.value = ""; // allow re-selecting the same file later
 });
 
+// ---- "Load Prebuilt Tables" band's own per-category dropdowns ----
+// One .prebuilt-tables-dropdown per category (Ships/Engines/Shields/... --
+// see index.html, each identified by its own data-prebuilt-dropdown
+// attribute though this loop never actually needs to read it, just wires
+// every instance identically) -- a plain show/hide toggle, not a
+// popover-per-click widget like the mock trace ("m" icon). Its own menu
+// items are real <a href> links, not JS-driven actions, so this only ever
+// needs to open, close on an outside click/Escape, and close itself once a
+// link inside it is actually clicked (the ensuing navigation would close it
+// anyway, but doing it explicitly avoids a flash of the still-open menu
+// while the page unloads). A click on a DIFFERENT dropdown's own button
+// closes this one for free -- that click's target isn't inside THIS
+// dropdown's own element, so the outside-click check below still fires.
+// Genuinely one listener set per dropdown (not a single shared delegate),
+// since each one closes over its own `dropdown`/`btn`/`menu` -- fine at
+// this scale (a handful of categories), and keeps each dropdown's own
+// state fully independent.
+for (const dropdown of document.querySelectorAll(".prebuilt-tables-dropdown")) {
+  const btn = dropdown.querySelector(".prebuilt-tables-dropdown-btn");
+  const menu = dropdown.querySelector(".prebuilt-tables-dropdown-menu");
+
+  const setOpen = (open) => {
+    menu.classList.toggle("hidden", !open);
+    btn.setAttribute("aria-expanded", String(open));
+  };
+
+  btn.addEventListener("click", () => setOpen(menu.classList.contains("hidden")));
+  menu.addEventListener("click", (event) => {
+    if (event.target.closest("a")) setOpen(false);
+  });
+  document.addEventListener("click", (event) => {
+    if (menu.classList.contains("hidden")) return;
+    if (event.target.closest(".prebuilt-tables-dropdown") === dropdown) return;
+    setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setOpen(false);
+  });
+}
+
 // ---- Component Analyzer's "Select Stats" modal ----
 // Left panel: every group in this table's own componentType catalog
 // (STAT_CATALOG_BY_TYPE), collapsed by default -- clicking a group's own
@@ -7865,16 +16244,30 @@ const statSelectSaveBtn = document.getElementById("stat-select-save-btn");
 let statSelectModalTable = null;
 let statSelectModalOrder = [];
 let statSelectExpandedGroups = new Set();
+// The index (into statSelectModalOrder) currently being click-and-dragged
+// by its own row's drag handle -- see renderStatSelectSelectedList()'s own
+// drag handle. Tracked here rather than read back out of
+// DataTransfer.getData() on drop (equally possible, just an extra string
+// round-trip for no benefit, since both ends are this same module).
+let statSelectDragIndex = null;
 
 function openStatSelectModal(table) {
-  const catalog = STAT_CATALOG_BY_TYPE[table.componentType];
+  const catalog = statCatalogForComponentType(table.componentType);
   if (!catalog) return;
   statSelectModalTable = table;
   const activeStatSet = table.statSets[table.activeStatSetIndex];
   statSelectModalOrder = [...(activeStatSet.selectedStats ?? [])];
   statSelectExpandedGroups = new Set(); // every group starts minimized, each opening
+  // Table/tab names trail the title ("Select Ship Chassis Stats - M Ship
+  // Chassis - Turrets") so it's obvious, with several tables open at
+  // once, exactly which one's own stat list this picker is editing --
+  // same "own title, falling back to the type's display name"/"own name,
+  // falling back to the default tab label" resolution scopeLabel() and
+  // the tab bar itself already use, so this reads identically to those.
   statSelectModalTitle.textContent = t("stat_select_modal.select_type_title", {
     type: t(componentTypeI18nKey(table.componentType)),
+    table: table.title.trim() || t(componentTypeI18nKey(table.componentType)),
+    tab: activeStatSet.name.trim() || defaultNewStatSetLabel(),
   });
   renderStatSelectModal();
   statSelectModalOverlay.classList.remove("hidden");
@@ -7885,15 +16278,62 @@ function renderStatSelectModal() {
   renderStatSelectSelectedList();
 }
 
+// kind -> i18n key, for both a stat definition's own `kind` and a
+// statGroup()'s own `kind` (two separate namespaces that happen to share
+// this one lookup table without colliding -- "static"/"dynamic" only ever
+// come from a group, "fundamental"/"pre-derived"/"derived"/"mod" only
+// ever from a stat). Whatever kind isn't in here shows no banner at all,
+// which is exactly the point: this is the single place a future kind
+// needs to be registered for its own label to start appearing anywhere
+// buildStatTagBanner() is used -- it also needs a `.stat-tag-banner-<kind>`
+// color rule added in style.css (see that file's own comment above
+// .stat-tag-banner-fundamental), or it renders with no border/fill at all.
+// "mod" (see modifierModStatDef()'s own comment) is its own kind, not a
+// variant of "pre-derived" -- it's the one kind of stat whose value is
+// genuinely live, client-side-only state (the player's current Mod Lab
+// selection) rather than anything ever extracted from the game's own
+// files, and the one and only kind the Mod Lab's own column highlight
+// ever starts a chain from (see modAffectedStatColumnKeysForSelection()).
+const STAT_TAG_LABEL_KEYS = {
+  static: "stat_tags.static",
+  dynamic: "stat_tags.dynamic",
+  fundamental: "stat_tags.fundamental",
+  "pre-derived": "stat_tags.pre_derived",
+  derived: "stat_tags.derived",
+  mod: "stat_tags.mod",
+};
+
+// The Statistics Lab's own first bit of visible UI (see GitHub issue #26)
+// -- a small banner naming a group's or a stat's own tag (statGroup()'s
+// "static"/"dynamic", or a stat definition's own
+// "fundamental"/"pre-derived"/future "derived"), reused identically for
+// both rather than two separately-styled banners: the same shared base
+// look (see .stat-tag-banner in style.css), just colored per-`kind` (see
+// that file's own .stat-tag-banner-<kind> rules) and labeling whichever
+// tag actually applies (see STAT_TAG_LABEL_KEYS above for the kind ->
+// label lookup). An inline <span>, not a <div> -- placed directly after
+// the group/stat's own label text so it reads on the same line rather
+// than stacked below it (see .stat-select-group-toggle/.stat-select-stat-item
+// in style.css). Every group and every stat with a registered kind shows
+// one -- deliberate, so a future dynamic group or derived stat reads as
+// visually distinct the moment one actually exists, by simply not getting
+// this banner at all.
+function buildStatTagBanner(tagLabel, kind) {
+  const banner = document.createElement("span");
+  banner.className = `stat-tag-banner stat-tag-banner-${kind}`;
+  banner.textContent = tagLabel;
+  return banner;
+}
+
 function renderStatSelectGroupsPanel() {
   statSelectGroupsPanel.innerHTML = "";
-  const catalog = STAT_CATALOG_BY_TYPE[statSelectModalTable.componentType];
+  const catalog = statCatalogForComponentType(statSelectModalTable.componentType);
 
   for (const group of catalog.groups) {
     const groupEl = document.createElement("div");
     groupEl.className = "stat-select-group";
-    const isExpanded = statSelectExpandedGroups.has(group);
-    const groupDefs = catalog.definitions.filter((d) => d.group === group);
+    const isExpanded = statSelectExpandedGroups.has(group.id);
+    const groupDefs = catalog.definitions.filter((d) => d.group === group.id);
 
     const groupHeader = document.createElement("div");
     groupHeader.className = "stat-select-group-header";
@@ -7905,10 +16345,13 @@ function renderStatSelectGroupsPanel() {
     toggleIcon.className = "cart-loadout-toggle-btn";
     toggleIcon.textContent = isExpanded ? "−" : "+";
     toggleBtn.appendChild(toggleIcon);
-    toggleBtn.appendChild(document.createTextNode(t(`component_analyzer.stat_groups.${group}`)));
+    toggleBtn.appendChild(document.createTextNode(statGroupLabel(group)));
+    if (STAT_TAG_LABEL_KEYS[group.kind]) {
+      toggleBtn.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[group.kind]), group.kind));
+    }
     toggleBtn.addEventListener("click", () => {
-      if (isExpanded) statSelectExpandedGroups.delete(group);
-      else statSelectExpandedGroups.add(group);
+      if (isExpanded) statSelectExpandedGroups.delete(group.id);
+      else statSelectExpandedGroups.add(group.id);
       renderStatSelectGroupsPanel();
     });
     groupHeader.appendChild(toggleBtn);
@@ -7952,17 +16395,38 @@ function renderStatSelectGroupsPanel() {
       statsList.className = "stat-select-group-stats";
       for (const def of groupDefs) {
         const alreadySelected = statSelectModalOrder.includes(def.key);
+        const statItem = document.createElement("div");
+        statItem.className = "stat-select-stat-item";
         const statBtn = document.createElement("button");
         statBtn.type = "button";
         statBtn.className = alreadySelected ? "stat-select-stat-row selected" : "stat-select-stat-row";
-        statBtn.textContent = t(def.labelKey);
+        statBtn.textContent = statDefLabel(def);
         statBtn.disabled = alreadySelected;
         statBtn.addEventListener("click", () => {
           if (statSelectModalOrder.includes(def.key)) return;
           statSelectModalOrder.push(def.key);
           renderStatSelectModal();
         });
-        statsList.appendChild(statBtn);
+        statItem.appendChild(statBtn);
+        const statInfoIcon = buildStatInfoIcon(statBtn, def);
+        if (statInfoIcon) statItem.appendChild(statInfoIcon);
+        // Same read-only Inspect view the Stat Lab's own Browse list opens
+        // (openStatLabInspect() is self-contained -- it shows the Stat Lab
+        // modal itself, stacked on top of this one, rather than needing it
+        // already open) -- never an edit affordance here, this picker is
+        // for choosing which stats a table shows, not authoring them.
+        if (def.formula) {
+          const detailsBtn = document.createElement("button");
+          detailsBtn.type = "button";
+          detailsBtn.className = "stat-select-stat-details-btn";
+          detailsBtn.textContent = t("stat_lab_modal.view_btn");
+          detailsBtn.addEventListener("click", () => openStatLabInspect(def, statSelectModalTable.componentType));
+          statItem.appendChild(detailsBtn);
+        }
+        if (STAT_TAG_LABEL_KEYS[def.kind]) {
+          statItem.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[def.kind]), def.kind));
+        }
+        statsList.appendChild(statItem);
       }
       groupEl.appendChild(statsList);
     }
@@ -7973,7 +16437,7 @@ function renderStatSelectGroupsPanel() {
 
 function renderStatSelectSelectedList() {
   statSelectSelectedList.innerHTML = "";
-  const catalog = STAT_CATALOG_BY_TYPE[statSelectModalTable.componentType];
+  const catalog = statCatalogForComponentType(statSelectModalTable.componentType);
 
   if (statSelectModalOrder.length === 0) {
     const empty = document.createElement("div");
@@ -7987,6 +16451,57 @@ function renderStatSelectSelectedList() {
     const def = catalog.definitions.find((d) => d.key === key);
     const row = document.createElement("div");
     row.className = "stat-select-selected-row";
+
+    // A click-and-drag alternative to the up/down buttons below -- native
+    // HTML5 drag-and-drop, restricted to starting from this handle (not
+    // anywhere on the row) by leaving `row.draggable` false until the
+    // handle itself reports a mousedown, which is the standard way to
+    // scope HTML5 DnD to one sub-element: draggable is only consulted
+    // once a drag gesture actually begins, so flipping it on just before
+    // that still takes effect. The actual reorder only happens in `drop`,
+    // not `dragover` -- this view's render functions always wipe and
+    // rebuild the whole list (see renderStatSelectSelectedList()'s own
+    // `innerHTML = ""`), and doing that WHILE a native drag gesture is
+    // still in progress (between dragstart and dragend) would destroy the
+    // very DOM node the browser is dragging, silently cancelling it.
+    const dragHandle = document.createElement("span");
+    dragHandle.className = "stat-select-selected-drag-handle";
+    dragHandle.textContent = "☰";
+    dragHandle.title = t("stat_select_modal.drag_reorder_tooltip");
+    dragHandle.addEventListener("mousedown", () => {
+      row.draggable = true;
+    });
+    row.appendChild(dragHandle);
+
+    row.addEventListener("dragstart", (event) => {
+      statSelectDragIndex = index;
+      row.classList.add("stat-select-selected-row-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    });
+    row.addEventListener("dragend", () => {
+      row.draggable = false;
+      row.classList.remove("stat-select-selected-row-dragging");
+      statSelectDragIndex = null;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (statSelectDragIndex === null) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (index !== statSelectDragIndex) row.classList.add("stat-select-selected-row-drag-over");
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("stat-select-selected-row-drag-over");
+    });
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      row.classList.remove("stat-select-selected-row-drag-over");
+      if (statSelectDragIndex === null || statSelectDragIndex === index) return;
+      const [moved] = statSelectModalOrder.splice(statSelectDragIndex, 1);
+      statSelectModalOrder.splice(index, 0, moved);
+      statSelectDragIndex = null;
+      renderStatSelectSelectedList();
+    });
 
     // "x button to the left" -- removal control comes before the label,
     // unlike every other remove-"×" in this app (which sit at the end of
@@ -8004,8 +16519,10 @@ function renderStatSelectSelectedList() {
 
     const label = document.createElement("span");
     label.className = "stat-select-selected-label";
-    label.textContent = def ? t(def.labelKey) : key;
+    label.textContent = def ? statDefLabel(def) : key;
     row.appendChild(label);
+    const selectedInfoIcon = def ? buildStatInfoIcon(label, def) : null;
+    if (selectedInfoIcon) row.appendChild(selectedInfoIcon);
 
     const upBtn = document.createElement("button");
     upBtn.type = "button";
@@ -8078,7 +16595,2555 @@ statSelectSaveBtn.addEventListener("click", () => {
   activeStatSet.selectedStats = [...statSelectModalOrder];
   closeStatSelectModal();
   saveState();
+  // statSelectModalTable can be either a real componentAnalyzerTables entry
+  // or a Ship Trial (same shape, see openStatSelectModal()'s own comment)
+  // -- both renders are cheap/idempotent, so just refresh whichever one
+  // actually contains it rather than tracking which modal-opener it came
+  // from.
   renderComponentAnalyzerTables();
+  renderShipTrials();
+});
+
+// ---- Statistics Lab (GitHub issue #26) ----
+// Global browse/create/edit UI for customStatGroups/customStatFamilies
+// (see that section's own comment, up near STAT_CATALOG_BY_TYPE) plus the
+// mock-value hierarchy (see resolveMockValue()'s own comment, up near
+// evaluateStatFormula()). Reachable from any table's own stat-set row
+// (component-analyzer-stat-lab-btn, opens on that table's componentType)
+// and from inside the Select Stats modal (stat-select-stat-lab-btn, same)
+// -- either way it's the exact same global catalog, just opened on
+// whichever type was active there; switching the type dropdown inside the
+// Stat Lab itself browses/edits any other type's own catalog just as
+// easily, and a stat created from one table is immediately visible from
+// every other table of that type too.
+const statLabModalOverlay = document.getElementById("stat-lab-modal-overlay");
+const statLabModalTitleEl = document.getElementById("stat-lab-modal-title");
+const statLabTypeSelect = document.getElementById("stat-lab-type-select");
+const statLabBrowseView = document.getElementById("stat-lab-browse-view");
+const statLabBrowseList = document.getElementById("stat-lab-browse-list");
+const statLabInspectView = document.getElementById("stat-lab-inspect-view");
+const statLabInspectName = document.getElementById("stat-lab-inspect-name");
+const statLabInspectTagContainer = document.getElementById("stat-lab-inspect-tag-container");
+const statLabInspectDescription = document.getElementById("stat-lab-inspect-description");
+const statLabInspectExpression = document.getElementById("stat-lab-inspect-expression");
+const statLabInspectVariablesEl = document.getElementById("stat-lab-inspect-variables");
+const statLabInspectCloseBtn = document.getElementById("stat-lab-inspect-close-btn");
+const statLabBuilderView = document.getElementById("stat-lab-builder-view");
+const statLabMocksView = document.getElementById("stat-lab-mocks-view");
+const statLabMocksSectionsEl = document.getElementById("stat-lab-mocks-sections");
+const statLabMissingMocksSummaryEl = document.getElementById("stat-lab-missing-mocks-summary");
+const statLabMockWizardEl = document.getElementById("stat-lab-mock-wizard");
+const statLabMockWizardLevelSelect = document.getElementById("stat-lab-mock-wizard-level-select");
+const statLabMockWizardTableSelect = document.getElementById("stat-lab-mock-wizard-table-select");
+const statLabMockWizardTabSelect = document.getElementById("stat-lab-mock-wizard-tab-select");
+const statLabMockWizardRowSelect = document.getElementById("stat-lab-mock-wizard-row-select");
+const statLabMockWizardTypeSelect = document.getElementById("stat-lab-mock-wizard-type-select");
+const statLabMockWizardComponentTypeSelect = document.getElementById("stat-lab-mock-wizard-component-type-select");
+const statLabMockWizardStatRow = document.getElementById("stat-lab-mock-wizard-stat-row");
+const statLabMockWizardStatDisplay = document.getElementById("stat-lab-mock-wizard-stat-display");
+const statLabMockWizardValueRow = document.getElementById("stat-lab-mock-wizard-value-row");
+const statLabMockWizardValueModeSelect = document.getElementById("stat-lab-mock-wizard-value-mode-select");
+const statLabMockWizardNumberInput = document.getElementById("stat-lab-mock-wizard-number-input");
+const statLabMockWizardValueComponentDisplay = document.getElementById("stat-lab-mock-wizard-value-component-display");
+const statLabMockWizardFullComponentRow = document.getElementById("stat-lab-mock-wizard-full-component-row");
+const statLabMockWizardFullComponentDisplay = document.getElementById("stat-lab-mock-wizard-full-component-display");
+const statLabMockWizardFullComponentCountInput = document.getElementById("stat-lab-mock-wizard-full-component-count-input");
+const statLabMockWizardGroupModeRow = document.getElementById("stat-lab-mock-wizard-group-mode-row");
+const statLabMockWizardGroupModeCheckbox = document.getElementById("stat-lab-mock-wizard-group-mode-checkbox");
+const statLabMockWizardCountRow = document.getElementById("stat-lab-mock-wizard-count-row");
+const statLabMockWizardGroupCountsRow = document.getElementById("stat-lab-mock-wizard-group-counts-row");
+const statLabMockWizardPerGroupCountInput = document.getElementById("stat-lab-mock-wizard-per-group-count-input");
+const statLabMockWizardGroupCountInput = document.getElementById("stat-lab-mock-wizard-group-count-input");
+const statLabCopyScopeWizardEl = document.getElementById("stat-lab-copy-scope-wizard");
+const statLabCopyScopeSourceHint = document.getElementById("stat-lab-copy-scope-source-hint");
+const statLabCopyScopeLevelSelect = document.getElementById("stat-lab-copy-scope-level-select");
+const statLabCopyScopeTableSelect = document.getElementById("stat-lab-copy-scope-table-select");
+const statLabCopyScopeTabSelect = document.getElementById("stat-lab-copy-scope-tab-select");
+const statLabCopyScopeRowSelect = document.getElementById("stat-lab-copy-scope-row-select");
+const statLabBuilderNameInput = document.getElementById("stat-lab-builder-name-input");
+const statLabBuilderDescriptionInput = document.getElementById("stat-lab-builder-description-input");
+const statLabBuilderExpressionInput = document.getElementById("stat-lab-builder-expression-input");
+const statLabUnresolvedVariablesEl = document.getElementById("stat-lab-unresolved-variables");
+const statLabBuilderVariablesEl = document.getElementById("stat-lab-builder-variables");
+const statLabBuilderGroupsEl = document.getElementById("stat-lab-builder-groups");
+const statLabBuilderPreviewTypeSelect = document.getElementById("stat-lab-builder-preview-type-select");
+const statLabBuilderEvalComponentSelect = document.getElementById("stat-lab-builder-eval-component-select");
+const statLabBuilderEvalResult = document.getElementById("stat-lab-builder-eval-result");
+const statLabBuilderDeleteBtn = document.getElementById("stat-lab-builder-delete-btn");
+const statLabConstantsView = document.getElementById("stat-lab-constants-view");
+const statLabConstantsListEl = document.getElementById("stat-lab-constants-list");
+const statLabConstantWizardEl = document.getElementById("stat-lab-constant-wizard");
+const statLabConstantWizardNameInput = document.getElementById("stat-lab-constant-wizard-name-input");
+const statLabConstantWizardDescriptionInput = document.getElementById("stat-lab-constant-wizard-description-input");
+const statLabConstantWizardTypeSelect = document.getElementById("stat-lab-constant-wizard-type-select");
+const statLabConstantWizardValueRow = document.getElementById("stat-lab-constant-wizard-value-row");
+const statLabConstantWizardValueInput = document.getElementById("stat-lab-constant-wizard-value-input");
+const statLabConstantWizardFormulaRow = document.getElementById("stat-lab-constant-wizard-formula-row");
+const statLabConstantWizardFormulaInput = document.getElementById("stat-lab-constant-wizard-formula-input");
+const statLabConstantWizardVariablesSection = document.getElementById("stat-lab-constant-wizard-variables-section");
+const statLabConstantWizardVariablesEl = document.getElementById("stat-lab-constant-wizard-variables");
+
+// The type currently being browsed inside the modal's own Browse view --
+// starts as whichever table/select-stats-modal it was opened from, but
+// the type dropdown can freely change it afterward (see
+// statLabTypeSelect's own change handler). Purely a Browse-view concern --
+// the builder itself has no single "owning type" anymore (see
+// statLabBuilderGroupByType's own comment just below), only Browse still
+// needs one type at a time to know which catalog to list.
+let statLabComponentType = null;
+// Which Browse-view groups are currently expanded -- mirrors
+// statSelectExpandedGroups' own "every group starts minimized" shape and
+// reset timing (see openStatLabModal()): fresh on every real modal open,
+// but NOT reset by the type dropdown's own change handler, so flipping
+// between types to compare keeps whatever's already open. Group ids are
+// plain strings reused across types (e.g. "core"/"modifiers"), so a
+// coincidental carry-over when switching types is harmless, not a bug.
+let statLabExpandedGroups = new Set();
+// The custom stat FAMILY currently being edited (its own real object out
+// of customStatFamilies, mutated in place only on Save), or null while
+// creating a brand new one (including via Clone -- a clone is always a
+// brand new family, never a mutation of its source).
+let statLabEditingFamily = null;
+// {name: {componentType, statId}} -- the builder's own explicit variable
+// list: added only via "+ Add Variable" (addStatLabBuilderVariable()) or
+// loaded from a saved formula, removed only via a row's own "x" (see
+// renderStatLabBuilderVariables()). Deliberately NOT kept in sync with the
+// expression text -- editing the formula never adds or drops an entry
+// here, it only changes what renderStatLabUnresolvedVariables() reports as
+// still needing one. Never split into stat_ref/mock_ref here -- that only
+// ever happens per component type, at catalog-generation time (see
+// crossComponentFormula()), since which type owns which variable depends
+// entirely on which type's own table is being rendered.
+let statLabBuilderVariableTargets = {};
+// {componentType: groupId} -- one entry for every component type
+// currently referenced by some variable in statLabBuilderVariableTargets,
+// each holding which of THAT type's own groups this stat files under
+// there. Kept in sync with the variable list by syncStatLabBuilderGroups()
+// (called from renderStatLabBuilderVariablesSection(), and directly from a
+// variable row's own type dropdown) -- a type disappears from here the
+// moment no variable references it anymore, and a newly-referenced type
+// defaults to its own first group. Save requires every entry here to have
+// a real group id (see the Save button's own handler) -- this is what
+// actually decides which component types the saved family ends up
+// registered on (statCatalogForComponentType()'s own
+// `family.groups[componentType] !== undefined` check).
+let statLabBuilderGroupByType = {};
+// Which of statLabBuilderGroupByType's own component types the Eval
+// button currently previews the formula FOR (i.e. which type's own
+// stat_ref/mock_ref split crossComponentFormula() builds, and which
+// type's own real components populate "Test against" below it) -- kept in
+// sync the same way, defaulting to the first referenced type.
+let statLabBuilderPreviewType = null;
+
+function statLabTypeOptions() {
+  return COMPONENT_TYPES.map((type) => ({ value: type.id, label: t(type.i18nKey) }));
+}
+
+// Every real component type PLUS the pseudo "Constant" type -- the Stat
+// Lab Builder's own variable row type dropdown (see
+// renderStatLabBuilderVariables()), so a formula variable can source from
+// a curated constant (see crossComponentFormula()'s own "constant" branch)
+// exactly as easily as from a real component type's stat.
+function statLabVariableTypeOptions() {
+  return [...statLabTypeOptions(), { value: "constant", label: t("stat_lab_modal.variable_type_constant") }];
+}
+
+function fillSelectOptions(select, options, selectedValue) {
+  select.innerHTML = "";
+  for (const { value, label } of options) {
+    select.appendChild(new Option(label, value));
+  }
+  if (selectedValue !== undefined) select.value = selectedValue;
+}
+
+// The modal's own title doubles as "which view is this" -- "Mocked
+// Statistics" on the Mocks view, "Statistics Lab" on Browse/Builder alike
+// (there's no separate title for Builder; it's still conceptually part of
+// browsing/authoring the same catalog Browse lists).
+function showStatLabView(view) {
+  statLabBrowseView.classList.toggle("hidden", view !== "browse");
+  statLabBuilderView.classList.toggle("hidden", view !== "builder");
+  statLabMocksView.classList.toggle("hidden", view !== "mocks");
+  statLabConstantsView.classList.toggle("hidden", view !== "constants");
+  statLabInspectView.classList.toggle("hidden", view !== "inspect");
+  statLabModalTitleEl.textContent = t(
+    view === "mocks"
+      ? "stat_lab_modal.mocked_stats_title"
+      : view === "constants"
+        ? "stat_lab_modal.constants_title"
+        : view === "inspect"
+          ? "stat_lab_modal.inspect_title"
+          : "stat_lab_modal.title",
+  );
+}
+
+// `view` lets a caller jump straight to Mocks (see the table's own
+// "Mocked Stats" button and stat-select-mocked-stats-btn) instead of
+// always landing on Browse.
+function openStatLabModal(componentType, view = "browse") {
+  statLabComponentType = componentType;
+  statLabExpandedGroups = new Set(); // every group starts minimized, each opening
+  fillSelectOptions(statLabTypeSelect, statLabTypeOptions(), componentType);
+  renderStatLabMissingMocksSummary();
+  if (view === "mocks") {
+    showStatLabView("mocks");
+    renderStatLabMocksView();
+  } else {
+    showStatLabView("browse");
+    renderStatLabBrowseList();
+  }
+  statLabModalOverlay.classList.remove("hidden");
+}
+
+document.getElementById("stat-select-stat-lab-btn").addEventListener("click", () => {
+  if (statSelectModalTable) openStatLabModal(statSelectModalTable.componentType);
+});
+
+document.getElementById("stat-select-mocked-stats-btn").addEventListener("click", () => {
+  if (statSelectModalTable) openStatLabModal(statSelectModalTable.componentType, "mocks");
+});
+
+statLabTypeSelect.addEventListener("change", () => {
+  statLabComponentType = statLabTypeSelect.value;
+  renderStatLabBrowseList();
+});
+
+document.getElementById("stat-lab-close-btn").addEventListener("click", () => {
+  statLabModalOverlay.classList.add("hidden");
+});
+
+document.getElementById("stat-lab-mocks-btn").addEventListener("click", () => {
+  showStatLabView("mocks");
+  renderStatLabMocksView();
+});
+// Closes the whole modal outright (same action as stat-lab-close-btn) --
+// the Mocks view is commonly opened directly (see the table's own "Mocked
+// Stats" button/stat-select-mocked-stats-btn) without ever having visited
+// Browse first, so "go back to Browse" would often mean "go somewhere the
+// user never came from" instead of actually closing anything.
+document.getElementById("stat-lab-mocks-close-btn").addEventListener("click", () => {
+  statLabModalOverlay.classList.add("hidden");
+});
+// The Mocks view's own explicit way to reach Browse -- previously the
+// "Back" button's job before it became "Close" above.
+document.getElementById("stat-lab-mocks-statistics-lab-btn").addEventListener("click", () => {
+  showStatLabView("browse");
+  renderStatLabBrowseList();
+});
+
+document.getElementById("stat-lab-constants-btn").addEventListener("click", () => {
+  showStatLabView("constants");
+  renderStatLabConstantsList();
+});
+document.getElementById("stat-lab-constants-close-btn").addEventListener("click", () => {
+  statLabModalOverlay.classList.add("hidden");
+});
+document.getElementById("stat-lab-constants-statistics-lab-btn").addEventListener("click", () => {
+  showStatLabView("browse");
+  renderStatLabBrowseList();
+});
+
+// ---- Browse view ----
+function renderStatLabBrowseList() {
+  statLabBrowseList.innerHTML = "";
+  const catalog = statCatalogForComponentType(statLabComponentType);
+  const groups = catalog?.groups ?? [];
+  for (const group of groups) {
+    const groupEl = document.createElement("div");
+    groupEl.className = "stat-lab-browse-group";
+    const isExpanded = statLabExpandedGroups.has(group.id);
+
+    const header = document.createElement("div");
+    header.className = "stat-lab-browse-group-header";
+    // Its own small icon button, not wrapping the whole header the way
+    // the Select Stats modal's own toggle does (see
+    // renderStatSelectGroupsPanel()) -- that shape only works there
+    // because a group's own name is always a plain, non-interactive text
+    // node; here it can ALSO be a "dynamic" group's own editable name
+    // field (its own pencil icon + rename input, see
+    // buildStatLabGroupNameField()), which needs to keep receiving its
+    // own clicks independently rather than toggling collapse every time.
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "stat-lab-browse-group-toggle";
+    const toggleIcon = document.createElement("span");
+    toggleIcon.className = "cart-loadout-toggle-btn";
+    toggleIcon.textContent = isExpanded ? "−" : "+";
+    toggleBtn.appendChild(toggleIcon);
+    toggleBtn.title = t(isExpanded ? "stat_lab_modal.collapse_group_tooltip" : "stat_lab_modal.expand_group_tooltip");
+    toggleBtn.addEventListener("click", () => {
+      if (isExpanded) statLabExpandedGroups.delete(group.id);
+      else statLabExpandedGroups.add(group.id);
+      renderStatLabBrowseList();
+    });
+    header.appendChild(toggleBtn);
+    header.appendChild(buildStatLabGroupNameField(group));
+    if (STAT_TAG_LABEL_KEYS[group.kind]) {
+      header.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[group.kind]), group.kind));
+    }
+    if (group.kind === "dynamic") {
+      const deleteGroupBtn = document.createElement("button");
+      deleteGroupBtn.type = "button";
+      deleteGroupBtn.className = "stat-lab-browse-group-delete-btn";
+      deleteGroupBtn.textContent = "×";
+      deleteGroupBtn.title = t("stat_lab_modal.delete_group_tooltip");
+      deleteGroupBtn.addEventListener("click", () => deleteCustomStatGroup(group));
+      header.appendChild(deleteGroupBtn);
+    }
+    groupEl.appendChild(header);
+
+    if (isExpanded) {
+      const defs = (catalog.definitions ?? []).filter((d) => d.group === group.id);
+      const list = document.createElement("div");
+      list.className = "stat-lab-browse-group-stats";
+      for (const def of defs) list.appendChild(buildStatLabBrowseStatRow(def, statLabComponentType));
+      if (defs.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "stat-lab-browse-empty";
+        empty.textContent = t("stat_lab_modal.no_stats_in_group");
+        list.appendChild(empty);
+      }
+      groupEl.appendChild(list);
+    }
+    statLabBrowseList.appendChild(groupEl);
+  }
+  if (groups.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "stat-lab-browse-empty";
+    empty.textContent = t("stat_lab_modal.no_groups");
+    statLabBrowseList.appendChild(empty);
+  }
+}
+
+// A "static" group's own plain i18n-backed name (never editable), or a
+// "dynamic" one's free-typed name with an inline rename control -- mirrors
+// buildEditableNameField()'s own edit-in-place shape (pencil icon ->
+// swaps to a text input on click, commits on blur/Enter) but re-renders
+// just this modal's own browse list on commit instead of the whole
+// Component Analyzer, since a group's name plays no role there.
+function buildStatLabGroupNameField(group) {
+  if (group.kind !== "dynamic") {
+    const span = document.createElement("span");
+    span.textContent = statGroupLabel(group);
+    return span;
+  }
+  const wrap = document.createElement("span");
+  wrap.className = "stat-lab-browse-group-name";
+  const nameSpan = document.createElement("span");
+  nameSpan.textContent = group.name;
+  wrap.appendChild(nameSpan);
+
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "editable-name-edit-btn";
+  editBtn.textContent = "✎";
+  editBtn.title = t("component_analyzer.rename_tooltip");
+  editBtn.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "editable-name-input";
+    input.value = group.name;
+    const commit = () => {
+      group.name = input.value.trim() || group.name;
+      saveState();
+      renderStatLabBrowseList();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+      else if (event.key === "Escape") renderStatLabBrowseList();
+    });
+    wrap.replaceChildren(input);
+    input.focus();
+    input.select();
+  });
+  wrap.appendChild(editBtn);
+  return wrap;
+}
+
+// `componentType` is the catalog this def is currently being shown under
+// -- never stored on `def` itself (a plain statDef() literal carries no
+// componentType of its own; a family-generated def's own "which types is
+// this on" question is answered by its family's `groups`, not a single
+// field), so Clone (which needs to know the source type to seed a
+// built-in stat's own trivial passthrough) takes it as an explicit
+// parameter instead of assuming def.componentType exists.
+function buildStatLabBrowseStatRow(def, componentType) {
+  const row = document.createElement("div");
+  row.className = "stat-lab-browse-stat-row";
+  const label = document.createElement("span");
+  label.textContent = statDefLabel(def);
+  row.appendChild(label);
+  const browseInfoIcon = buildStatInfoIcon(label, def);
+  if (browseInfoIcon) row.appendChild(browseInfoIcon);
+  if (STAT_TAG_LABEL_KEYS[def.kind]) {
+    row.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[def.kind]), def.kind));
+  }
+
+  const actions = document.createElement("span");
+  actions.className = "stat-lab-browse-stat-actions";
+  // Only a stat backed by a real formula has anything to show here -- a
+  // "fundamental" stat reads a raw column directly (see statDef()'s own
+  // comment), nothing to inspect. Shown for every OTHER kind (pre-derived/
+  // mod/derived alike), not just "derived" -- unlike Edit below, Details is
+  // never destructive, so there's no reason to withhold it from the
+  // app-authored, locked stats that otherwise have no way to inspect their
+  // own formula short of Clone (which pollutes the custom stat list just
+  // to peek).
+  if (def.formula) {
+    const detailsBtn = document.createElement("button");
+    detailsBtn.type = "button";
+    detailsBtn.textContent = t("stat_lab_modal.view_btn");
+    detailsBtn.addEventListener("click", () => openStatLabInspect(def, componentType));
+    actions.appendChild(detailsBtn);
+  }
+  const cloneBtn = document.createElement("button");
+  cloneBtn.type = "button";
+  cloneBtn.textContent = t("stat_lab_modal.clone_btn");
+  cloneBtn.addEventListener("click", () => openStatLabBuilderClone(def, componentType));
+  actions.appendChild(cloneBtn);
+  // Only a "derived" (user-created) stat is editable/deletable -- a
+  // "fundamental"/"pre-derived" one is app-shipped and locked, per
+  // statDef()'s own comment (Clone above is the only way to start a new
+  // stat from one of those).
+  if (def.kind === "derived") {
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.textContent = t("stat_lab_modal.edit_btn");
+    editBtn.addEventListener("click", () => openStatLabBuilderEdit(def));
+    actions.appendChild(editBtn);
+  }
+  row.appendChild(actions);
+  return row;
+}
+
+document.getElementById("stat-lab-new-stat-btn").addEventListener("click", () => openStatLabBuilderNew());
+
+document.getElementById("stat-lab-new-group-btn").addEventListener("click", () => {
+  customStatGroups.push(makeCustomStatGroup(statLabComponentType, t("stat_lab_modal.default_group_name")));
+  saveState();
+  renderStatLabBrowseList();
+});
+
+function deleteCustomStatGroup(group) {
+  const hasStats = customStatFamilies.some((family) => family.groups[group.componentType] === group.id);
+  if (hasStats) {
+    alert(t("stat_lab_modal.group_not_empty"));
+    return;
+  }
+  customStatGroups = customStatGroups.filter((g) => g.id !== group.id);
+  saveState();
+  renderStatLabBrowseList();
+}
+
+// ---- Builder view ----
+// Parses `expression` with math.js and returns every referenced variable
+// name that isn't itself a math.js global/function (pi, e, sqrt, ...) --
+// the set the builder needs a {componentType, statId} source for. A
+// malformed expression (mid-typing, or just wrong) yields an empty list
+// rather than throwing -- the same "graceful, not fatal" contract
+// evaluateStatFormula() itself already follows.
+function parseFormulaVariableNames(expression) {
+  if (!expression || !expression.trim()) return [];
+  try {
+    const names = new Set();
+    math.parse(expression).traverse((node) => {
+      if (node.isSymbolNode && !(node.name in math)) names.add(node.name);
+    });
+    return [...names];
+  } catch {
+    return [];
+  }
+}
+
+// statLabBuilderVariableTargets is now purely explicit -- added only via
+// "+ Add Variable" (addStatLabBuilderVariable()) or loaded from a saved
+// formula, removed only via a row's own "x" -- never auto-added or
+// auto-dropped just because the expression text happens to mention or
+// stop mentioning a name. Typing/deleting text in the formula box no
+// longer changes this list at all; it only changes what
+// renderStatLabUnresolvedVariables() below reports as still needing one.
+// (Previously every parsed name was auto-bound to a silent default target
+// the moment it appeared, which could leave a wrong guess in place without
+// the user ever noticing -- explicit add/remove means a variable only has
+// a source when someone actually chose one.)
+
+// Every name parseFormulaVariableNames() finds in the current expression
+// that isn't already a key in statLabBuilderVariableTargets -- shown in
+// red above the variable list as a to-do, not auto-resolved. Re-run on
+// every expression edit (see the textarea's own "input" listener) and
+// whenever the variable list itself changes (add/remove/rename).
+function renderStatLabUnresolvedVariables() {
+  const parsed = parseFormulaVariableNames(statLabBuilderExpressionInput.value);
+  const unresolved = parsed.filter((name) => !(name in statLabBuilderVariableTargets));
+  statLabUnresolvedVariablesEl.classList.toggle("hidden", unresolved.length === 0);
+  statLabUnresolvedVariablesEl.textContent =
+    unresolved.length > 0 ? t("stat_lab_modal.unresolved_variables_label", { names: unresolved.join(", ") }) : "";
+}
+
+// Every distinct componentType among statLabBuilderVariableTargets' own
+// targets -- the set of component types this stat, as currently drafted,
+// would actually be registered on (see syncStatLabBuilderGroups()'s own
+// comment). Order follows Object.values() insertion order (i.e. the order
+// variables were added), not alphabetical -- stable enough for a handful
+// of types, not worth sorting. "constant" (a variable row's own pseudo
+// "Constant" type, see statLabVariableTypeOptions()) is deliberately
+// excluded -- a constant_ref is global, with no real component type of its
+// own to register a group under, so it must never leak into "which types
+// does this stat need a group chosen for".
+function distinctVariableComponentTypes() {
+  return [
+    ...new Set(
+      Object.values(statLabBuilderVariableTargets)
+        .map((target) => target.componentType)
+        .filter((componentType) => componentType !== "constant"),
+    ),
+  ];
+}
+
+function renderStatLabBuilderVariablesSection() {
+  renderStatLabUnresolvedVariables();
+  renderStatLabBuilderVariables();
+  syncStatLabBuilderTypeDependents();
+}
+
+// Adds one new explicit variable -- prefilled with the first still-
+// unresolved name from the expression when there is one (the common case:
+// the user just typed a new name and clicked Add for it), otherwise a
+// fresh "variableN" placeholder they can rename via the row's own name
+// field. Defaults the new variable's own type to whichever type is
+// already being previewed (or Browse's own current type for a brand new,
+// still-empty stat) -- just a starting guess, freely changed via the
+// row's own type dropdown.
+function addStatLabBuilderVariable() {
+  const unresolved = parseFormulaVariableNames(statLabBuilderExpressionInput.value).filter(
+    (name) => !(name in statLabBuilderVariableTargets),
+  );
+  let name = unresolved[0];
+  if (!name) {
+    let n = 1;
+    while (`variable${n}` in statLabBuilderVariableTargets) n++;
+    name = `variable${n}`;
+  }
+  const componentType = statLabBuilderPreviewType ?? statLabComponentType;
+  statLabBuilderVariableTargets[name] = {
+    componentType,
+    statId: allStatDefsForComponentType(componentType)[0]?.key ?? null,
+  };
+  renderStatLabBuilderVariablesSection();
+}
+
+document.getElementById("stat-lab-add-variable-btn").addEventListener("click", addStatLabBuilderVariable);
+
+// Every OTHER variable currently eligible to be used as an aggregate
+// variable's own `limit` -- any non-aggregate one (a `limit` naming
+// another aggregate would need that one resolved first too, and
+// evaluateStatFormula()'s own two-pass order never does that -- see its
+// comment), excluding `ownName` itself (a variable can't cap its own
+// aggregate against its own not-yet-resolved value).
+function eligibleLimitVariableNames(ownName) {
+  return Object.entries(statLabBuilderVariableTargets)
+    .filter(([name, target]) => name !== ownName && (!target.aggregation || target.aggregation === "none"))
+    .map(([name]) => name);
+}
+
+function renderStatLabBuilderVariables() {
+  statLabBuilderVariablesEl.innerHTML = "";
+  for (const [name, target] of Object.entries(statLabBuilderVariableTargets)) {
+    const row = document.createElement("div");
+    row.className = "stat-lab-builder-variable-row";
+
+    // Editable (not just display) -- a manually-added variable has no
+    // real name until the user types one, and renaming an existing one is
+    // just as valid (it's a plain object-key rename below, nothing more).
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "stat-lab-builder-variable-name";
+    nameInput.value = name;
+    nameInput.addEventListener("blur", () => {
+      const newName = nameInput.value.trim();
+      if (!newName || newName === name) {
+        renderStatLabBuilderVariablesSection();
+        return;
+      }
+      if (newName in statLabBuilderVariableTargets) {
+        alert(t("stat_lab_modal.variable_name_taken"));
+        renderStatLabBuilderVariablesSection();
+        return;
+      }
+      delete statLabBuilderVariableTargets[name];
+      statLabBuilderVariableTargets[newName] = target;
+      // Carry the rename into any OTHER variable's own `limit` that
+      // pointed at the old name -- otherwise that aggregate would
+      // silently fall back to "no limit" (an unbounded sum/average/count)
+      // the moment its own limit variable got renamed, with nothing in
+      // the UI ever pointing out why.
+      for (const other of Object.values(statLabBuilderVariableTargets)) {
+        if (other.limit === name) other.limit = newName;
+      }
+      renderStatLabBuilderVariablesSection();
+    });
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") nameInput.blur();
+    });
+    row.appendChild(nameInput);
+
+    // No "mocked" indicator here anymore -- whether this variable ends up
+    // a stat_ref or a mock_ref now depends on which component type the
+    // stat is being VIEWED from at render time (a per-table question),
+    // not on anything fixed at authoring time, so a static badge here
+    // would just be misleading. An aggregate variable (aggregation !==
+    // "none") is the one exception -- it's ALWAYS an aggregate_ref
+    // regardless of viewing type (see crossComponentFormula()'s own
+    // comment), so its own dropdown is the only "what kind of reference
+    // is this" signal a row needs.
+    const aggregationSelect = document.createElement("select");
+    aggregationSelect.className = "stat-lab-builder-variable-aggregation";
+    fillSelectOptions(
+      aggregationSelect,
+      [
+        { value: "none", label: t("stat_lab_modal.aggregation_none") },
+        { value: "sum", label: t("stat_lab_modal.aggregation_sum") },
+        { value: "average", label: t("stat_lab_modal.aggregation_average") },
+        { value: "count", label: t("stat_lab_modal.aggregation_count") },
+      ],
+      target.aggregation ?? "none",
+    );
+    row.appendChild(aggregationSelect);
+
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "stat-lab-builder-variable-type";
+    fillSelectOptions(typeSelect, statLabVariableTypeOptions(), target.componentType);
+    row.appendChild(typeSelect);
+
+    const statSelect = document.createElement("select");
+    statSelect.className = "stat-lab-builder-variable-stat";
+    row.appendChild(statSelect);
+
+    // A "Constant" row (see statLabVariableTypeOptions()) lists every
+    // curated constant instead of a real component type's own stats --
+    // constantId rides along in `target.statId`, same reasoning as
+    // crossComponentFormula()'s own "constant" branch.
+    function populateStatSelect() {
+      const options =
+        typeSelect.value === "constant"
+          ? eligibleConstantOptions()
+          : allStatDefsForComponentType(typeSelect.value).map((def) => ({ value: def.key, label: statDefLabel(def) }));
+      const selected = target.componentType === typeSelect.value && options.some((o) => o.value === target.statId)
+        ? target.statId
+        : options[0]?.value;
+      fillSelectOptions(statSelect, options, selected);
+      target.componentType = typeSelect.value;
+      target.statId = statSelect.value || null;
+    }
+    populateStatSelect();
+
+    // A constant is a single global value -- sum/average/count across
+    // "every configured mock" makes no sense for it, so aggregation is
+    // disabled and forced back to "none" whenever this row's own type is
+    // (or becomes) "constant".
+    function syncAggregationAvailability() {
+      const isConstant = typeSelect.value === "constant";
+      aggregationSelect.disabled = isConstant;
+      if (isConstant && target.aggregation) {
+        target.aggregation = undefined;
+        aggregationSelect.value = "none";
+      }
+    }
+    syncAggregationAvailability();
+
+    const limitSelect = document.createElement("select");
+    limitSelect.className = "stat-lab-builder-variable-limit";
+    function populateLimitSelect() {
+      const options = [
+        { value: "", label: t("stat_lab_modal.limit_none") },
+        ...eligibleLimitVariableNames(name).map((n) => ({ value: n, label: n })),
+      ];
+      const selected = options.some((o) => o.value === (target.limit ?? "")) ? target.limit ?? "" : "";
+      fillSelectOptions(limitSelect, options, selected);
+      target.limit = limitSelect.value || undefined;
+    }
+    populateLimitSelect();
+    // NOT the shared .hidden class -- that's display:none, which would
+    // pull this cell out of the row's own CSS grid flow entirely and
+    // shift the remove button left into the Limit column's slot instead
+    // of its own. visibility:hidden keeps the grid cell reserved (empty,
+    // not removed) so every row's remove button always lands in the same
+    // rightmost column regardless of whether Limit is showing anything.
+    limitSelect.classList.toggle("stat-lab-builder-variable-limit-inactive", (target.aggregation ?? "none") === "none");
+    row.appendChild(limitSelect);
+
+    // A full renderStatLabBuilderVariablesSection() re-render isn't needed
+    // for a type/stat/limit change alone -- just the groups/preview-type
+    // sections (type only) -- but an AGGREGATION change can add or remove
+    // this row from every other row's own limit dropdown options, so that
+    // one does re-render the whole section.
+    typeSelect.addEventListener("change", () => {
+      populateStatSelect();
+      syncAggregationAvailability();
+      syncStatLabBuilderTypeDependents();
+    });
+    statSelect.addEventListener("change", () => {
+      target.statId = statSelect.value;
+    });
+    aggregationSelect.addEventListener("change", () => {
+      target.aggregation = aggregationSelect.value === "none" ? undefined : aggregationSelect.value;
+      if (!target.aggregation) target.limit = undefined;
+      renderStatLabBuilderVariablesSection();
+    });
+    limitSelect.addEventListener("change", () => {
+      target.limit = limitSelect.value || undefined;
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "stat-lab-builder-variable-remove-btn";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("stat_lab_modal.remove_variable_tooltip");
+    removeBtn.addEventListener("click", () => {
+      delete statLabBuilderVariableTargets[name];
+      // Same staleness concern as a rename above -- a removed variable
+      // can't go on capping anyone's aggregate.
+      for (const other of Object.values(statLabBuilderVariableTargets)) {
+        if (other.limit === name) other.limit = undefined;
+      }
+      renderStatLabBuilderVariablesSection();
+    });
+    row.appendChild(removeBtn);
+
+    statLabBuilderVariablesEl.appendChild(row);
+  }
+}
+
+statLabBuilderExpressionInput.addEventListener("input", renderStatLabUnresolvedVariables);
+
+// Re-derives which component types actually need a group assignment (see
+// statLabBuilderGroupByType's own comment) from the current variable
+// list, and refreshes the Eval section's own "Preview as" type options --
+// the two things that change whenever the variable list's own set of
+// component types could have changed (add/remove/rename a variable,
+// switch a variable's own type dropdown, or load a whole new
+// stat/family). Bundled into one function since both read the exact same
+// distinctVariableComponentTypes() list.
+function syncStatLabBuilderTypeDependents() {
+  const types = distinctVariableComponentTypes();
+  syncStatLabBuilderGroups(types);
+  syncStatLabBuilderPreviewType(types);
+}
+
+// Keeps an existing group choice for a type still referenced (including
+// one just loaded from an existing family's own `groups`, restored before
+// this runs -- see openStatLabBuilderEdit()), defaults a newly-referenced
+// type to its own first group, and drops a type no longer referenced by
+// any variable at all.
+function syncStatLabBuilderGroups(types) {
+  const next = {};
+  for (const type of types) {
+    const catalog = statCatalogForComponentType(type);
+    const options = catalog?.groups ?? [];
+    const current = statLabBuilderGroupByType[type];
+    next[type] = current && options.some((g) => g.id === current) ? current : options[0]?.id;
+  }
+  statLabBuilderGroupByType = next;
+  renderStatLabBuilderGroups();
+}
+
+function renderStatLabBuilderGroups() {
+  statLabBuilderGroupsEl.innerHTML = "";
+  const types = Object.keys(statLabBuilderGroupByType);
+  if (types.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "stat-lab-browse-empty";
+    empty.textContent = t("stat_lab_modal.no_variables_yet");
+    statLabBuilderGroupsEl.appendChild(empty);
+    return;
+  }
+  for (const type of types) {
+    const row = document.createElement("div");
+    row.className = "stat-lab-builder-group-row";
+
+    const label = document.createElement("span");
+    label.className = "stat-lab-builder-group-type-label";
+    label.textContent = t(componentTypeI18nKey(type));
+    row.appendChild(label);
+
+    const catalog = statCatalogForComponentType(type);
+    const options = (catalog?.groups ?? []).map((group) => ({ value: group.id, label: statGroupLabel(group) }));
+    const groupSelect = document.createElement("select");
+    fillSelectOptions(groupSelect, options, statLabBuilderGroupByType[type]);
+    groupSelect.addEventListener("change", () => {
+      statLabBuilderGroupByType[type] = groupSelect.value;
+    });
+    row.appendChild(groupSelect);
+
+    statLabBuilderGroupsEl.appendChild(row);
+  }
+}
+
+// Keeps the existing preview type if it's still one of the stat's own
+// contributing types, otherwise falls back to the first one (or none, if
+// the variable list is currently empty) -- see
+// populateStatLabBuilderEvalComponentSelect() for what changing it does.
+function syncStatLabBuilderPreviewType(types) {
+  if (!statLabBuilderPreviewType || !types.includes(statLabBuilderPreviewType)) {
+    statLabBuilderPreviewType = types[0] ?? null;
+  }
+  fillSelectOptions(
+    statLabBuilderPreviewTypeSelect,
+    types.map((type) => ({ value: type, label: t(componentTypeI18nKey(type)) })),
+    statLabBuilderPreviewType,
+  );
+  populateStatLabBuilderEvalComponentSelect();
+}
+
+statLabBuilderPreviewTypeSelect.addEventListener("change", () => {
+  statLabBuilderPreviewType = statLabBuilderPreviewTypeSelect.value;
+  populateStatLabBuilderEvalComponentSelect();
+});
+
+// The real component "Test against" picks from -- always of whichever
+// type Eval is currently previewing AS (statLabBuilderPreviewType), since
+// that's the type crossComponentFormula() will treat as the owning one
+// (see the Eval button's own handler).
+async function populateStatLabBuilderEvalComponentSelect() {
+  if (!statLabBuilderPreviewType) {
+    statLabBuilderEvalComponentSelect.innerHTML = "";
+    return;
+  }
+  await fetchComponentList(statLabBuilderPreviewType);
+  const options = [...statSourceForComponentType(statLabBuilderPreviewType)].map(([wareId, row]) => ({
+    value: wareId,
+    label: row.name,
+  }));
+  fillSelectOptions(statLabBuilderEvalComponentSelect, options);
+}
+
+function resetStatLabBuilderEvalResult() {
+  statLabBuilderEvalResult.textContent = "";
+  statLabBuilderEvalResult.classList.remove("stat-lab-eval-result-ok", "stat-lab-eval-result-error");
+}
+
+// ---- Read-only Inspect view (TODO.md item 7) ----
+const STAT_LAB_AGGREGATION_LABEL_KEYS = {
+  sum: "stat_lab_modal.aggregation_sum",
+  average: "stat_lab_modal.aggregation_average",
+  count: "stat_lab_modal.aggregation_count",
+  // App-authored-only aggregations (Shield MJ/Rate/Delay's own per-group
+  // totals) -- no Builder UI can create one of these (its aggregation
+  // dropdown only offers sum/average/count, see
+  // renderStatLabBuilderVariables()), but a real pre-derived formula can
+  // still use one, so Inspect needs its own label regardless.
+  group_sum: "stat_lab_modal.aggregation_group_sum",
+  group_average: "stat_lab_modal.aggregation_group_average",
+};
+
+// Readable {aggregation, componentType, stat, limit} strings for one
+// formula variable's own resolution target, for the read-only Inspect view
+// (openStatLabInspect()) -- covers every ref.type
+// resolveFormulaVariable()/resolveAggregateVariable() can ever see.
+// stat_ref and mock_ref share one description (same {componentType,
+// statId} shape the Builder's own dropdowns use -- see
+// renderStatLabBuilderVariables()'s own comment on why they're
+// indistinguishable at authoring time); mod_modifier_ref and constant_ref
+// are their own distinct shapes with no {componentType, statId} at all, so
+// each gets its own small, honest description instead of being forced into
+// that same shape.
+function describeFormulaVariableTarget(ref) {
+  if (!ref) return { aggregation: "", componentType: "", stat: "", limit: "" };
+  if (ref.type === "mod_modifier_ref") {
+    return {
+      aggregation: "",
+      componentType: t("stat_lab_modal.inspect_mod_modifier_type"),
+      stat: t("stat_lab_modal.inspect_mod_modifier_stat", { column: ref.realColumn }),
+      limit: "",
+    };
+  }
+  if (ref.type === "constant_ref") {
+    const constant = allConstantDefs().find((c) => c.id === ref.constantId);
+    return {
+      aggregation: "",
+      componentType: t("stat_lab_modal.variable_type_constant"),
+      stat: constant ? statDefLabel(constant) : ref.constantId,
+      limit: "",
+    };
+  }
+  if (ref.type === "mock_ref") {
+    const [componentType, statId] = ref.mockId.split(":");
+    const targetDef = lookupStatDef(componentType, statId);
+    return {
+      aggregation: "",
+      componentType: t(componentTypeI18nKey(componentType)),
+      stat: targetDef ? statDefLabel(targetDef) : statId,
+      limit: "",
+    };
+  }
+  if (ref.type === "aggregate_ref") {
+    const targetDef = lookupStatDef(ref.componentType, ref.statId);
+    return {
+      aggregation: t(STAT_LAB_AGGREGATION_LABEL_KEYS[ref.aggregation] ?? "stat_lab_modal.aggregation_none"),
+      componentType: t(componentTypeI18nKey(ref.componentType)),
+      stat: targetDef ? statDefLabel(targetDef) : ref.statId,
+      limit: typeof ref.limit === "number" ? String(ref.limit) : ref.limit || "",
+    };
+  }
+  // stat_ref
+  const targetDef = lookupStatDef(ref.componentType, ref.statId);
+  return {
+    aggregation: "",
+    componentType: t(componentTypeI18nKey(ref.componentType)),
+    stat: targetDef ? statDefLabel(targetDef) : ref.statId,
+    limit: "",
+  };
+}
+
+function renderStatLabInspectVariables(def) {
+  statLabInspectVariablesEl.innerHTML = "";
+  for (const [name, ref] of Object.entries(def.formula.variables ?? {})) {
+    const described = describeFormulaVariableTarget(ref);
+    const row = document.createElement("div");
+    row.className = "stat-lab-inspect-variable-row";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "stat-lab-inspect-variable-name";
+    nameEl.textContent = name;
+    row.appendChild(nameEl);
+
+    const aggEl = document.createElement("span");
+    aggEl.className = described.aggregation ? "" : "stat-lab-inspect-variable-cell-muted";
+    aggEl.textContent = described.aggregation || t("stat_lab_modal.aggregation_none");
+    row.appendChild(aggEl);
+
+    const typeEl = document.createElement("span");
+    typeEl.textContent = described.componentType;
+    row.appendChild(typeEl);
+
+    const statEl = document.createElement("span");
+    statEl.textContent = described.stat;
+    row.appendChild(statEl);
+
+    const limitEl = document.createElement("span");
+    limitEl.className = described.limit ? "" : "stat-lab-inspect-variable-cell-muted";
+    limitEl.textContent = described.limit || t("stat_lab_modal.limit_none");
+    row.appendChild(limitEl);
+
+    statLabInspectVariablesEl.appendChild(row);
+  }
+}
+
+// `def` must carry a real `formula` -- see buildStatLabBrowseStatRow()'s
+// own guard on when the Details button even appears (never for a
+// "fundamental" stat, which reads a raw column directly and has no
+// formula to show at all). `componentType` is the catalog this def is
+// currently being shown under (same reasoning as
+// openStatLabBuilderClone()'s own parameter). Self-contained, like
+// openStatLabModal() itself -- sets statLabComponentType/the type select
+// and unhides the overlay on its own -- so this can be called directly
+// from a completely different modal (the Select Stats modal's own
+// "Details" button, see renderStatSelectGroupsPanel()) without the Stat
+// Lab modal needing to already be open.
+function openStatLabInspect(def, componentType) {
+  statLabComponentType = componentType;
+  fillSelectOptions(statLabTypeSelect, statLabTypeOptions(), componentType);
+  statLabInspectName.textContent = statDefLabel(def);
+  statLabInspectTagContainer.innerHTML = "";
+  if (STAT_TAG_LABEL_KEYS[def.kind]) {
+    statLabInspectTagContainer.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[def.kind]), def.kind));
+  }
+  const description = statDefDescription(def);
+  statLabInspectDescription.textContent = description;
+  statLabInspectDescription.classList.toggle("hidden", !description);
+  statLabInspectExpression.textContent = def.formula.expression;
+  renderStatLabInspectVariables(def);
+  showStatLabView("inspect");
+  statLabModalOverlay.classList.remove("hidden");
+}
+
+statLabInspectCloseBtn.addEventListener("click", () => {
+  renderStatLabBrowseList();
+  showStatLabView("browse");
+});
+
+function openStatLabBuilderNew() {
+  statLabEditingFamily = null;
+  statLabBuilderNameInput.value = "";
+  statLabBuilderDescriptionInput.value = "";
+  statLabBuilderExpressionInput.value = "";
+  statLabBuilderVariableTargets = {};
+  statLabBuilderGroupByType = {};
+  renderStatLabBuilderVariablesSection();
+  statLabBuilderDeleteBtn.classList.add("hidden");
+  resetStatLabBuilderEvalResult();
+  showStatLabView("builder");
+}
+
+function openStatLabBuilderEdit(def) {
+  const family = customStatFamilies.find((f) => f.id === def.familyId);
+  if (!family) return;
+  statLabEditingFamily = family;
+  statLabBuilderNameInput.value = family.label;
+  statLabBuilderDescriptionInput.value = family.description ?? "";
+  statLabBuilderExpressionInput.value = family.formula.expression;
+  // family.formula.variables is already the shared, not-yet-split
+  // {componentType, statId} shape -- copy each target rather than alias
+  // it, so editing here can't mutate the real family until Save.
+  statLabBuilderVariableTargets = Object.fromEntries(
+    Object.entries(family.formula.variables).map(([name, target]) => [name, { ...target }]),
+  );
+  // Restored BEFORE rendering, not after -- renderStatLabBuilderVariablesSection()'s
+  // own syncStatLabBuilderGroups() keeps an existing, still-valid choice
+  // for a type it already finds here rather than resetting it to that
+  // type's first group.
+  statLabBuilderGroupByType = { ...family.groups };
+  renderStatLabBuilderVariablesSection();
+  statLabBuilderDeleteBtn.classList.remove("hidden");
+  resetStatLabBuilderEvalResult();
+  showStatLabView("builder");
+}
+
+// Reverses crossComponentFormula()'s own target -> runtime-ref transform,
+// for one variable of a "pre-derived" built-in stat's own already-built
+// `def.formula.variables[name]` -- back into the {componentType, statId,
+// aggregation?, limit?} shape the builder's own variable rows expect (the
+// shape a fresh statLabBuilderVariableTargets entry, or a user-created
+// family's own stored formula.variables, is always already in -- see
+// addStatLabBuilderVariable() and the family-clone branch above).
+// stat_ref/aggregate_ref already carry componentType+statId directly;
+// mock_ref only carries them combined as "<componentType>:<statId>" (see
+// resolveMockValue()'s own mockId shape), so that one needs splitting.
+// `whenNull`/`optional` (a handful of turret/missile formulas' own
+// conditional-resolution flags -- see crossComponentFormula()'s own
+// comment) have no builder-UI representation yet, so cloning drops them;
+// the cloned formula still computes the same thing in the ordinary case,
+// just without that edge-case suppression.
+function formulaVariableToBuilderTarget(ref) {
+  if (ref.type === "mock_ref") {
+    const [componentType, statId] = ref.mockId.split(":");
+    return { componentType, statId };
+  }
+  // stat_ref or aggregate_ref
+  return { componentType: ref.componentType, statId: ref.statId, aggregation: ref.aggregation, limit: ref.limit };
+}
+
+// `componentType` is the catalog `def` was clicked from (see
+// buildStatLabBrowseStatRow()'s own comment) -- only actually needed for
+// the fundamental-stat branch below, to know which type's own real column
+// the seeded passthrough formula should point at.
+function openStatLabBuilderClone(def, componentType) {
+  statLabEditingFamily = null;
+  if (def.familyId) {
+    // Cloning a user-created family copies its ENTIRE registration --
+    // every type it's on, with each one's own group -- not just the one
+    // type it was clicked from, since the family (not any single
+    // per-type view of it) is the real stat being duplicated.
+    const family = customStatFamilies.find((f) => f.id === def.familyId);
+    statLabBuilderNameInput.value = t("stat_lab_modal.clone_name", { name: family.label });
+    statLabBuilderDescriptionInput.value = family.description ?? "";
+    statLabBuilderExpressionInput.value = family.formula.expression;
+    statLabBuilderVariableTargets = Object.fromEntries(
+      Object.entries(family.formula.variables).map(([name, target]) => [name, { ...target }]),
+    );
+    statLabBuilderGroupByType = { ...family.groups };
+  } else if (def.kind === "pre-derived" && def.formula) {
+    // An app-authored pre-derived stat is a real, already-built formula
+    // (crossComponentFormula(), same shape a saved family's own formula
+    // has) -- clone copies THAT (expression + every variable, converted
+    // back to the builder's own editable shape -- see
+    // formulaVariableToBuilderTarget()), not a passthrough reference to
+    // the stat's own final value. A passthrough would let the user rename
+    // the number but never actually see or tweak the calculation that
+    // produces it, which defeats the point of cloning a formula at all.
+    statLabBuilderNameInput.value = t("stat_lab_modal.clone_name", { name: statDefLabel(def) });
+    statLabBuilderDescriptionInput.value = statDefDescription(def) ?? "";
+    statLabBuilderExpressionInput.value = def.formula.expression;
+    statLabBuilderVariableTargets = Object.fromEntries(
+      Object.entries(def.formula.variables).map(([name, ref]) => [name, formulaVariableToBuilderTarget(ref)]),
+    );
+    statLabBuilderGroupByType = { [componentType]: def.group };
+  } else {
+    // A fundamental stat is a plain raw column -- there is no underlying
+    // formula to unwrap, so the trivial one-variable passthrough (equal to
+    // this stat's own real value on the type it was cloned from) is the
+    // correct starting point here, not a workaround.
+    statLabBuilderNameInput.value = t("stat_lab_modal.clone_name", { name: statDefLabel(def) });
+    statLabBuilderDescriptionInput.value = "";
+    statLabBuilderExpressionInput.value = "value";
+    statLabBuilderVariableTargets = { value: { componentType, statId: def.key } };
+    statLabBuilderGroupByType = { [componentType]: def.group };
+  }
+  renderStatLabBuilderVariablesSection();
+  statLabBuilderDeleteBtn.classList.add("hidden");
+  resetStatLabBuilderEvalResult();
+  showStatLabView("builder");
+}
+
+document.getElementById("stat-lab-builder-cancel-btn").addEventListener("click", () => {
+  renderStatLabBrowseList();
+  showStatLabView("browse");
+});
+
+document.getElementById("stat-lab-builder-save-btn").addEventListener("click", () => {
+  const label = statLabBuilderNameInput.value.trim();
+  const description = statLabBuilderDescriptionInput.value.trim();
+  const expression = statLabBuilderExpressionInput.value.trim();
+  const variables = Object.fromEntries(
+    Object.entries(statLabBuilderVariableTargets).filter(([, target]) => target.statId),
+  );
+  const unresolved = parseFormulaVariableNames(expression).filter((name) => !(name in statLabBuilderVariableTargets));
+  if (!label) return alert(t("stat_lab_modal.name_required"));
+  if (!expression) return alert(t("stat_lab_modal.formula_required"));
+  if (unresolved.length > 0) {
+    return alert(t("stat_lab_modal.unresolved_variables_present", { names: unresolved.join(", ") }));
+  }
+  if (Object.keys(statLabBuilderGroupByType).length === 0) {
+    return alert(t("stat_lab_modal.no_variables_yet"));
+  }
+  const missingGroupTypes = Object.entries(statLabBuilderGroupByType)
+    .filter(([, groupId]) => !groupId)
+    .map(([type]) => t(componentTypeI18nKey(type)));
+  if (missingGroupTypes.length > 0) {
+    return alert(t("stat_lab_modal.group_required_per_type", { types: missingGroupTypes.join(", ") }));
+  }
+
+  const formula = { expression, variables };
+  const groups = { ...statLabBuilderGroupByType };
+  if (statLabEditingFamily) {
+    statLabEditingFamily.label = label;
+    statLabEditingFamily.description = description;
+    statLabEditingFamily.formula = formula;
+    statLabEditingFamily.groups = groups;
+  } else {
+    customStatFamilies.push(makeCustomStatFamily(label, formula, groups, description));
+  }
+  saveState();
+  renderStatLabBrowseList();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  showStatLabView("browse");
+});
+
+statLabBuilderDeleteBtn.addEventListener("click", () => {
+  if (!statLabEditingFamily) return;
+  if (!confirm(t("stat_lab_modal.delete_confirm", { name: statLabEditingFamily.label }))) return;
+  const key = statLabEditingFamily.key;
+  customStatFamilies = customStatFamilies.filter((f) => f.id !== statLabEditingFamily.id);
+  // Drop this stat from every stat set that had it selected, on every
+  // component type it was ever registered on -- same "never leave a
+  // dangling key nothing resolves" reasoning deleteCustomStatGroup() above
+  // already applies to a group. The key alone is enough to find every
+  // occurrence regardless of type, since a family's own key never
+  // collides with anything else (see makeCustomStatFamily()'s own
+  // comment).
+  for (const table of componentAnalyzerTables) {
+    for (const statSet of table.statSets) {
+      statSet.selectedStats = (statSet.selectedStats ?? []).filter((k) => k !== key);
+    }
+  }
+  saveState();
+  statLabEditingFamily = null;
+  renderStatLabBrowseList();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  showStatLabView("browse");
+});
+
+// Same evaluation evaluateStatFormula() does, but never swallows the
+// reason for a failure -- used only by the Stat Lab's own Eval button,
+// where surfacing *why* a formula didn't resolve (a missing/unconfigured
+// variable, a math.js syntax error, a non-numeric result) is the entire
+// point. Every other caller goes through evaluateStatFormula() itself,
+// which stays silent/graceful on purpose for normal table rendering.
+function evalStatLabFormulaVerbose(formula, row, context) {
+  const expression = formula.expression.trim();
+  if (!expression) return { ok: false, message: t("stat_lab_modal.eval_empty_formula") };
+  try {
+    math.parse(expression);
+  } catch (err) {
+    return { ok: false, message: t("stat_lab_modal.eval_parse_error", { error: err.message }) };
+  }
+  const scope = {};
+  const aggregateEntries = [];
+  // Same two-pass order as evaluateStatFormula() -- every plain variable
+  // resolves first so an aggregate's own `limit` (naming one of those
+  // plain variables) has a real value in `scope` already.
+  for (const [name, ref] of Object.entries(formula.variables ?? {})) {
+    if (ref.type === "aggregate_ref") {
+      aggregateEntries.push([name, ref]);
+      continue;
+    }
+    const value = resolveFormulaVariable(ref, row, context);
+    if (value === null || value === undefined) {
+      return { ok: false, message: t("stat_lab_modal.eval_missing_variable", { name }) };
+    }
+    scope[name] = value;
+  }
+  for (const [name, ref] of aggregateEntries) {
+    // The "Test against" row DOES join the aggregate when it's the same
+    // component type this aggregate reads (see resolveAggregateVariable()'s
+    // own comment) -- so zero configured mocks is only a real problem when
+    // there's no such row to fall back on either. That specific "nothing
+    // at all to aggregate" case gets its own message naming the actual
+    // type involved, rather than the same generic "no value" wording
+    // every other kind of failure below shares.
+    const rowIsSameType = context?.componentType === ref.componentType;
+    if (!rowIsSameType && resolveMockConfigList(ref.componentType, context).length === 0) {
+      return {
+        ok: false,
+        message: t("stat_lab_modal.eval_missing_aggregate_mocks", { name, type: t(componentTypeI18nKey(ref.componentType)) }),
+      };
+    }
+    const value = resolveAggregateVariable(ref, row, context, aggregateLimitValue(ref, scope));
+    if (value === null || value === undefined) {
+      return { ok: false, message: t("stat_lab_modal.eval_missing_variable", { name }) };
+    }
+    scope[name] = value;
+  }
+  let result;
+  try {
+    result = math.evaluate(expression, scope);
+  } catch (err) {
+    return { ok: false, message: t("stat_lab_modal.eval_expression_error", { error: err.message }) };
+  }
+  if (typeof result !== "number" || Number.isNaN(result)) {
+    return { ok: false, message: t("stat_lab_modal.eval_non_numeric") };
+  }
+  // Same 1-decimal display truncation the table cells use -- see formatStatValue().
+  return { ok: true, value: truncateStatDisplayNumber(result) };
+}
+
+document.getElementById("stat-lab-builder-eval-btn").addEventListener("click", async () => {
+  const previewType = statLabBuilderPreviewType;
+  if (!previewType) {
+    statLabBuilderEvalResult.textContent = t("stat_lab_modal.eval_no_component");
+    statLabBuilderEvalResult.classList.remove("stat-lab-eval-result-ok");
+    statLabBuilderEvalResult.classList.add("stat-lab-eval-result-error");
+    return;
+  }
+  // Builds this stat's own stat_ref/mock_ref split AS SEEN from
+  // `previewType` -- the exact same split statDefFromFamily() would build
+  // for that type once saved, so Eval genuinely previews what that type's
+  // real table would show, not some generic authoring-time approximation.
+  const formula = crossComponentFormula(
+    previewType,
+    statLabBuilderExpressionInput.value.trim(),
+    statLabBuilderVariableTargets,
+  );
+  // Warms componentListCache for every OTHER type this still-unsaved
+  // draft's own variables reference (a mock_ref's mockId, or an
+  // aggregate_ref's own componentType) -- not just previewType (already
+  // warmed by populateStatLabBuilderEvalComponentSelect() for the "Test
+  // against" dropdown itself). A "Full Component"/component_ref mock only
+  // resolves through this same cache (see resolveMockConfigValue()), and
+  // nothing else was guaranteed to have warmed it yet for a type this
+  // draft references but no table/wizard interaction happened to touch
+  // first -- without this, such a mock silently reads as unconfigured
+  // ("has no value...") even though a real mock exists, which is
+  // confusing to debug from the Eval result alone.
+  const referencedTypes = new Set(
+    Object.values(formula.variables)
+      .map((ref) => (ref.type === "mock_ref" ? ref.mockId.split(":")[0] : ref.type === "aggregate_ref" ? ref.componentType : null))
+      .filter(Boolean),
+  );
+  await Promise.all([...referencedTypes].map((type) => fetchComponentList(type)));
+  const wareId = statLabBuilderEvalComponentSelect.value;
+  const row = wareId ? statSourceForComponentType(previewType).get(wareId) : null;
+  const result = !row
+    ? { ok: false, message: t("stat_lab_modal.eval_no_component") }
+    : evalStatLabFormulaVerbose(formula, row, {
+        componentType: previewType,
+        table: null,
+        statSet: null,
+        component: { ware_id: wareId },
+        resolving: new Set(),
+      });
+  statLabBuilderEvalResult.textContent = result.ok ? t("stat_lab_modal.eval_result", { value: result.value }) : result.message;
+  statLabBuilderEvalResult.classList.toggle("stat-lab-eval-result-ok", result.ok);
+  statLabBuilderEvalResult.classList.toggle("stat-lab-eval-result-error", !result.ok);
+});
+
+// For every table whose currently-selected stats resolve at least one
+// formula variable to a missing mock (see resolveMockValue()'s own
+// comment), the set of missing mockIds encountered anywhere in that table
+// -- across every stat set and every row, not just the first one found --
+// grouped by component type for display (see groupMockLabelsByType()).
+// Recomputed fresh each time the Stat Lab modal opens or a stat/mock
+// changes (same small-scale reasoning as collectAllConfiguredMockEntries())
+// rather than tracked incrementally.
+function collectMissingMocksByTable() {
+  const results = [];
+  for (const table of componentAnalyzerTables) {
+    const catalog = statCatalogForComponentType(table.componentType);
+    if (!catalog) continue;
+    const statSource = statSourceForComponentType(table.componentType);
+    const missingMockIds = new Set();
+    for (const statSet of table.statSets) {
+      const defs = (statSet.selectedStats ?? [])
+        .map((key) => catalog.definitions.find((d) => d.key === key))
+        .filter((def) => def?.formula);
+      if (defs.length === 0) continue;
+      for (const component of table.components) {
+        const sourceRow = statSource.get(component.ware_id);
+        const context = { componentType: table.componentType, table, statSet, component, resolving: new Set() };
+        for (const def of defs) {
+          const missingMocks = new Set();
+          resolveStatValue(def, sourceRow, { ...context, missingMocks });
+          for (const mockId of missingMocks) missingMockIds.add(mockId);
+        }
+      }
+    }
+    if (missingMockIds.size > 0) {
+      results.push({
+        tableName: table.title.trim() || t(componentTypeI18nKey(table.componentType)),
+        groups: groupMockLabelsByType([...missingMockIds]),
+      });
+    }
+  }
+  return results;
+}
+
+// The Statistics Lab's own standing warning -- see
+// .stat-lab-missing-mocks-summary's own comment in style.css for why this
+// lives outside all three views instead of inside just one of them.
+// Refreshed on modal open and after anything that could change which
+// mocks are missing (a stat's own formula/selection changing, or a mock
+// itself being added/removed/edited).
+function renderStatLabMissingMocksSummary() {
+  const results = collectMissingMocksByTable();
+  statLabMissingMocksSummaryEl.classList.toggle("hidden", results.length === 0);
+  statLabMissingMocksSummaryEl.innerHTML = "";
+  if (results.length === 0) return;
+
+  const heading = document.createElement("div");
+  heading.className = "stat-lab-missing-mocks-heading";
+  heading.textContent = t("stat_lab_modal.missing_mocks_heading");
+  statLabMissingMocksSummaryEl.appendChild(heading);
+
+  for (const { tableName, groups } of results) {
+    const tableBlock = document.createElement("div");
+    tableBlock.className = "stat-lab-missing-mocks-table";
+    const tableNameEl = document.createElement("div");
+    tableNameEl.className = "stat-lab-missing-mocks-table-name";
+    tableNameEl.textContent = tableName;
+    tableBlock.appendChild(tableNameEl);
+    for (const group of groups) {
+      const line = document.createElement("div");
+      line.className = "stat-lab-missing-mocks-line";
+      line.textContent = `${group.typeName}: ${group.labels.join(", ")}`;
+      tableBlock.appendChild(line);
+    }
+    statLabMissingMocksSummaryEl.appendChild(tableBlock);
+  }
+}
+
+// ---- Mocks view ----
+// Reorganized around SCOPE, not around each individual mock -- one section
+// per actual scope instance (Global; each table with anything configured
+// at its own table/row level; each stat-set tab with anything configured
+// at tab/tab-row level), each listing every mock configured at exactly
+// that scope. The old per-mock-card layout inverted this (one card per
+// mockId, showing every scope it happened to be overridden at inside that
+// one card) -- this is the other way around, which is what actually
+// matches how a user thinks about it ("what have I configured for this
+// table's own Flight tab", not "where has Forward Thrust been mocked").
+
+// The plain object a given scope's own mocks actually live in -- created
+// on first write (`??=`) rather than up front, so a table/statSet that's
+// never had a mock configured doesn't carry empty {}/{}s forever. See
+// resolveMockValue()'s own comment for why table/tab live directly on the
+// table/statSet object (already persisted wholesale) while row/tab-row
+// nest one level deeper by ware_id.
+function mockConfigMapFor(scope) {
+  if (scope.level === "global") return globalStatMocks;
+  if (scope.level === "table") return (scope.table.statMocks ??= {});
+  if (scope.level === "tab") return (scope.statSet.statMocks ??= {});
+  if (scope.level === "row") {
+    scope.table.rowStatMocks ??= {};
+    return (scope.table.rowStatMocks[scope.wareId] ??= {});
+  }
+  // "tabRow"
+  scope.statSet.rowStatMocks ??= {};
+  return (scope.statSet.rowStatMocks[scope.wareId] ??= {});
+}
+
+// Every mock currently configured anywhere, as a flat {scope, mockId,
+// config, index?}[] -- scanned fresh from componentAnalyzerTables plus
+// globalStatMocks each time (no separate index to keep in sync, and the
+// total number of tables/tabs/rows/mocks is always small). Covers BOTH
+// individual-stat mocks ("<componentType>:<statId>", a single config, no
+// `index`) and "full component" ones (bare componentType, stored as a
+// list -- see asConfigList()'s own comment) -- distinguished purely by
+// whether mockId contains ":" (see buildMockEntryRow()). A full-component
+// key expands into one entry PER list element, each carrying its own
+// `index` into that list (needed to edit/remove exactly that one entry
+// without touching its siblings).
+function collectAllConfiguredMockEntries() {
+  const entries = [];
+  const pushAll = (map, scope) => {
+    for (const [mockId, value] of Object.entries(map ?? {})) {
+      asConfigList(value).forEach((config, index) => entries.push({ scope, mockId, config, index }));
+    }
+  };
+  pushAll(globalStatMocks, { level: "global" });
+  for (const table of componentAnalyzerTables) {
+    pushAll(table.statMocks, { level: "table", table });
+    for (const [wareId, mocks] of Object.entries(table.rowStatMocks ?? {})) {
+      pushAll(mocks, { level: "row", table, wareId });
+    }
+    for (const statSet of table.statSets) {
+      pushAll(statSet.statMocks, { level: "tab", table, statSet });
+      for (const [wareId, mocks] of Object.entries(statSet.rowStatMocks ?? {})) {
+        pushAll(mocks, { level: "tabRow", table, statSet, wareId });
+      }
+    }
+  }
+  return entries;
+}
+
+// Every componentType a mock's own "component_ref" value could ever need
+// to resolve through statSourceForComponentType()/fetchComponentList() --
+// either because some formula's mock_ref variable names it, or because a
+// mock is already configured for it somewhere (the Add Mock wizard lets a
+// mock be configured ahead of any formula actually needing it yet, unlike
+// the old per-mockId-card Mocks view, which only ever showed inputs a real
+// formula needed -- see restorePersistedState()'s own warm-cache use of
+// this).
+function collectMockRelevantComponentTypes() {
+  const types = new Set();
+  for (const type of COMPONENT_TYPES) {
+    for (const def of allStatDefsForComponentType(type.id)) {
+      for (const ref of Object.values(def.formula?.variables ?? {})) {
+        if (ref.type === "mock_ref") types.add(ref.mockId.split(":")[0]);
+        else if (ref.type === "aggregate_ref") types.add(ref.componentType);
+      }
+    }
+  }
+  for (const entry of collectAllConfiguredMockEntries()) types.add(entry.mockId.split(":")[0]);
+  return [...types];
+}
+
+// A scope's own display label, e.g. "Global", "Table: Engines Comparison",
+// "Table: Engines Comparison / Tab: Flight Model" -- shared by section
+// headers and the Add Mock wizard's own validation messages.
+function scopeLabel(scope) {
+  if (scope.level === "ambient") return t("stat_lab_modal.mock_scope_ambient");
+  if (scope.level === "global") return t("stat_lab_modal.mock_scope_global");
+  const tableName = scope.table.title.trim() || t(componentTypeI18nKey(scope.table.componentType));
+  if (scope.level === "table") return t("stat_lab_modal.mock_scope_table", { table: tableName });
+  const tabName = scope.statSet ? scope.statSet.name.trim() || defaultNewStatSetLabel() : null;
+  const componentName = scope.wareId
+    ? (scope.table.components.find((c) => c.ware_id === scope.wareId)?.name ?? scope.wareId)
+    : null;
+  if (scope.level === "tab") return t("stat_lab_modal.mock_scope_tab", { table: tableName, tab: tabName });
+  if (scope.level === "row") return t("stat_lab_modal.mock_scope_row", { table: tableName, component: componentName });
+  return t("stat_lab_modal.mock_scope_tab_row", { table: tableName, tab: tabName, component: componentName });
+}
+
+// A stable identity for one scope INSTANCE (not just its level) -- groups
+// collectAllConfiguredMockEntries()'s own flat list back into one section
+// per actual scope, e.g. every mock configured on "Table X's own Tab Y"
+// lands in the same section regardless of which stat each one is for.
+function scopeIdentityKey(scope) {
+  if (scope.level === "global") return "global";
+  const parts = [scope.level, scope.table.id];
+  if (scope.statSet) parts.push("tab", scope.statSet.id);
+  if (scope.wareId) parts.push("row", scope.wareId);
+  return parts.join(":");
+}
+
+// A reusable {mode select -> number input | component display+pick
+// button} control -- shared by an already-configured mock's own row (see
+// buildMockEntryRow()) and the Add Mock wizard's own stat-value step.
+// `initialConfig` seeds the starting mode/value; `onChange(config|null)`
+// fires on every edit (null meaning "cleared back to unset"), including a
+// component picked via the button (async, through the same
+// filterable/searchable picker "Select Components" itself uses -- see
+// pickComponentForMock()).
+function buildMockValueControl(componentType, initialConfig, onChange) {
+  const wrap = document.createElement("span");
+  wrap.className = "stat-lab-mock-value-control";
+
+  const modeSelect = document.createElement("select");
+  fillSelectOptions(
+    modeSelect,
+    [
+      { value: "literal", label: t("stat_lab_modal.mock_mode_literal") },
+      { value: "component_ref", label: t("stat_lab_modal.mock_mode_component") },
+    ],
+    initialConfig?.type ?? "literal",
+  );
+
+  const numberInput = document.createElement("input");
+  numberInput.type = "number";
+  numberInput.step = "any";
+  numberInput.className = "stat-lab-mock-number-input";
+  if (initialConfig?.type === "literal" && initialConfig.value !== null && initialConfig.value !== undefined) {
+    numberInput.value = initialConfig.value;
+  }
+
+  const componentDisplay = document.createElement("span");
+  componentDisplay.className = "stat-lab-mock-wizard-display";
+  const pickBtn = document.createElement("button");
+  pickBtn.type = "button";
+  pickBtn.textContent = t("stat_lab_modal.pick_component_btn");
+
+  let currentWareId = initialConfig?.type === "component_ref" ? initialConfig.wareId : null;
+
+  function updateComponentDisplay() {
+    if (!currentWareId) {
+      componentDisplay.textContent = t("stat_lab_modal.mock_no_component_picked");
+      return;
+    }
+    const row = statSourceForComponentType(componentType).get(currentWareId);
+    componentDisplay.textContent = row ? row.name : currentWareId;
+  }
+  updateComponentDisplay();
+
+  function syncVisibility() {
+    const literal = modeSelect.value === "literal";
+    numberInput.classList.toggle("hidden", !literal);
+    componentDisplay.classList.toggle("hidden", literal);
+    pickBtn.classList.toggle("hidden", literal);
+  }
+  syncVisibility();
+
+  modeSelect.addEventListener("change", () => {
+    syncVisibility();
+    if (modeSelect.value === "literal") {
+      const value = parseFloat(numberInput.value);
+      onChange(Number.isNaN(value) ? null : { type: "literal", value });
+    } else {
+      onChange(currentWareId ? { type: "component_ref", wareId: currentWareId } : null);
+    }
+  });
+  numberInput.addEventListener("change", () => {
+    const value = parseFloat(numberInput.value);
+    onChange(Number.isNaN(value) ? null : { type: "literal", value });
+  });
+  pickBtn.addEventListener("click", async () => {
+    await fetchComponentList(componentType);
+    const wareId = await pickComponentForMock(componentType);
+    if (!wareId) return;
+    currentWareId = wareId;
+    updateComponentDisplay();
+    onChange({ type: "component_ref", wareId });
+  });
+
+  wrap.append(modeSelect, numberInput, componentDisplay, pickBtn);
+  return wrap;
+}
+
+// The "full component" mock's own simpler value control -- always a
+// component_ref, no literal-number option at all (a single number can't
+// sensibly stand in for "every stat of this type" the way it can for one
+// specific stat -- see the "Full Component" mock type's own comment where
+// it's produced, in the Add Mock wizard below).
+function buildFullComponentValueControl(componentType, initialWareId, onChange) {
+  const wrap = document.createElement("span");
+  wrap.className = "stat-lab-mock-value-control";
+
+  const componentDisplay = document.createElement("span");
+  componentDisplay.className = "stat-lab-mock-wizard-display";
+  const pickBtn = document.createElement("button");
+  pickBtn.type = "button";
+  pickBtn.textContent = t("stat_lab_modal.pick_component_btn");
+
+  let currentWareId = initialWareId ?? null;
+  function updateDisplay() {
+    if (!currentWareId) {
+      componentDisplay.textContent = t("stat_lab_modal.mock_no_component_picked");
+      return;
+    }
+    const row = statSourceForComponentType(componentType).get(currentWareId);
+    componentDisplay.textContent = row ? row.name : currentWareId;
+  }
+  updateDisplay();
+
+  pickBtn.addEventListener("click", async () => {
+    await fetchComponentList(componentType);
+    const wareId = await pickComponentForMock(componentType);
+    if (!wareId) return;
+    currentWareId = wareId;
+    updateDisplay();
+    onChange(wareId);
+  });
+
+  wrap.append(componentDisplay, pickBtn);
+  return wrap;
+}
+
+// How many identical instances a full-component mock entry's own ware
+// stands in for (see asConfigList()'s own comment on the config's `count`
+// field) -- a plain number input, 1-999, defaulting to and never going
+// below 1 (there's no such thing as "0 of" an entry; delete it instead).
+// `initialCount` undefined/1 both render as a bare "1" (the common case,
+// no visual clutter for the vast majority of mocks that are just one of
+// something). `onChange(count)` fires on blur/Enter, same discrete-commit
+// convention as this view's other inline edits, not live per-keystroke.
+// `disabled` renders a greyed-out, inert copy of this control instead of a
+// live one -- used for a group-mode entry's row (see buildMockEntryRow()),
+// which has no real flat `count` of its own (its count comes from the
+// separate Per-group/Number-of-groups line below), but still shows this
+// placeholder in the same column so every entry's row -- group-mode or
+// not -- lines up (label | ware picker | count box | move/remove).
+function buildMockCountControl(initialCount, onChange, disabled = false) {
+  const wrap = document.createElement("span");
+  wrap.className = disabled ? "stat-lab-mock-count-control stat-lab-mock-count-control-disabled" : "stat-lab-mock-count-control";
+  const label = document.createElement("span");
+  label.className = "stat-lab-mock-count-label";
+  label.textContent = "×";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "stat-lab-mock-count-input";
+  input.min = "1";
+  input.step = "1";
+  input.title = disabled ? t("stat_lab_modal.mock_count_disabled_tooltip") : t("stat_lab_modal.mock_count_tooltip");
+  if (disabled) {
+    // Left blank, not defaulted to "1" -- this box doesn't affect the
+    // entry's real count (see this function's own comment), and showing
+    // a "1" here would look like a live value rather than a non-op.
+    input.value = "";
+    input.disabled = true;
+    wrap.append(label, input);
+    return wrap;
+  }
+  input.value = String(Math.max(1, Math.floor(initialCount ?? 1)));
+  const commit = () => {
+    const count = Math.max(1, Math.floor(Number(input.value)) || 1);
+    input.value = String(count);
+    onChange(count);
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") input.blur();
+  });
+  wrap.append(label, input);
+  return wrap;
+}
+
+// Group-mode counterpart to buildMockCountControl() -- two inputs (per
+// group, number of groups) instead of one flat count. A group-mode entry
+// claims whole chassis groups in this mock list's own priority order (see
+// resolveGroupAggregateVariable()), the same FIFO-by-list-position rule
+// every other mock list already uses -- so an entry meant to land on a
+// multi-slot group (e.g. an L/XL hull's engine-attached shield group) needs
+// to be listed BEFORE any flat entries that would otherwise claim that same
+// group first using only 1 of its slots. The tooltip on both inputs calls
+// this out since it's easy to miss (bit us once: a group-mode entry placed
+// last in the list silently landed on a 1-slot turret group instead of the
+// intended 6-slot engine group).
+function buildMockGroupCountControl(initialPerGroup, initialGroupCount, onChange) {
+  const wrap = document.createElement("span");
+  wrap.className = "stat-lab-mock-count-control stat-lab-mock-group-count-control";
+  const tooltip = t("stat_lab_modal.mock_group_order_tooltip");
+
+  const perGroupLabel = document.createElement("span");
+  perGroupLabel.className = "stat-lab-mock-count-label";
+  perGroupLabel.textContent = t("stat_lab_modal.mock_wizard_per_group_count_label");
+  const perGroupInput = document.createElement("input");
+  perGroupInput.type = "number";
+  perGroupInput.className = "stat-lab-mock-count-input";
+  perGroupInput.min = "1";
+  perGroupInput.step = "1";
+  perGroupInput.value = String(Math.max(1, Math.floor(initialPerGroup ?? 1)));
+  perGroupInput.title = tooltip;
+
+  const groupLabel = document.createElement("span");
+  groupLabel.className = "stat-lab-mock-count-label";
+  groupLabel.textContent = "×";
+  const groupInput = document.createElement("input");
+  groupInput.type = "number";
+  groupInput.className = "stat-lab-mock-count-input";
+  groupInput.min = "1";
+  groupInput.step = "1";
+  groupInput.value = String(Math.max(1, Math.floor(initialGroupCount ?? 1)));
+  groupInput.title = tooltip;
+
+  const groupsLabel = document.createElement("span");
+  groupsLabel.className = "stat-lab-mock-count-label";
+  groupsLabel.textContent = t("stat_lab_modal.mock_wizard_group_count_label");
+
+  const commit = () => {
+    const perGroup = Math.max(1, Math.floor(Number(perGroupInput.value)) || 1);
+    const groups = Math.max(1, Math.floor(Number(groupInput.value)) || 1);
+    perGroupInput.value = String(perGroup);
+    groupInput.value = String(groups);
+    onChange(perGroup, groups);
+  };
+  perGroupInput.addEventListener("blur", commit);
+  groupInput.addEventListener("blur", commit);
+  perGroupInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") perGroupInput.blur();
+  });
+  groupInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") groupInput.blur();
+  });
+
+  wrap.append(perGroupLabel, perGroupInput, groupLabel, groupInput, groupsLabel);
+  wrap.title = tooltip;
+  return wrap;
+}
+
+// One already-configured mock's own row within a scope section -- label,
+// its own value control, and a remove button. `mockId` containing ":"
+// means an individual-stat mock (see mockLabel()), a single scalar config
+// -- `index` is always undefined there. A bare componentType means a
+// "full component" one, one row per entry in that componentType's own
+// list (see asConfigList()'s own comment); `index` is that entry's
+// position in the list, so edit/remove touch exactly that entry and leave
+// its siblings alone. When more than one entry exists for the same
+// (scope, componentType), the label gets a "#N" suffix so an aggregate
+// variable's "sum of every Shield mock here" reads as the list it is,
+// not a single ambiguous "Shield" row repeated.
+function buildMockEntryRow(scope, mockId, config, index) {
+  const row = document.createElement("div");
+  row.className = "stat-lab-mock-entry-row";
+  const isFullComponent = !mockId.includes(":");
+  const componentType = mockId.split(":")[0];
+  const configMap = mockConfigMapFor(scope);
+  const list = asConfigList(configMap[mockId]);
+  const persist = (rerenderView) => {
+    saveState();
+    renderComponentAnalyzerTables();
+    renderStatLabMissingMocksSummary();
+    if (rerenderView) renderStatLabMocksView();
+  };
+
+  // Lets a full-component mock carry its own applied mod, exactly like a
+  // real Component Analyzer row -- same buildModLabButton()/
+  // openModLabModal() machinery, just pointed at this entry's own config
+  // object (`config`, the live array element itself, not a copy) as
+  // `component` instead of a table row, and `table: null` since a
+  // standalone mock has no real table-wide default to fall back to (see
+  // resolveMockConfigValue()'s own comment for the matching read-side
+  // change). wareName comes from this mocked ware's own real display
+  // name, same lookup buildFullComponentValueControl() already shows in
+  // its own picker. Leads the row (before the label) rather than
+  // trailing it -- same small 20px/16px-icon "row" variant the
+  // Component Analyzer's own per-row launcher uses
+  // (.component-analyzer-mod-lab-btn-row), just left-aligned here
+  // instead of pushed to the row's far end (see
+  // .stat-lab-mock-mod-lab-btn's own comment in style.css for why the
+  // base class's own margin-left: auto needs overriding for that).
+  if (isFullComponent && config) {
+    const wareName = statSourceForComponentType(componentType).get(config.wareId)?.name ?? null;
+    const modLabBtn = buildModLabButton(wareName, componentType, config.wareId, null, config);
+    modLabBtn.classList.add("component-analyzer-mod-lab-btn-row", "stat-lab-mock-mod-lab-btn");
+    row.appendChild(modLabBtn);
+  }
+
+  // Every mock key is an ordered PRIORITY list (see resolveMockValue()):
+  // "#N" in the label is that entry's position, and the arrows reorder it.
+  const label = document.createElement("span");
+  label.className = "stat-lab-mock-entry-label";
+  if (isFullComponent) {
+    const typeLabel = t(componentTypeI18nKey(componentType));
+    label.textContent =
+      list.length > 1
+        ? t("stat_lab_modal.mock_full_component_label_indexed", { type: typeLabel, index: index + 1 })
+        : t("stat_lab_modal.mock_full_component_label", { type: typeLabel });
+  } else {
+    label.textContent = list.length > 1 ? `${mockLabel(mockId)} #${index + 1}` : mockLabel(mockId);
+  }
+  row.appendChild(label);
+
+  // A group-mode entry's own real count (Per group x Number of groups)
+  // goes on its own line below this row -- captured here (not appended
+  // yet) so it can be appended after the move/remove buttons below. The
+  // row itself still gets a disabled placeholder count box in the normal
+  // position (see buildMockCountControl()'s own comment) purely so every
+  // entry's row -- group-mode or not -- lines up column for column.
+  let groupCountControl = null;
+  if (isFullComponent) {
+    row.appendChild(
+      buildFullComponentValueControl(componentType, config?.wareId, (wareId) => {
+        const current = asConfigList(configMap[mockId]);
+        // Preserves this entry's own count/group-mode fields -- picking a
+        // different ware for an existing "3x ..." or group-mode entry
+        // should keep that shape, not reset back down to a bare 1.
+        current[index] = { ...current[index], type: "component_ref", wareId };
+        configMap[mockId] = current;
+        persist(false);
+      }),
+    );
+    if (config?.groupMode) {
+      row.appendChild(buildMockCountControl(1, () => {}, true));
+      groupCountControl = buildMockGroupCountControl(config?.perGroupCount, config?.groupCount, (perGroupCount, groupCount) => {
+        const current = asConfigList(configMap[mockId]);
+        current[index] = { ...current[index], perGroupCount, groupCount };
+        configMap[mockId] = current;
+        persist(false);
+      });
+    } else {
+      row.appendChild(
+        buildMockCountControl(config?.count, (count) => {
+          const current = asConfigList(configMap[mockId]);
+          current[index] = { ...current[index], count };
+          configMap[mockId] = current;
+          persist(false);
+        }),
+      );
+    }
+  } else {
+    row.appendChild(
+      buildMockValueControl(componentType, config, (newConfig) => {
+        const current = asConfigList(configMap[mockId]);
+        if (newConfig) current[index] = newConfig;
+        else current.splice(index, 1);
+        if (current.length === 0) delete configMap[mockId];
+        else configMap[mockId] = current;
+        persist(false);
+      }),
+    );
+  }
+
+  const makeMoveButton = (glyph, tooltipKey, offset) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = glyph;
+    btn.title = t(tooltipKey);
+    btn.className = "stat-lab-mock-move-btn";
+    const target = index + offset;
+    btn.disabled = target < 0 || target >= list.length;
+    btn.addEventListener("click", () => {
+      const current = asConfigList(configMap[mockId]);
+      [current[index], current[target]] = [current[target], current[index]];
+      configMap[mockId] = current;
+      persist(true);
+    });
+    return btn;
+  };
+  const moveUpBtn = makeMoveButton("▲", "stat_lab_modal.mock_move_up_tooltip", -1);
+  const moveDownBtn = makeMoveButton("▼", "stat_lab_modal.mock_move_down_tooltip", 1);
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.textContent = "×";
+  removeBtn.title = t("stat_lab_modal.remove_override_tooltip");
+  removeBtn.addEventListener("click", () => {
+    const current = asConfigList(configMap[mockId]);
+    current.splice(index, 1);
+    if (current.length === 0) delete configMap[mockId];
+    else configMap[mockId] = current;
+    persist(true);
+  });
+
+  row.append(moveUpBtn, moveDownBtn, removeBtn);
+
+  if (groupCountControl) {
+    const groupLine = document.createElement("div");
+    groupLine.className = "stat-lab-mock-group-count-line";
+    groupLine.appendChild(groupCountControl);
+    row.appendChild(groupLine);
+  }
+
+  return row;
+}
+
+// Which scopes' own sections are currently collapsed in the Mocked Stats
+// modal -- keyed by scopeIdentityKey() (the same stable per-scope-instance
+// key collectAllConfiguredMockEntries() groups entries by), not persisted
+// across a reload, same ephemeral-UI-state spirit as
+// statSelectExpandedGroups above. A collapsed scope still shows its own
+// header (title, Add Mock, Copy to New Scope) -- only the entry list (or
+// the "nothing configured" placeholder) is hidden, so collapsing a scope
+// never blocks adding to it.
+let collapsedMockScopes = new Set();
+
+function buildMockSection(scope, entries) {
+  const section = document.createElement("div");
+  section.className = "stat-lab-mock-section";
+
+  const key = scopeIdentityKey(scope);
+  const collapsed = collapsedMockScopes.has(key);
+
+  const header = document.createElement("div");
+  header.className = "stat-lab-mock-section-header";
+  const collapseBtn = document.createElement("button");
+  collapseBtn.type = "button";
+  collapseBtn.className = "cart-loadout-toggle-btn stat-lab-mock-section-collapse-btn";
+  collapseBtn.textContent = collapsed ? "+" : "−";
+  collapseBtn.title = t(collapsed ? "stat_lab_modal.expand_scope_tooltip" : "stat_lab_modal.collapse_scope_tooltip");
+  collapseBtn.addEventListener("click", () => {
+    if (collapsed) collapsedMockScopes.delete(key);
+    else collapsedMockScopes.add(key);
+    renderStatLabMocksView();
+  });
+  header.appendChild(collapseBtn);
+  const titleEl = document.createElement("span");
+  titleEl.textContent = scopeLabel(scope);
+  header.appendChild(titleEl);
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "stat-lab-mock-section-add-btn";
+  addBtn.textContent = "+";
+  addBtn.title = t("stat_lab_modal.add_mock_in_scope_tooltip");
+  addBtn.addEventListener("click", () => openMockWizard(scope));
+  header.appendChild(addBtn);
+  if (entries.length > 0) {
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "stat-lab-mock-section-copy-btn";
+    copyBtn.textContent = t("stat_lab_modal.copy_scope_btn");
+    copyBtn.title = t("stat_lab_modal.copy_scope_tooltip");
+    copyBtn.addEventListener("click", () => openCopyScopeWizard(scope));
+    header.appendChild(copyBtn);
+  }
+  section.appendChild(header);
+
+  if (collapsed) return section;
+
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "stat-lab-browse-empty";
+    empty.textContent = t("stat_lab_modal.no_mocks_in_scope");
+    section.appendChild(empty);
+    return section;
+  }
+
+  const list = document.createElement("div");
+  list.className = "stat-lab-mock-section-list";
+  for (const { mockId, config, index } of entries) list.appendChild(buildMockEntryRow(scope, mockId, config, index));
+  section.appendChild(list);
+  return section;
+}
+
+// Global always gets its own section, even empty (it's the one scope with
+// no enumeration needed, and the most common place to configure a
+// sensible default) -- every other scope only gets a section once
+// something is actually configured there, since there could otherwise be
+// one empty section per table/tab/row in the whole Component Analyzer.
+function renderStatLabMocksView() {
+  statLabMocksSectionsEl.innerHTML = "";
+  const sections = new Map();
+  sections.set("global", { scope: { level: "global" }, entries: [] });
+  for (const entry of collectAllConfiguredMockEntries()) {
+    const key = scopeIdentityKey(entry.scope);
+    if (!sections.has(key)) sections.set(key, { scope: entry.scope, entries: [] });
+    sections.get(key).entries.push(entry);
+  }
+  for (const { scope, entries } of sections.values()) {
+    statLabMocksSectionsEl.appendChild(buildMockSection(scope, entries));
+  }
+}
+
+// ---- Add Mock wizard ----
+// A brand new mock's own working state while the wizard is open --
+// discarded on Cancel/Add, never partially persisted. mockWizardStatKey is
+// only used for an "Individual Stat" mock; mockWizardFullComponentWareId
+// only for a "Full Component" one.
+let mockWizardComponentType = null;
+let mockWizardStatKey = null;
+let mockWizardValueConfig = null;
+let mockWizardFullComponentWareId = null;
+
+function currentMockWizardTable() {
+  return componentAnalyzerTables.find((table) => String(table.id) === statLabMockWizardTableSelect.value) ?? null;
+}
+
+function syncMockWizardTableDependents() {
+  const table = currentMockWizardTable();
+  fillSelectOptions(
+    statLabMockWizardTabSelect,
+    (table?.statSets ?? []).map((statSet) => ({
+      value: String(statSet.id),
+      label: statSet.name.trim() || defaultNewStatSetLabel(),
+    })),
+  );
+  fillSelectOptions(
+    statLabMockWizardRowSelect,
+    (table?.components ?? []).map((component) => ({ value: component.ware_id, label: component.name })),
+  );
+}
+statLabMockWizardTableSelect.addEventListener("change", syncMockWizardTableDependents);
+
+// Picking a scope level/mock type here doesn't itself write anything --
+// it only decides which fields show, so a half-picked wizard is never
+// accidentally applied (see the Add button's own handler for the actual
+// write).
+// Only shield/turret full-component mocks can be "group mode" -- the two
+// types GET /api/ships/{id}/groups actually has a real group breakdown
+// for (see chassisGroupsFor()/orderedChassisGroups() and
+// resolveGroupAggregateVariable()'s own comment) -- an engine/thruster/
+// weapon mock stays plain-count-only.
+const GROUP_MODE_COMPONENT_TYPES = new Set(["shield", "turret"]);
+
+function syncMockWizardVisibility() {
+  const level = statLabMockWizardLevelSelect.value;
+  statLabMockWizardTableSelect.classList.toggle("hidden", level === "global");
+  statLabMockWizardTabSelect.classList.toggle("hidden", !(level === "tab" || level === "tabRow"));
+  statLabMockWizardRowSelect.classList.toggle("hidden", !(level === "row" || level === "tabRow"));
+
+  const isStat = statLabMockWizardTypeSelect.value === "stat";
+  statLabMockWizardStatRow.classList.toggle("hidden", !isStat);
+  statLabMockWizardValueRow.classList.toggle("hidden", !isStat);
+  statLabMockWizardFullComponentRow.classList.toggle("hidden", isStat);
+
+  const groupCapable = !isStat && GROUP_MODE_COMPONENT_TYPES.has(mockWizardComponentType);
+  statLabMockWizardGroupModeRow.classList.toggle("hidden", !groupCapable);
+  const groupMode = groupCapable && statLabMockWizardGroupModeCheckbox.checked;
+  statLabMockWizardCountRow.classList.toggle("hidden", isStat || groupMode);
+  statLabMockWizardGroupCountsRow.classList.toggle("hidden", !groupMode);
+}
+statLabMockWizardLevelSelect.addEventListener("change", syncMockWizardVisibility);
+statLabMockWizardGroupModeCheckbox.addEventListener("change", syncMockWizardVisibility);
+
+function resetMockWizardPicks() {
+  mockWizardStatKey = null;
+  mockWizardValueConfig = null;
+  mockWizardFullComponentWareId = null;
+  statLabMockWizardFullComponentCountInput.value = "1";
+  statLabMockWizardGroupModeCheckbox.checked = false;
+  statLabMockWizardPerGroupCountInput.value = "1";
+  statLabMockWizardGroupCountInput.value = "1";
+  renderMockWizardStatDisplay();
+  renderMockWizardValueDisplay();
+  renderMockWizardFullComponentDisplay();
+}
+
+statLabMockWizardTypeSelect.addEventListener("change", () => {
+  resetMockWizardPicks();
+  syncMockWizardVisibility();
+});
+statLabMockWizardComponentTypeSelect.addEventListener("change", () => {
+  mockWizardComponentType = statLabMockWizardComponentTypeSelect.value;
+  resetMockWizardPicks();
+  syncMockWizardVisibility();
+});
+
+function renderMockWizardStatDisplay() {
+  const def = mockWizardStatKey ? lookupStatDef(mockWizardComponentType, mockWizardStatKey) : null;
+  statLabMockWizardStatDisplay.textContent = def ? statDefLabel(def) : t("stat_lab_modal.mock_no_stat_picked");
+}
+document.getElementById("stat-lab-mock-wizard-pick-stat-btn").addEventListener("click", async () => {
+  const statKey = await pickStatForMock(mockWizardComponentType);
+  if (!statKey) return;
+  mockWizardStatKey = statKey;
+  renderMockWizardStatDisplay();
+});
+
+function syncMockWizardValueModeVisibility() {
+  const literal = statLabMockWizardValueModeSelect.value === "literal";
+  statLabMockWizardNumberInput.classList.toggle("hidden", !literal);
+  statLabMockWizardValueComponentDisplay.classList.toggle("hidden", literal);
+  document.getElementById("stat-lab-mock-wizard-pick-value-component-btn").classList.toggle("hidden", literal);
+}
+function renderMockWizardValueDisplay() {
+  statLabMockWizardValueModeSelect.value = mockWizardValueConfig?.type ?? "literal";
+  statLabMockWizardNumberInput.value =
+    mockWizardValueConfig?.type === "literal" && mockWizardValueConfig.value !== null && mockWizardValueConfig.value !== undefined
+      ? mockWizardValueConfig.value
+      : "";
+  syncMockWizardValueModeVisibility();
+  if (mockWizardValueConfig?.type === "component_ref" && mockWizardValueConfig.wareId) {
+    const row = statSourceForComponentType(mockWizardComponentType).get(mockWizardValueConfig.wareId);
+    statLabMockWizardValueComponentDisplay.textContent = row ? row.name : mockWizardValueConfig.wareId;
+  } else {
+    statLabMockWizardValueComponentDisplay.textContent = t("stat_lab_modal.mock_no_component_picked");
+  }
+}
+statLabMockWizardValueModeSelect.addEventListener("change", () => {
+  mockWizardValueConfig =
+    statLabMockWizardValueModeSelect.value === "literal"
+      ? { type: "literal", value: null }
+      : { type: "component_ref", wareId: null };
+  renderMockWizardValueDisplay();
+});
+statLabMockWizardNumberInput.addEventListener("input", () => {
+  const value = parseFloat(statLabMockWizardNumberInput.value);
+  mockWizardValueConfig = { type: "literal", value: Number.isNaN(value) ? null : value };
+});
+document.getElementById("stat-lab-mock-wizard-pick-value-component-btn").addEventListener("click", async () => {
+  await fetchComponentList(mockWizardComponentType);
+  const wareId = await pickComponentForMock(mockWizardComponentType);
+  if (!wareId) return;
+  mockWizardValueConfig = { type: "component_ref", wareId };
+  renderMockWizardValueDisplay();
+});
+
+function renderMockWizardFullComponentDisplay() {
+  if (mockWizardFullComponentWareId) {
+    const row = statSourceForComponentType(mockWizardComponentType).get(mockWizardFullComponentWareId);
+    statLabMockWizardFullComponentDisplay.textContent = row ? row.name : mockWizardFullComponentWareId;
+  } else {
+    statLabMockWizardFullComponentDisplay.textContent = t("stat_lab_modal.mock_no_component_picked");
+  }
+}
+document.getElementById("stat-lab-mock-wizard-pick-full-component-btn").addEventListener("click", async () => {
+  await fetchComponentList(mockWizardComponentType);
+  const wareId = await pickComponentForMock(mockWizardComponentType);
+  if (!wareId) return;
+  mockWizardFullComponentWareId = wareId;
+  renderMockWizardFullComponentDisplay();
+});
+
+// `scope` (optional): pre-fills the level/table/tab/row selects to match an
+// EXISTING section's own scope -- the "+" button on that section's own
+// header (see buildMockSection()) -- instead of always starting back at
+// Global, so adding a second mock to the same already-open scope doesn't
+// require re-picking the table/tab/row by hand every time.
+function openMockWizard(scope) {
+  fillSelectOptions(statLabMockWizardLevelSelect, [
+    { value: "global", label: t("stat_lab_modal.mock_scope_level_global") },
+    { value: "table", label: t("stat_lab_modal.mock_scope_level_table") },
+    { value: "tab", label: t("stat_lab_modal.mock_scope_level_tab") },
+    { value: "row", label: t("stat_lab_modal.mock_scope_level_row") },
+    { value: "tabRow", label: t("stat_lab_modal.mock_scope_level_tab_row") },
+  ]);
+  fillSelectOptions(
+    statLabMockWizardTableSelect,
+    componentAnalyzerTables.map((table) => ({
+      value: String(table.id),
+      label: table.title.trim() || t(componentTypeI18nKey(table.componentType)),
+    })),
+  );
+  if (scope?.table) statLabMockWizardTableSelect.value = String(scope.table.id);
+  syncMockWizardTableDependents();
+  if (scope?.statSet) statLabMockWizardTabSelect.value = String(scope.statSet.id);
+  if (scope?.wareId) statLabMockWizardRowSelect.value = scope.wareId;
+  // "component" (Full Component) is the default pick, not "stat" -- the
+  // common case is mocking a whole second instance of a component (a
+  // second weapon, a second shield, ...), not a single stat on one.
+  fillSelectOptions(
+    statLabMockWizardTypeSelect,
+    [
+      { value: "stat", label: t("stat_lab_modal.mock_type_stat") },
+      { value: "component", label: t("stat_lab_modal.mock_type_component") },
+    ],
+    "component",
+  );
+  fillSelectOptions(statLabMockWizardComponentTypeSelect, statLabTypeOptions());
+  mockWizardComponentType = statLabMockWizardComponentTypeSelect.value;
+  resetMockWizardPicks();
+  if (scope) statLabMockWizardLevelSelect.value = scope.level;
+  syncMockWizardVisibility();
+  statLabMockWizardEl.classList.remove("hidden");
+}
+// Wrapped in an arrow function, not passed directly -- openMockWizard
+// treats a truthy first argument as a `scope` to pre-fill from (see the
+// "+" button in buildMockSection(), which deliberately does pass one), so
+// passing the click handler straight through would leak the click Event
+// itself in as `scope` and corrupt the level select's default value.
+document.getElementById("stat-lab-add-mock-btn").addEventListener("click", () => openMockWizard());
+
+function closeMockWizard() {
+  statLabMockWizardEl.classList.add("hidden");
+}
+document.getElementById("stat-lab-mock-wizard-cancel-btn").addEventListener("click", closeMockWizard);
+
+document.getElementById("stat-lab-mock-wizard-add-btn").addEventListener("click", () => {
+  const level = statLabMockWizardLevelSelect.value;
+  const table = currentMockWizardTable();
+  if (level !== "global" && !table) return alert(t("stat_lab_modal.mock_wizard_table_required"));
+  const statSet = table?.statSets.find((s) => String(s.id) === statLabMockWizardTabSelect.value);
+  const wareId = statLabMockWizardRowSelect.value;
+
+  let scope;
+  if (level === "global") scope = { level: "global" };
+  else if (level === "table") scope = { level: "table", table };
+  else if (level === "tab") {
+    if (!statSet) return alert(t("stat_lab_modal.mock_wizard_tab_required"));
+    scope = { level: "tab", table, statSet };
+  } else if (level === "row") {
+    if (!wareId) return alert(t("stat_lab_modal.mock_wizard_row_required"));
+    scope = { level: "row", table, wareId };
+  } else {
+    if (!statSet || !wareId) return alert(t("stat_lab_modal.mock_wizard_tab_row_required"));
+    scope = { level: "tabRow", table, statSet, wareId };
+  }
+
+  const isStat = statLabMockWizardTypeSelect.value === "stat";
+  const configMap = mockConfigMapFor(scope);
+  if (isStat) {
+    if (!mockWizardStatKey) return alert(t("stat_lab_modal.mock_wizard_stat_required"));
+    const hasValue =
+      mockWizardValueConfig &&
+      (mockWizardValueConfig.type === "literal"
+        ? mockWizardValueConfig.value !== null && mockWizardValueConfig.value !== undefined
+        : !!mockWizardValueConfig.wareId);
+    if (!hasValue) return alert(t("stat_lab_modal.mock_wizard_value_required"));
+    // Like full-component mocks, individual-stat mocks APPEND to the
+    // (scope, stat)'s priority list -- adding another one is how a second
+    // (third, ...) fallback is stacked; reorder it in the list afterwards.
+    const statMockKey = `${mockWizardComponentType}:${mockWizardStatKey}`;
+    const statList = asConfigList(configMap[statMockKey]);
+    statList.push(mockWizardValueConfig);
+    configMap[statMockKey] = statList;
+  } else {
+    if (!mockWizardFullComponentWareId) return alert(t("stat_lab_modal.mock_wizard_component_required"));
+    // Full-component mocks APPEND to this (scope, componentType)'s own
+    // list rather than overwrite -- running the wizard again for the same
+    // scope/type is how a second (third, ...) mocked instance gets added,
+    // for an aggregate variable to sum/average/count across (see
+    // asConfigList()'s own comment). No dedicated "add another" control
+    // exists elsewhere in the Mocks view itself; this is the one place a
+    // new entry is ever created.
+    const list = asConfigList(configMap[mockWizardComponentType]);
+    const groupMode =
+      GROUP_MODE_COMPONENT_TYPES.has(mockWizardComponentType) && statLabMockWizardGroupModeCheckbox.checked;
+    const config = groupMode
+      ? {
+          type: "component_ref",
+          wareId: mockWizardFullComponentWareId,
+          groupMode: true,
+          perGroupCount: Math.max(1, Math.floor(Number(statLabMockWizardPerGroupCountInput.value)) || 1),
+          groupCount: Math.max(1, Math.floor(Number(statLabMockWizardGroupCountInput.value)) || 1),
+        }
+      : {
+          type: "component_ref",
+          wareId: mockWizardFullComponentWareId,
+          count: Math.max(1, Math.floor(Number(statLabMockWizardFullComponentCountInput.value)) || 1),
+        };
+    list.push(config);
+    configMap[mockWizardComponentType] = list;
+  }
+  saveState();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  closeMockWizard();
+  renderStatLabMocksView();
+});
+
+// ---- Copy To New Scope wizard ----
+// Lets a whole scope's worth of already-configured mocks (every mockId
+// entry in it) be duplicated into a different scope in one step, instead
+// of re-running the Add Mock wizard once per entry -- opened from a
+// populated section's own header (see buildMockSection()). Shares the Add
+// Mock wizard's own level/table/tab/row select shape and fill logic, but
+// as a separate, simpler set of elements/state, since this wizard picks
+// ONLY a target scope, never a mock type/stat/value -- the mockId keys
+// themselves (which already encode componentType, and for a stat key, the
+// statId too) are what gets copied, unchanged.
+let copyScopeSource = null;
+
+function currentCopyScopeTable() {
+  return componentAnalyzerTables.find((table) => String(table.id) === statLabCopyScopeTableSelect.value) ?? null;
+}
+
+function syncCopyScopeTableDependents() {
+  const table = currentCopyScopeTable();
+  fillSelectOptions(
+    statLabCopyScopeTabSelect,
+    (table?.statSets ?? []).map((statSet) => ({
+      value: String(statSet.id),
+      label: statSet.name.trim() || defaultNewStatSetLabel(),
+    })),
+  );
+  fillSelectOptions(
+    statLabCopyScopeRowSelect,
+    (table?.components ?? []).map((component) => ({ value: component.ware_id, label: component.name })),
+  );
+}
+statLabCopyScopeTableSelect.addEventListener("change", syncCopyScopeTableDependents);
+
+function syncCopyScopeVisibility() {
+  const level = statLabCopyScopeLevelSelect.value;
+  statLabCopyScopeTableSelect.classList.toggle("hidden", level === "global");
+  statLabCopyScopeTabSelect.classList.toggle("hidden", !(level === "tab" || level === "tabRow"));
+  statLabCopyScopeRowSelect.classList.toggle("hidden", !(level === "row" || level === "tabRow"));
+}
+statLabCopyScopeLevelSelect.addEventListener("change", syncCopyScopeVisibility);
+
+// Pre-fills the target scope picker to match the SOURCE scope (same
+// convenience openMockWizard()'s own `scope` param gives the "+" button --
+// the common case is nudging just one piece, e.g. same table/tab but a
+// different row), then lets the user change whichever part they want.
+function openCopyScopeWizard(sourceScope) {
+  copyScopeSource = sourceScope;
+  statLabCopyScopeSourceHint.textContent = t("stat_lab_modal.copy_scope_source_hint", {
+    scope: scopeLabel(sourceScope),
+  });
+  fillSelectOptions(statLabCopyScopeLevelSelect, [
+    { value: "global", label: t("stat_lab_modal.mock_scope_level_global") },
+    { value: "table", label: t("stat_lab_modal.mock_scope_level_table") },
+    { value: "tab", label: t("stat_lab_modal.mock_scope_level_tab") },
+    { value: "row", label: t("stat_lab_modal.mock_scope_level_row") },
+    { value: "tabRow", label: t("stat_lab_modal.mock_scope_level_tab_row") },
+  ]);
+  fillSelectOptions(
+    statLabCopyScopeTableSelect,
+    componentAnalyzerTables.map((table) => ({
+      value: String(table.id),
+      label: table.title.trim() || t(componentTypeI18nKey(table.componentType)),
+    })),
+  );
+  if (sourceScope.table) statLabCopyScopeTableSelect.value = String(sourceScope.table.id);
+  syncCopyScopeTableDependents();
+  if (sourceScope.statSet) statLabCopyScopeTabSelect.value = String(sourceScope.statSet.id);
+  if (sourceScope.wareId) statLabCopyScopeRowSelect.value = sourceScope.wareId;
+  statLabCopyScopeLevelSelect.value = sourceScope.level;
+  syncCopyScopeVisibility();
+  statLabCopyScopeWizardEl.classList.remove("hidden");
+}
+
+function closeCopyScopeWizard() {
+  statLabCopyScopeWizardEl.classList.add("hidden");
+  copyScopeSource = null;
+}
+document.getElementById("stat-lab-copy-scope-cancel-btn").addEventListener("click", closeCopyScopeWizard);
+
+document.getElementById("stat-lab-copy-scope-confirm-btn").addEventListener("click", () => {
+  if (!copyScopeSource) return;
+  const level = statLabCopyScopeLevelSelect.value;
+  const table = currentCopyScopeTable();
+  if (level !== "global" && !table) return alert(t("stat_lab_modal.mock_wizard_table_required"));
+  const statSet = table?.statSets.find((s) => String(s.id) === statLabCopyScopeTabSelect.value);
+  const wareId = statLabCopyScopeRowSelect.value;
+
+  let targetScope;
+  if (level === "global") targetScope = { level: "global" };
+  else if (level === "table") targetScope = { level: "table", table };
+  else if (level === "tab") {
+    if (!statSet) return alert(t("stat_lab_modal.mock_wizard_tab_required"));
+    targetScope = { level: "tab", table, statSet };
+  } else if (level === "row") {
+    if (!wareId) return alert(t("stat_lab_modal.mock_wizard_row_required"));
+    targetScope = { level: "row", table, wareId };
+  } else {
+    if (!statSet || !wareId) return alert(t("stat_lab_modal.mock_wizard_tab_row_required"));
+    targetScope = { level: "tabRow", table, statSet, wareId };
+  }
+
+  if (scopeIdentityKey(targetScope) === scopeIdentityKey(copyScopeSource)) {
+    return alert(t("stat_lab_modal.copy_scope_same_scope"));
+  }
+
+  const sourceMap = mockConfigMapFor(copyScopeSource);
+  const targetMap = mockConfigMapFor(targetScope);
+  // Same append-to-the-priority-list behavior the Add Mock wizard's own Add
+  // button uses just above -- copying into a scope that already has entries
+  // for a given mockId ADDS this source's entries after them rather than
+  // overwriting, so nothing already configured on the target is ever lost;
+  // this is also exactly what makes "copy into an existing scope" and
+  // "copy into a brand new one" the same code path, per the user's own
+  // spec (mockConfigMapFor() lazily creates an empty map for a scope
+  // that's never had anything configured on it yet).
+  for (const [mockId, value] of Object.entries(sourceMap)) {
+    const targetList = asConfigList(targetMap[mockId]);
+    for (const config of asConfigList(value)) targetList.push(JSON.parse(JSON.stringify(config)));
+    targetMap[mockId] = targetList;
+  }
+
+  saveState();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  closeCopyScopeWizard();
+  renderStatLabMocksView();
+});
+
+// ---- Constants view ----
+// A flat list (no groups -- see CONSTANT_DEFINITIONS' own comment) of every
+// curated constant, app-authored ("pre-derived") and user-authored
+// ("derived") alike -- the Statistics Lab's own catalog of GLOBAL values a
+// formula can reference via a constant_ref variable (see
+// resolveFormulaVariable()), for inputs that don't belong to any one
+// component type the way a stat's own stat_ref/mock_ref would assume.
+function constantValueDisplay(def) {
+  const value = resolveConstantValue(def.id, new Set());
+  return typeof value === "number" ? formatMockTraceValue(value) : "--";
+}
+
+function buildConstantRow(def) {
+  const row = document.createElement("div");
+  row.className = "stat-lab-mock-entry-row";
+
+  const label = document.createElement("span");
+  label.className = "stat-lab-mock-entry-label";
+  label.textContent = statDefLabel(def);
+  row.appendChild(label);
+
+  if (STAT_TAG_LABEL_KEYS[def.kind]) {
+    row.appendChild(buildStatTagBanner(t(STAT_TAG_LABEL_KEYS[def.kind]), def.kind));
+  }
+
+  const typeLabel = document.createElement("span");
+  typeLabel.className = "stat-lab-constant-type-label";
+  typeLabel.textContent = t(def.type === "formula" ? "stat_lab_modal.constant_type_formula" : "stat_lab_modal.constant_type_literal");
+  row.appendChild(typeLabel);
+
+  const valueEl = document.createElement("span");
+  valueEl.className = "stat-lab-constant-value";
+  valueEl.textContent = constantValueDisplay(def);
+  row.appendChild(valueEl);
+
+  const description = statDefDescription(def);
+  if (description) {
+    label.title = description;
+    row.title = description;
+  }
+
+  if (def.kind === "derived") {
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("stat_lab_modal.delete_constant_tooltip");
+    removeBtn.addEventListener("click", () => {
+      if (!confirm(t("stat_lab_modal.delete_constant_confirm", { name: statDefLabel(def) }))) return;
+      customConstants = customConstants.filter((c) => c.id !== def.id);
+      saveState();
+      renderComponentAnalyzerTables();
+      renderStatLabMissingMocksSummary();
+      renderStatLabConstantsList();
+    });
+    row.appendChild(removeBtn);
+  }
+
+  return row;
+}
+
+function renderStatLabConstantsList() {
+  statLabConstantsListEl.innerHTML = "";
+  const defs = allConstantDefs();
+  if (defs.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "stat-lab-browse-empty";
+    empty.textContent = t("stat_lab_modal.no_constants_yet");
+    statLabConstantsListEl.appendChild(empty);
+    return;
+  }
+  for (const def of defs) statLabConstantsListEl.appendChild(buildConstantRow(def));
+}
+
+// ---- Add Constant wizard ----
+// constantWizardVariableTargets: {name: constantId} -- a derived constant's
+// own formula variables, always a constant_ref (there's no row/mock
+// context here for a stat_ref/mock_ref to mean anything), so this is just
+// a name -> constantId map rather than the Stat Lab Builder's own richer
+// {componentType, statId, aggregation, limit} target shape.
+let constantWizardVariableTargets = {};
+
+function syncConstantWizardTypeVisibility() {
+  const isFormula = statLabConstantWizardTypeSelect.value === "formula";
+  statLabConstantWizardValueRow.classList.toggle("hidden", isFormula);
+  statLabConstantWizardFormulaRow.classList.toggle("hidden", !isFormula);
+  statLabConstantWizardVariablesSection.classList.toggle("hidden", !isFormula);
+}
+statLabConstantWizardTypeSelect.addEventListener("change", syncConstantWizardTypeVisibility);
+
+// Every OTHER constant currently eligible as a variable's own source -- any
+// constant besides the one being authored right now would always be safe
+// to allow (resolveConstantValue()'s own `resolving` Set catches a real
+// cycle at eval time regardless), but excluding every constant NOT YET
+// SAVED (there is none, mid-wizard -- a brand new constant has no id yet)
+// is moot; this exists purely so the dropdown has a stable, readable
+// option list.
+function eligibleConstantOptions() {
+  return allConstantDefs().map((def) => ({ value: def.id, label: statDefLabel(def) }));
+}
+
+function renderConstantWizardVariables() {
+  statLabConstantWizardVariablesEl.innerHTML = "";
+  for (const [name, constantId] of Object.entries(constantWizardVariableTargets)) {
+    const row = document.createElement("div");
+    row.className = "stat-lab-builder-variable-row";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "stat-lab-builder-variable-name";
+    nameInput.value = name;
+    nameInput.addEventListener("blur", () => {
+      const newName = nameInput.value.trim();
+      if (!newName || newName === name) {
+        renderConstantWizardVariables();
+        return;
+      }
+      if (newName in constantWizardVariableTargets) {
+        alert(t("stat_lab_modal.variable_name_taken"));
+        renderConstantWizardVariables();
+        return;
+      }
+      delete constantWizardVariableTargets[name];
+      constantWizardVariableTargets[newName] = constantId;
+      renderConstantWizardVariables();
+    });
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") nameInput.blur();
+    });
+    row.appendChild(nameInput);
+
+    const constantSelect = document.createElement("select");
+    fillSelectOptions(constantSelect, eligibleConstantOptions(), constantId);
+    constantSelect.addEventListener("change", () => {
+      constantWizardVariableTargets[name] = constantSelect.value;
+    });
+    row.appendChild(constantSelect);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("stat_lab_modal.remove_variable_tooltip");
+    removeBtn.addEventListener("click", () => {
+      delete constantWizardVariableTargets[name];
+      renderConstantWizardVariables();
+    });
+    row.appendChild(removeBtn);
+
+    statLabConstantWizardVariablesEl.appendChild(row);
+  }
+}
+
+document.getElementById("stat-lab-constant-wizard-add-variable-btn").addEventListener("click", () => {
+  const options = eligibleConstantOptions();
+  if (options.length === 0) return alert(t("stat_lab_modal.no_constants_yet"));
+  const unresolved = parseFormulaVariableNames(statLabConstantWizardFormulaInput.value).filter(
+    (name) => !(name in constantWizardVariableTargets),
+  );
+  let name = unresolved[0];
+  if (!name) {
+    let n = 1;
+    while (`variable${n}` in constantWizardVariableTargets) n++;
+    name = `variable${n}`;
+  }
+  constantWizardVariableTargets[name] = options[0].value;
+  renderConstantWizardVariables();
+});
+
+function openConstantWizard() {
+  statLabConstantWizardNameInput.value = "";
+  statLabConstantWizardDescriptionInput.value = "";
+  statLabConstantWizardTypeSelect.value = "literal";
+  statLabConstantWizardValueInput.value = "";
+  statLabConstantWizardFormulaInput.value = "";
+  constantWizardVariableTargets = {};
+  renderConstantWizardVariables();
+  syncConstantWizardTypeVisibility();
+  statLabConstantWizardEl.classList.remove("hidden");
+}
+document.getElementById("stat-lab-add-constant-btn").addEventListener("click", openConstantWizard);
+
+function closeConstantWizard() {
+  statLabConstantWizardEl.classList.add("hidden");
+}
+document.getElementById("stat-lab-constant-wizard-cancel-btn").addEventListener("click", closeConstantWizard);
+
+document.getElementById("stat-lab-constant-wizard-add-btn").addEventListener("click", () => {
+  const label = statLabConstantWizardNameInput.value.trim();
+  const description = statLabConstantWizardDescriptionInput.value.trim();
+  const type = statLabConstantWizardTypeSelect.value;
+  if (!label) return alert(t("stat_lab_modal.name_required"));
+
+  let value = null;
+  let formula = null;
+  if (type === "literal") {
+    value = parseFloat(statLabConstantWizardValueInput.value);
+    if (Number.isNaN(value)) return alert(t("stat_lab_modal.constant_value_required"));
+  } else {
+    const expression = statLabConstantWizardFormulaInput.value.trim();
+    if (!expression) return alert(t("stat_lab_modal.formula_required"));
+    const unresolved = parseFormulaVariableNames(expression).filter((name) => !(name in constantWizardVariableTargets));
+    if (unresolved.length > 0) {
+      return alert(t("stat_lab_modal.unresolved_variables_present", { names: unresolved.join(", ") }));
+    }
+    const variables = Object.fromEntries(
+      Object.entries(constantWizardVariableTargets).map(([name, constantId]) => [name, { type: "constant_ref", constantId }]),
+    );
+    formula = { expression, variables };
+  }
+
+  customConstants.push(makeCustomConstant(label, type, value, formula, description));
+  saveState();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  closeConstantWizard();
+  renderStatLabConstantsList();
 });
 
 // ---- Component Analyzer's "Select Components" picker modal ----
@@ -8403,13 +19468,235 @@ componentSetPickerCancelBtn.addEventListener("click", closeComponentSetPickerMod
 componentSetPickerDoneBtn.addEventListener("click", () => {
   if (!componentSetPickerTable || !componentSetPickerCurrentList) return;
   const byWareId = new Map(componentSetPickerCurrentList.map((component) => [component.ware_id, component]));
+  // componentSetPickerCurrentList's own rows are fresh objects straight
+  // from fetchComponentList() (no appliedMods/blockGlobalMod on them at
+  // all) -- without this, re-confirming Select Components (even
+  // re-picking the exact same set) would silently wipe every row's own
+  // saved Mod Lab selection and its independent override-empty checkbox
+  // state (see saveModLabAppliedMods()). Carried forward here by ware_id
+  // for any ware that's still selected; a ware dropped from the selection
+  // naturally loses both along with the row itself.
+  const previousAppliedMods = new Map(
+    componentSetPickerTable.components
+      .filter((component) => component.appliedMods)
+      .map((component) => [component.ware_id, component.appliedMods]),
+  );
+  const previousBlockGlobalMod = new Map(
+    componentSetPickerTable.components
+      .filter((component) => component.blockGlobalMod)
+      .map((component) => [component.ware_id, component.blockGlobalMod]),
+  );
   componentSetPickerTable.components = [...componentSetPickerSelection]
     .map((wareId) => byWareId.get(wareId))
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
+  for (const component of componentSetPickerTable.components) {
+    const appliedMods = previousAppliedMods.get(component.ware_id);
+    if (appliedMods) component.appliedMods = appliedMods;
+    const blockGlobalMod = previousBlockGlobalMod.get(component.ware_id);
+    if (blockGlobalMod) component.blockGlobalMod = blockGlobalMod;
+  }
   closeComponentSetPickerModal();
   saveState();
   renderComponentAnalyzerTables();
+});
+
+// ---- Statistics Lab: single-select component/stat pickers ----
+// Two lightweight, promise-based "pick one" modals the Add Mock wizard
+// (and an already-configured mock's own value control) use for "pick a
+// component"/"pick a stat" -- deliberately NOT componentSetPickerModal
+// itself reused in some single-select mode: that modal's own Done handler
+// carries forward a table's real components' Mod Lab selections/overrides
+// (see its own long comment), a whole contract that has no meaning for
+// "pick one component to source a mock value from". This one reuses just
+// the shared, stateless pieces (COMPONENT_FILTER_GROUPS,
+// buildChassisFilterPanel()/buildComponentTypeFilterPanel(),
+// shipPassesCurrentFilters(), fetchComponentList()) with its own minimal
+// DOM/state, resolving a Promise instead of writing into a table.
+const mockComponentPickerModalOverlay = document.getElementById("mock-component-picker-modal-overlay");
+const mockComponentPickerModalTitle = document.getElementById("mock-component-picker-modal-title");
+const mockComponentPickerSearchInput = document.getElementById("mock-component-picker-search-input");
+const mockComponentPickerFiltersBtn = document.getElementById("mock-component-picker-filters-btn");
+const mockComponentPickerFiltersPanel = document.getElementById("mock-component-picker-filters-panel");
+const mockComponentPickerFiltersGrid = document.getElementById("mock-component-picker-filters-grid");
+const mockComponentPickerModalStatus = document.getElementById("mock-component-picker-modal-status");
+const mockComponentPickerTbody = document.getElementById("mock-component-picker-tbody");
+const mockComponentPickerCancelBtn = document.getElementById("mock-component-picker-cancel-btn");
+
+let mockComponentPickerComponentType = null;
+let mockComponentPickerCurrentList = null;
+let mockComponentPickerResolve = null;
+
+// Resolves to a ware_id, or null if the user cancels. Only one of these
+// (or pickStatForMock() below) is ever open at a time, so a single
+// module-level resolver is enough -- nothing calls this reentrantly.
+function pickComponentForMock(componentType) {
+  return new Promise((resolve) => {
+    mockComponentPickerResolve = resolve;
+    openMockComponentPickerModal(componentType);
+  });
+}
+
+async function openMockComponentPickerModal(componentType) {
+  mockComponentPickerComponentType = componentType;
+  mockComponentPickerCurrentList = null;
+  mockComponentPickerSearchInput.value = "";
+  mockComponentPickerModalTitle.textContent = t("component_set_picker_modal.select_type_title", {
+    type: t(componentTypeI18nKey(componentType)),
+  });
+
+  mockComponentPickerFiltersPanel.classList.add("hidden");
+  mockComponentPickerFiltersGrid.innerHTML = "";
+  const filterGroups = COMPONENT_FILTER_GROUPS[componentType];
+  const hasFilterPanel = componentType === "chassis" || (filterGroups?.length ?? 0) > 0;
+  mockComponentPickerFiltersBtn.classList.toggle("hidden", !hasFilterPanel);
+  if (hasFilterPanel) {
+    mockComponentPickerFiltersBtn.textContent = t("component_set_picker_modal.filters_btn", {
+      type: t(componentTypeI18nKey(componentType)),
+    });
+  }
+  if (componentType === "chassis") {
+    buildChassisFilterPanel(mockComponentPickerFiltersGrid, renderMockComponentPickerRows);
+  }
+
+  mockComponentPickerTbody.innerHTML = "";
+  mockComponentPickerModalStatus.textContent = t("component_set_picker_modal.loading");
+  mockComponentPickerModalStatus.classList.remove("hidden");
+  mockComponentPickerModalOverlay.classList.remove("hidden");
+
+  const list = await fetchComponentList(componentType);
+  if (mockComponentPickerComponentType !== componentType) return; // reopened for a different type while this was in flight
+  mockComponentPickerModalStatus.classList.add("hidden");
+  mockComponentPickerCurrentList = list;
+
+  if (filterGroups && filterGroups.length > 0) {
+    buildComponentTypeFilterPanel(filterGroups, list, mockComponentPickerFiltersGrid, renderMockComponentPickerRows);
+  }
+  renderMockComponentPickerRows();
+}
+
+mockComponentPickerFiltersBtn.addEventListener("click", () => {
+  mockComponentPickerFiltersPanel.classList.toggle("hidden");
+});
+
+function filteredMockComponentPickerList() {
+  let list = mockComponentPickerCurrentList ?? [];
+  const query = mockComponentPickerSearchInput.value.trim().toLowerCase();
+  if (query) list = list.filter((component) => component.name.toLowerCase().includes(query));
+
+  if (mockComponentPickerComponentType === "chassis") {
+    const shipsByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
+    list = list.filter((component) => {
+      const ship = shipsByWareId.get(component.ware_id);
+      return ship ? shipPassesCurrentFilters(ship, mockComponentPickerFiltersGrid) : true;
+    });
+  } else if ((COMPONENT_FILTER_GROUPS[mockComponentPickerComponentType]?.length ?? 0) > 0) {
+    list = list.filter((component) => shipPassesCurrentFilters(component, mockComponentPickerFiltersGrid));
+  }
+  return list;
+}
+
+function renderMockComponentPickerRows() {
+  const filtered = filteredMockComponentPickerList();
+  mockComponentPickerTbody.innerHTML = "";
+  for (const component of filtered) {
+    const tr = document.createElement("tr");
+    tr.className = "equipment-picker-row";
+    const nameTd = document.createElement("td");
+    const rowContent = document.createElement("span");
+    rowContent.className = "component-picker-row-content";
+    rowContent.appendChild(buildEntityIdentityColumn(component));
+    const factionIconsGroup = buildEntityOwnerIconsGroup(component);
+    if (factionIconsGroup.children.length > 0) rowContent.appendChild(factionIconsGroup);
+    nameTd.appendChild(rowContent);
+    tr.appendChild(nameTd);
+    tr.addEventListener("click", () => {
+      const resolve = mockComponentPickerResolve;
+      mockComponentPickerResolve = null;
+      closeMockComponentPickerModal();
+      resolve?.(component.ware_id);
+    });
+    mockComponentPickerTbody.appendChild(tr);
+  }
+}
+
+mockComponentPickerSearchInput.addEventListener("input", () => {
+  if (mockComponentPickerCurrentList) renderMockComponentPickerRows();
+});
+
+function closeMockComponentPickerModal() {
+  mockComponentPickerModalOverlay.classList.add("hidden");
+  mockComponentPickerComponentType = null;
+  mockComponentPickerCurrentList = null;
+}
+
+mockComponentPickerCancelBtn.addEventListener("click", () => {
+  const resolve = mockComponentPickerResolve;
+  mockComponentPickerResolve = null;
+  closeMockComponentPickerModal();
+  resolve?.(null);
+});
+
+// A minimal single-select "pick one stat" popup -- the exact same
+// grouped-by-catalog-group/tag-banner look renderStatLabBrowseList()
+// already established, just click-to-resolve instead of Clone/Edit
+// buttons. Browses `componentType`'s FULL catalog (fundamental,
+// pre-derived, and derived alike -- not limited to stats some formula
+// already needs a mock for), since the Add Mock wizard's own point is to
+// let a mock be configured proactively for any stat at all.
+const statPickModalOverlay = document.getElementById("stat-pick-modal-overlay");
+const statPickList = document.getElementById("stat-pick-list");
+const statPickCancelBtn = document.getElementById("stat-pick-cancel-btn");
+let statPickResolve = null;
+
+// Resolves to a stat's own `key`, or null if cancelled.
+function pickStatForMock(componentType) {
+  return new Promise((resolve) => {
+    statPickResolve = resolve;
+    renderStatPickList(componentType);
+    statPickModalOverlay.classList.remove("hidden");
+  });
+}
+
+function renderStatPickList(componentType) {
+  statPickList.innerHTML = "";
+  const catalog = statCatalogForComponentType(componentType);
+  for (const group of catalog?.groups ?? []) {
+    const defs = catalog.definitions.filter((d) => d.group === group.id);
+    if (defs.length === 0) continue;
+    const groupEl = document.createElement("div");
+    groupEl.className = "stat-lab-browse-group";
+    const header = document.createElement("div");
+    header.className = "stat-lab-browse-group-header";
+    header.textContent = statGroupLabel(group);
+    groupEl.appendChild(header);
+    const list = document.createElement("div");
+    list.className = "stat-lab-browse-group-stats";
+    for (const def of defs) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "stat-select-stat-row";
+      row.textContent = statDefLabel(def);
+      const pickInfoIcon = buildStatInfoIcon(row, def);
+      if (pickInfoIcon) row.appendChild(pickInfoIcon);
+      row.addEventListener("click", () => {
+        const resolve = statPickResolve;
+        statPickResolve = null;
+        statPickModalOverlay.classList.add("hidden");
+        resolve?.(def.key);
+      });
+      list.appendChild(row);
+    }
+    groupEl.appendChild(list);
+    statPickList.appendChild(groupEl);
+  }
+}
+
+statPickCancelBtn.addEventListener("click", () => {
+  const resolve = statPickResolve;
+  statPickResolve = null;
+  statPickModalOverlay.classList.add("hidden");
+  resolve?.(null);
 });
 
 // ---- Page navigation (Fleet Planner / Cost Analysis / About) ----
@@ -8418,7 +19705,7 @@ componentSetPickerDoneBtn.addEventListener("click", () => {
 // priceOverrides etc. all stay exactly as they were.
 // location.hash still updates so a page is linkable/bookmarkable and the
 // browser's own back/forward buttons work.
-const PAGE_IDS = ["fleet-planner", "cost-analysis", "component-analyzer", "about"];
+const PAGE_IDS = ["fleet-planner", "cost-analysis", "component-analyzer", "proving-grounds", "about"];
 
 function showPage(pageId) {
   if (!PAGE_IDS.includes(pageId)) pageId = PAGE_IDS[0];
@@ -8484,10 +19771,24 @@ function saveState() {
     version: PERSISTED_STATE_VERSION,
     fleets,
     activeFleetIndex,
+    wareCostListFocusedFleetIndex,
     priceOverrides,
     importedLoadoutsResult,
     shareCache,
     componentAnalyzerTables,
+    shipTrials,
+    provingGroundsActiveTab,
+    // Statistics Lab (GitHub issue #26) -- persisted globally, independent
+    // of componentAnalyzerTables (see customStatGroups' own comment), so a
+    // custom stat/group survives even if every table that ever used it is
+    // later removed. globalStatMocks is the one mock-scope level with
+    // nowhere else to live -- table/tab/row-level mocks ride along inside
+    // componentAnalyzerTables itself (see resolveMockValue()'s own
+    // comment), already covered by the line above.
+    customStatGroups,
+    customStatFamilies,
+    customConstants,
+    globalStatMocks,
     filters: {
       size: checkedValues("size-filter"),
       purpose: checkedValues("purpose-filter"),
@@ -8539,13 +19840,38 @@ function loadPersistedState() {
 // values not surviving a reload despite table.components itself (and
 // everything else about the table) persisting correctly.
 async function restorePersistedState(state) {
-  if (!state) return;
+  // A null state (no real localStorage data -- loadPersistedState()'s own
+  // "nothing saved yet" case, e.g. a brand-new session) used to return
+  // here immediately, skipping everything below INCLUDING the
+  // componentListCache warming at this function's own tail -- every
+  // `if (state.xxx)`/`Array.isArray(state.xxx)` check below already
+  // no-ops safely for an empty object, so there was never a real need to
+  // bail out this early. That warming doesn't depend on any persisted
+  // data existing at all (collectMockRelevantComponentTypes()'s own first
+  // pass reads the STATIC stat catalog, not saved state -- see its own
+  // comment), so skipping it here meant a first-time session that went
+  // straight to Proving Grounds (no prior Component Analyzer/Ship
+  // Builder visit to warm the cache as a side effect) could show a
+  // cross-component Ship Trial stat as missing or silently wrong (e.g.
+  // Sustained Weapon Damage, or Avg/Min/Max Equipped Cost) until the user
+  // happened to open some other picker for the same componentType.
+  // Normalizing to {} here instead lets every check below correctly
+  // no-op (same effective behavior for state restoration) while still
+  // reaching the warming/render tail unconditionally.
+  state = state ?? {};
 
   if (Array.isArray(state.fleets) && state.fleets.length > 0) {
     fleets = state.fleets;
     // Defensive clamp -- guards against a corrupted/hand-edited index
     // rather than trusting it blindly.
     activeFleetIndex = Math.min(Math.max(state.activeFleetIndex ?? 0, 0), fleets.length - 1);
+    // Same clamp, but null (not 0) is the valid "nothing focused" default --
+    // only a real saved number gets clamped into range, anything else (never
+    // saved, corrupted) falls back to null rather than guessing column 0.
+    wareCostListFocusedFleetIndex =
+      typeof state.wareCostListFocusedFleetIndex === "number"
+        ? Math.min(Math.max(state.wareCostListFocusedFleetIndex, 0), fleets.length - 1)
+        : null;
   }
   // priceOverrides is const (mutated in place elsewhere too, e.g. the
   // Configured Ware Price Overrides list's own "x" remove button) --
@@ -8577,13 +19903,86 @@ async function restorePersistedState(state) {
         if (!Array.isArray(statSet.selectedStats)) statSet.selectedStats = [];
       }
     }
-    nextStatSetId =
+  }
+
+  // Ship Trials (Proving Grounds, Phase 1) -- same shape/backfill as
+  // componentAnalyzerTables just above (a Trial's statSets are the exact
+  // same makeStatSet() objects, see makeShipTrial()'s own comment), kept
+  // as its own separate array/id-counter rather than folded into
+  // componentAnalyzerTables itself -- see that array's own comment on why.
+  if (Array.isArray(state.shipTrials)) {
+    shipTrials = state.shipTrials;
+    nextShipTrialId = 1 + shipTrials.reduce((max, trial) => Math.max(max, trial.id ?? 0), 0);
+    nextShipTrialInstanceId =
       1 +
+      shipTrials.reduce(
+        (max, trial) => Math.max(max, ...(trial.components ?? []).map((component) => component.instanceId ?? 0)),
+        0,
+      );
+    for (const trial of shipTrials) {
+      if (!Array.isArray(trial.statSets) || trial.statSets.length === 0) {
+        trial.statSets = [makeStatSet()];
+        trial.activeStatSetIndex = 0;
+      } else if (!(trial.activeStatSetIndex >= 0 && trial.activeStatSetIndex < trial.statSets.length)) {
+        trial.activeStatSetIndex = 0;
+      }
+      for (const statSet of trial.statSets) {
+        if (!Array.isArray(statSet.selectedStats)) statSet.selectedStats = [];
+      }
+      if (!Array.isArray(trial.components)) trial.components = [];
+      if (!trial.shipMocks || typeof trial.shipMocks !== "object") trial.shipMocks = {};
+      if (!trial.shipChassisAppliedMods || typeof trial.shipChassisAppliedMods !== "object") {
+        trial.shipChassisAppliedMods = {};
+      }
+    }
+  }
+  if (state.provingGroundsActiveTab === "ship-trials" || state.provingGroundsActiveTab === "fleet-trials") {
+    provingGroundsActiveTab = state.provingGroundsActiveTab;
+  }
+
+  // nextStatSetId is shared across componentAnalyzerTables AND shipTrials
+  // (both ultimately call the same makeStatSet()) -- computed once here,
+  // after both arrays are restored, so a freshly created stat set in
+  // EITHER one can never collide with an id either array already has.
+  nextStatSetId =
+    1 +
+    Math.max(
       componentAnalyzerTables.reduce(
         (max, table) => Math.max(max, ...table.statSets.map((statSet) => statSet.id ?? 0)),
         0,
-      );
+      ),
+      shipTrials.reduce((max, trial) => Math.max(max, ...trial.statSets.map((statSet) => statSet.id ?? 0)), 0),
+    );
+
+  // Statistics Lab (GitHub issue #26) -- table/tab/row-level mocks need no
+  // restoration of their own: they live inside componentAnalyzerTables
+  // itself (already restored above) and are read defensively everywhere
+  // (mockConfigMapFor()'s own `??=`, collectAllConfiguredMockEntries()'s own `?.`), so
+  // a table/statSet persisted before statMocks/rowStatMocks existed just
+  // behaves as if none are configured.
+  if (Array.isArray(state.customStatGroups)) {
+    customStatGroups = state.customStatGroups;
+    nextCustomStatGroupId =
+      1 +
+      customStatGroups.reduce((max, group) => {
+        const n = parseInt(String(group.id).split("_").pop(), 10);
+        return Number.isFinite(n) ? Math.max(max, n) : max;
+      }, 0);
   }
+  if (Array.isArray(state.customStatFamilies)) {
+    customStatFamilies = state.customStatFamilies;
+    nextCustomStatFamilyId = 1 + customStatFamilies.reduce((max, family) => Math.max(max, family.id ?? 0), 0);
+  }
+  if (Array.isArray(state.customConstants)) {
+    customConstants = state.customConstants;
+    nextCustomConstantId =
+      1 +
+      customConstants.reduce((max, c) => {
+        const n = parseInt(String(c.id).split("_").pop(), 10);
+        return Number.isFinite(n) ? Math.max(max, n) : max;
+      }, 0);
+  }
+  if (state.globalStatMocks && typeof state.globalStatMocks === "object") globalStatMocks = state.globalStatMocks;
 
   if (state.filters) {
     const filterGroups = {
@@ -8611,12 +20010,22 @@ async function restorePersistedState(state) {
   // next time something happens to call fetchComponentList() for that
   // type (opening "Select Components"/"Select Stats") -- see this
   // function's own docstring for the full story.
+  // Also warms every componentType a mock_ref formula variable OR an
+  // already-configured mock might need (see collectMockRelevantComponentTypes()'s
+  // own comment) -- a mock's own "component_ref" value is resolved through
+  // this exact same cache (see resolveMockValue()), so it needs to be warm
+  // before first paint for the same reason a table's own displayed
+  // componentType does.
   const restoredComponentTypes = new Set(
-    componentAnalyzerTables.map((table) => table.componentType).filter((type) => type && type !== "chassis"),
+    [...componentAnalyzerTables.map((table) => table.componentType), ...collectMockRelevantComponentTypes()].filter(
+      (type) => type && type !== "chassis",
+    ),
   );
   await Promise.all([...restoredComponentTypes].map((type) => fetchComponentList(type)));
 
   renderComponentAnalyzerTables();
+  renderShipTrials();
+  showProvingGroundsTab(provingGroundsActiveTab);
 }
 
 async function bootstrap() {
@@ -8647,6 +20056,9 @@ async function bootstrap() {
   await loadAmmunitionCompatibilityTypeNames();
   await loadThrusterClassNames();
   await loadDeployableTypeNames();
+  await loadModQualityNames();
+  await loadEquipmentMods();
+  await loadEquipmentModTargetMappings();
   await loadMissileWeaponSystemNames();
   await loadBuildMethods();
   await loadBuildMethodNames();

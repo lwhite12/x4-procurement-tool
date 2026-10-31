@@ -28,3 +28,7 @@ Thumbs.db
 # shared/tracked (unlike a team-shared .claude/settings.json, if one is
 # ever added).
 .claude/settings.local.json
+# Claude Code's own per-session lock file (pid/session-id/timestamp) --
+# got committed by accident once (see git history), pure local machine
+# state, never meant to be tracked.
+.claude/scheduled_tasks.lock

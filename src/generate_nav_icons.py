@@ -1,9 +1,10 @@
 """Converts the raw map-object station icons extracted by
 extract_game_data.py's "nav_icons" job, plus the existing full ship-class
 icon set ship_icon_jobs() already extracts, into this website's top-nav
-page icons (Fleet Planner/Cost Analysis/About/Component Analyzer), their
-small "you are here" player-location markers, and the Fleet Lists tab
-bar's own per-fleet ship icon + selected-fleet indicator.
+page icons (Fleet Planner/Cost Analysis/About/Component Analyzer/Proving
+Grounds), their small "you are here" player-location markers, the Fleet
+Lists tab bar's own per-fleet ship icon + selected-fleet indicator, and
+the Proving Grounds page's own inline "under construction" glyph.
 
 Reads:
   - data/images/nav_icons_raw/mapob_shipyard.gz
@@ -13,6 +14,11 @@ Reads:
     closest real game asset to issue #4's "advanced electronics station
     symbol" spec for the Component Analyzer tab; see nav_icon_jobs()'s own
     docstring in extract_game_data.py)
+  - data/images/nav_icons_raw/mapob_piratestation.gz (the Proving Grounds
+    tab's own icon -- see nav_icon_jobs()'s own docstring)
+  - data/images/nav_icons_raw/mapob_constructionsite.gz (the Proving
+    Grounds page's own inline "under construction" glyph -- see
+    nav_icon_jobs()'s own docstring)
   - data/images/nav_icons_raw/bordersquare.gz (the map's own "selected
     item" white frame -- see SELECTION_BOX_SRC below)
   - data/images/ships/symbols_raw/*.gz (every ship-class icon, already
@@ -21,9 +27,12 @@ Reads:
     files)
 
 Writes, per station type ("fleet_planner"/"cost_analysis"/"about"/
-"component_analyzer"):
+"component_analyzer"/"proving_grounds"):
   - data/images/nav_icons/<name>.png            (normal, unselected page)
   - data/images/nav_icons/<name>_highlight.png   (that page currently selected)
+
+Writes one plain (no _highlight variant -- it's never a nav button) icon:
+  - data/images/nav_icons/construction_site.png
 
 Writes two markers per ship-class icon:
   - data/images/nav_icons/player_location/<ship icon name>.png -- e.g.
@@ -134,7 +143,14 @@ ICON_MAP = {
     "mapob_tradestation": "cost_analysis",
     "mapob_equipmentdock": "about",
     "mapob_hightech": "component_analyzer",
+    "mapob_piratestation": "proving_grounds",
 }
+
+# The Proving Grounds page's own inline "under construction" glyph -- same
+# recolor_icon()/PLAYER_GREEN treatment as every ICON_MAP entry above, just
+# a single plain output (no _highlight variant -- it's never a nav button,
+# always shown the same way).
+CONSTRUCTION_SITE_SRC_STEM = "mapob_constructionsite"
 
 
 def recolor_icon(gz_path: Path, out_path: Path, tint: tuple[int, int, int]) -> None:
@@ -187,6 +203,13 @@ def main() -> None:
         recolor_icon(gz_path, OUT_DIR / f"{out_name}.png", PLAYER_GREEN)
         recolor_icon(gz_path, OUT_DIR / f"{out_name}_highlight.png", PLAYER_GREEN_HIGHLIGHT)
         written += 2
+
+    construction_site_src = RAW_DIR / f"{CONSTRUCTION_SITE_SRC_STEM}.gz"
+    if construction_site_src.exists():
+        recolor_icon(construction_site_src, OUT_DIR / "construction_site.png", PLAYER_GREEN)
+        written += 1
+    else:
+        print(f"WARNING: {construction_site_src.relative_to(ROOT)} not found, skipping")
 
     ship_icon_paths = sorted(SHIP_ICONS_RAW_DIR.glob("*.gz"))
     for gz_path in ship_icon_paths:

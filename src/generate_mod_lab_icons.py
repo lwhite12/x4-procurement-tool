@@ -8,26 +8,36 @@ Reads:
   - data/images/mod_lab_icons_raw/mapob_buildstorage.gz
 
 Writes:
-  - data/images/mod_lab_icons/mods_grade_circle_01.png
-  - data/images/mod_lab_icons/mods_grade_circle_02.png
-  - data/images/mod_lab_icons/mods_grade_circle_03.png
+  - data/images/mod_lab_icons/mods_grade_circle_01.png (tier color)
+  - data/images/mod_lab_icons/mods_grade_circle_02.png (tier color)
+  - data/images/mod_lab_icons/mods_grade_circle_03.png (tier color)
+  - data/images/mod_lab_icons/mods_grade_circle_01_white.png (plain white)
+  - data/images/mod_lab_icons/mods_grade_circle_02_white.png (plain white)
+  - data/images/mod_lab_icons/mods_grade_circle_03_white.png (plain white)
   - data/images/mod_lab_icons/mod_lab_button.png
   - data/images/mod_lab_icons/mods_lab.png
 
 The three mods_grade_circle_* sources are plain white/light-grey (the
 game's own mod-quality-tier badges from the equipment mods menu, one per
-tier -- see mod_lab_icon_jobs()' own docstring in extract_game_data.py),
-recolored to each tier's own real in-game color -- see
+tier -- see mod_lab_icon_jobs()' own docstring in extract_game_data.py).
+Each gets recolored twice: once to its own real in-game tier color (see
 MOD_QUALITY_COLORS below for the extractor and its libraries/colors.xml
-source. Not wired into any real mod logic yet -- pulled/colored now so
-they're on hand once mod-application logic gets built and a component's
-own launcher button can show whichever tier is actually applied to it.
+source -- used nowhere in the UI yet, kept in case a tier-colored variant
+is wanted later), and once to plain white (the *_white.png files) -- used
+by each mod row inside the Modifications Lab's own Basic/Enhanced/
+Exceptional tab, so the row's own icon shows which tier via its real
+chevron-count shape while staying visually neutral (the mod's own name
+text already carries the tier color -- see app.js's MOD_QUALITY_COLORS).
 
 mod_lab_button.png is the same Exceptional (3-chevron) badge shape but
 tinted plain white instead -- used as every Modifications Lab launcher
 button's icon (table header + per-row) while no mod is applied yet, so
 the neutral/unmodded state doesn't visually claim a tier that isn't
-actually selected.
+actually selected. Distinct from mods_grade_circle_03_white.png above
+despite being pixel-identical output today -- that one specifically means
+"this row is an Exceptional-tier mod", this one means "open the mod
+picker, nothing selected yet"; kept as separate files so the two concepts
+can diverge later without one accidentally affecting the other.
 
 mapob_buildstorage.gz, by contrast, is a black-fill/white-glyph map_objects
 hex badge exactly like nav_icon_jobs()' own mapob_* sources (see
@@ -35,6 +45,14 @@ generate_nav_icons.py's module docstring for the full story on why those
 get recolored rather than shipped black) -- tinted the same
 "faction_player" green here, used as the Modifications Lab modal's own
 header icon.
+
+The Modifications Lab's own "Chassis" tab/row icon (mod_level=0, see
+app.js's MOD_QUALITY_ICONS) is NOT produced by this script -- by explicit
+request it reuses the real ship-class symbol PNG generate_ship_icons.py
+already writes to data/images/ships/symbols/ship_m_corvette_01.png
+directly, rather than a separately re-extracted/tinted copy, so it
+visually matches the real chassis image instead of an app-invented white
+variant of it.
 """
 
 import gzip
@@ -67,11 +85,12 @@ MOD_QUALITY_COLORS = {
     "mods_grade_circle_03": (0xB3, 0x00, 0xB3),  # Exceptional -- magenta_dark (purple)
 }
 
+NEUTRAL_TINT = (0xFF, 0xFF, 0xFF)
+
 # The neutral/unmodded launcher-button icon -- same source badge as
 # Exceptional's 3-chevron circle, tinted plain white rather than any real
 # tier color (see mod_lab_button.png's own note in the module docstring).
 NEUTRAL_BUTTON_SOURCE_STEM = "mods_grade_circle_03"
-NEUTRAL_BUTTON_TINT = (0xFF, 0xFF, 0xFF)
 
 
 def recolor_icon(gz_path: Path, out_path: Path, tint: tuple[int, int, int]) -> None:
@@ -99,11 +118,12 @@ def main() -> None:
             print(f"WARNING: {gz_path.relative_to(ROOT)} not found, skipping")
             continue
         recolor_icon(gz_path, OUT_DIR / f"{stem}.png", tint)
-        written += 1
+        recolor_icon(gz_path, OUT_DIR / f"{stem}_white.png", NEUTRAL_TINT)
+        written += 2
 
     neutral_src = RAW_DIR / f"{NEUTRAL_BUTTON_SOURCE_STEM}.gz"
     if neutral_src.exists():
-        recolor_icon(neutral_src, OUT_DIR / "mod_lab_button.png", NEUTRAL_BUTTON_TINT)
+        recolor_icon(neutral_src, OUT_DIR / "mod_lab_button.png", NEUTRAL_TINT)
         written += 1
     else:
         print(f"WARNING: {neutral_src.relative_to(ROOT)} not found, skipping")

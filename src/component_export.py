@@ -62,10 +62,15 @@ def dedupe_names(names: list[str]) -> list[str]:
     return result
 
 
-def build_csv_zip(sheets: list[dict]) -> bytes:
+def build_csv_zip(sheets: list[dict], mods_json: str | None = None) -> bytes:
     """One <table_name>__<tab_name>.csv per sheet, all in one zip. `sheets`
     is a list of {table_name, tab_name, headers, rows} dicts (row values
     already stringified by the frontend -- see this module's own docstring).
+    `mods_json`, when given, is written verbatim as an accompanying
+    mods.json entry -- a CSV cell only ever holds the already-resolved
+    number a mod produced (see gatherComponentAnalyzerExportSheets() in
+    app.js), never which mod caused it, so this is the export's only record
+    of that at all.
     """
     filenames = dedupe_names(
         [
@@ -82,12 +87,16 @@ def build_csv_zip(sheets: list[dict]) -> bytes:
             writer.writerow(sheet["headers"])
             writer.writerows(sheet["rows"])
             zf.writestr(filename, csv_buffer.getvalue())
+        if mods_json is not None:
+            zf.writestr("mods.json", mods_json)
     return buffer.getvalue()
 
 
-def build_xlsx_zip(sheets: list[dict]) -> bytes:
+def build_xlsx_zip(sheets: list[dict], mods_json: str | None = None) -> bytes:
     """One <table_name>.xlsx workbook per distinct table_name, one sheet per
-    tab_name inside it, all in one zip.
+    tab_name inside it, all in one zip. `mods_json` -- see build_csv_zip()'s
+    own comment -- is written verbatim as one shared accompanying mods.json
+    entry, not per-workbook, since it already covers every exported table.
     """
     tables: dict[str, list[dict]] = {}
     for sheet in sheets:
@@ -109,4 +118,6 @@ def build_xlsx_zip(sheets: list[dict]) -> bytes:
             xlsx_buffer = io.BytesIO()
             workbook.save(xlsx_buffer)
             zf.writestr(filename, xlsx_buffer.getvalue())
+        if mods_json is not None:
+            zf.writestr("mods.json", mods_json)
     return buffer.getvalue()

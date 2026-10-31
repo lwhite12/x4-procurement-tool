@@ -15,6 +15,62 @@ it.
 
 ## [Unreleased] - Development
 
+### Added
+
+- **Statistics Lab**: author your own custom stats right inside the Component Analyzer -- formulas
+  (sums, averages, counts) built from any existing stat, optionally mixing in stats from other
+  component types, with mocked inputs (a literal value, or a real full component to stand in for
+  data a table wouldn't otherwise have access to) wherever a formula needs something the table
+  itself can't supply. Includes a Constants page for reusable curated numbers, group-mode mocks,
+  and a read-only "Details" view for inspecting the formula behind any stat at all -- including the
+  app's own built-in ones -- from both the Stat Lab and the stat picker, with no risk of editing it
+  by accident.
+- Dozens of new built-in stats across every component type, including weapon Burst/Sustained DPS,
+  Travel Acceleration, per-group Shield MJ/Recharge Rate/Delay, and a new Avg/Min/Max Equipped Cost
+  per ship (sums every actually-equipped component's own price, correctly capped to each slot
+  type's real count rather than whatever happens to be mocked).
+- **Proving Grounds** (new top-level page): a Ship Trials comparison tool. Add ships straight from
+  your saved loadouts, from a Fleet List, or build one fresh in an embedded Ship Builder -- edit any
+  Trial ship's loadout later in place, with an "Edited" badge once it's drifted from the original.
+  Pick any column as the comparison baseline (click to set it, click that same column again to
+  clear it) for colored value/percent-change diffs against every other column, the same comparison
+  language the Cost Analyzer already used.
+- The Cost Analyzer's own comparison baseline no longer has to be whichever fleet you're actively
+  editing -- click "Focus" on any column instead, with the same colored diffs, and fleet columns are
+  no longer silently reordered around whichever one that is.
+- "Load Prebuilt Tables": one-click, ready-made Component Analyzer comparison tables covering every
+  weapon/turret/shield/engine/thruster/missile/economy-ware category, split by size (S/M/L/XL)
+  where that matters.
+- Both saved-loadout pickers (Ship Trials' own "Add Loadout Ship", and the Fleet Planner's "Select
+  Filter Loadout") now have the same Size/Purpose/Type/Race/Vendor/Build Method filters as the main
+  ship picker, plus free-text search by ship name or loadout name.
+- Modifications Lab: Copy/Paste a mod between slots, a real cost breakdown (wares + credits) for
+  every editable mod, and a Roll button with a running cumulative cost.
+- Ship Builder: a Chassis Mod that raises missile/drone/deployable/countermeasure capacity now
+  updates those limits immediately, and automatically scales back an already-maxed selection if the
+  mod is later weakened or removed.
+- Static site assets now always revalidate with the server instead of being cached indefinitely, so
+  a deployed update is visible without a hard refresh.
+
+### Changed
+
+- ~23 existing stats (Max Speed, Shield MJ, turn rates, and more) now correctly read a component's
+  modded (Post Mod) value instead of its unmodded base value, so an applied Mod Lab modification
+  actually shows up where you'd expect it to.
+- Shield (MJ)/Recharge Rate/Recharge Delay are no longer a naive sum across every mounted shield --
+  rewritten to match how the game itself actually computes them (the main shield slot alone, plus a
+  real per-hardpoint-group average for bonus shields), verified against real in-game loadouts.
+
+### Fixed
+
+- A brand-new session with nothing saved yet could show cross-component Proving Grounds/Statistics
+  Lab stats as silently wrong or missing on the very first page visited, until an unrelated picker
+  happened to be opened elsewhere first.
+- A pure area-damage weapon (the Paranid Blast Mortar/Flak family) no longer silently breaks its
+  own Hull/Shield Damage per Shot calculation.
+- A weapon with no heat generation at all now correctly contributes its full burst DPS to a ship's
+  Sustained DPS total instead of being dropped.
+
 ## [0.6.0] - 2026-09-06 - Production
 
 ### Added

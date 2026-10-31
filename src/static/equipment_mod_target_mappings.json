@@ -1,0 +1,262 @@
+{
+  "engine": {
+    "boostacc": [
+      { "real_table": "engines_base", "real_column": "boost_acceleration", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "boostduration": [
+      { "real_table": "engines_base", "real_column": "boost_duration", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "boostthrust": [
+      { "real_table": "engines_base", "real_column": "boost_thrust", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "forwardthrust": [
+      { "real_table": "engines_base", "real_column": "thrust_forward", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "travelattacktime": [
+      { "real_table": "engines_base", "real_column": "travel_attack", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "travelchargetime": [
+      { "real_table": "engines_base", "real_column": "travel_charge", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "travelthrust": [
+      { "real_table": "engines_base", "real_column": "travel_thrust", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "rotationthrust": [
+      {
+        "real_table": "thrusters_base",
+        "real_column": "thrust_pitch",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Every thruster macro's own class=\"engine\" and no <thruster> category exists in equipmentmods.xml at all -- an engine-category mod's rotation/strafe stats land on the ship's own equipped thruster, not the engine ware itself."
+      },
+      {
+        "real_table": "thrusters_base",
+        "real_column": "thrust_yaw",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Same cross-component reasoning as thrust_pitch above."
+      },
+      {
+        "real_table": "thrusters_base",
+        "real_column": "thrust_roll",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Same cross-component reasoning as thrust_pitch above."
+      }
+    ],
+    "strafethrust": [
+      {
+        "real_table": "thrusters_base",
+        "real_column": "thrust_strafe",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Cross-component -- see rotationthrust's own note."
+      }
+    ],
+    "strafeacc": [
+      {
+        "real_table": "thrusters_base",
+        "real_column": "thrust_strafe",
+        "operation": "multiply",
+        "confidence": "inferred",
+        "note": "No separate \"acceleration\" attribute exists on any thruster macro (confirmed by inspecting every one -- only <thrust>/<angular>) -- thrust_strafe is the only real column left for this to plausibly be."
+      }
+    ],
+    "travelstartthrust": [
+      {
+        "real_table": "engines_base",
+        "real_column": "boost_acceleration",
+        "operation": "multiply",
+        "confidence": "inferred",
+        "note": "Never appears as its own primary mod -- only ever as a bonus candidate alongside travelthrust/forwardthrust/rotationthrust/strafethrust/travelattacktime/travelchargetime (each already mapped above). The same phrase is also the WARE ID of a real mod whose own tag/in-game display name is \"boostacc\"/\"Travel Start Thrust Mod\" (mod_engine_travelstartthrust_01_mk1) -- Egosoft's own naming already treats this phrase as boost acceleration."
+      }
+    ]
+  },
+  "shield": {
+    "capacity": [
+      { "real_table": "shields_base", "real_column": "recharge_max", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "rechargedelay": [
+      { "real_table": "shields_base", "real_column": "recharge_delay", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "rechargerate": [
+      { "real_table": "shields_base", "real_column": "recharge_rate", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ]
+  },
+  "ship": {
+    "maxhull": [
+      { "real_table": "ships_base", "real_column": "hull", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "mass": [
+      { "real_table": "flight_model", "real_column": "physics_mass", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "drag": [
+      { "real_table": "flight_model", "real_column": "physics_drag_forward", "operation": "multiply", "confidence": "confirmed", "note": "A single drag mod scales all 7 directional drag columns at once -- the raw ship macro's own <drag forward=\"\" reverse=\"\" horizontal=\"\" vertical=\"\" pitch=\"\" yaw=\"\" roll=\"\"/> is one element, one multiplier applied uniformly." },
+      { "real_table": "flight_model", "real_column": "physics_drag_reverse", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." },
+      { "real_table": "flight_model", "real_column": "physics_drag_horizontal", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." },
+      { "real_table": "flight_model", "real_column": "physics_drag_vertical", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." },
+      { "real_table": "flight_model", "real_column": "physics_drag_pitch", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." },
+      { "real_table": "flight_model", "real_column": "physics_drag_yaw", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." },
+      { "real_table": "flight_model", "real_column": "physics_drag_roll", "operation": "multiply", "confidence": "confirmed", "note": "Same drag element as physics_drag_forward above." }
+    ],
+    "missilecapacity": [
+      {
+        "real_table": "ships_base",
+        "real_column": "missile_capacity",
+        "operation": "add",
+        "confidence": "confirmed",
+        "note": "Rolls a raw integer count (e.g. +1 to +4), not a ratio -- equipmentmods.xml's own header comment says as much: \"min and max for capacity mods such as countermeasurecapacity require ints\"."
+      }
+    ],
+    "unitcapacity": [
+      {
+        "real_table": "ships_base",
+        "real_column": "drone_capacity",
+        "operation": "add",
+        "confidence": "confirmed",
+        "note": "Raw ware id is <storage unit=\"\"/> -- \"unit\" is this app's drone_capacity. Same raw-integer-count semantics as missilecapacity above, not a ratio."
+      }
+    ],
+    "countermeasurecapacity": [
+      {
+        "real_table": "ships_base",
+        "real_column": "countermeasure_capacity",
+        "operation": "add",
+        "confidence": "confirmed",
+        "note": "Raw integer count (+1 to +4), same semantics as missilecapacity/unitcapacity above. The target column itself is an assumed default by ship size, not real per-ship game data (see COUNTERMEASURE_CAPACITY_BY_SIZE in generate_ships_table.py) -- the mod still adds to it the same way it would a real number."
+      }
+    ],
+    "deployablecapacity": [
+      {
+        "real_table": "ships_base",
+        "real_column": "deployable_capacity",
+        "operation": "add",
+        "confidence": "confirmed",
+        "note": "Raw integer count (+1 to +4), same semantics as missilecapacity/unitcapacity above. The target column itself is an assumed default by ship size, not real per-ship game data (see DEPLOYABLE_CAPACITY_BY_SIZE in generate_ships_table.py) -- the mod still adds to it the same way it would a real number."
+      }
+    ],
+    "radarrange": [
+      {
+        "real_table": "ships_base",
+        "real_column": "radar_range",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "A real ratio multiplier (e.g. 1.05-1.2), applied against ships_base.radar_range -- real per-ship data on only 2 of 255 ships (Hyperion/Sapporo), DEFAULT_RADAR_RANGE (40000) everywhere else, so this mod always has a real base value to scale."
+      }
+    ],
+    "radarcloak": [
+      {
+        "real_table": "ships_base",
+        "real_column": "radar_cloak",
+        "operation": "add",
+        "confidence": "confirmed",
+        "note": "ships_base.radar_cloak is a flat constant 1.0 for every ship (no ship has any inherent stealth) -- this mod's own roll is a negative offset (e.g. -0.45 to -0.3) ADDED to that baseline, e.g. 1.0 + -0.45 = 0.55 (a 45% detectability reduction), not multiplied against it."
+      }
+    ],
+    "regiondamage": [
+      {
+        "real_table": "ships_base",
+        "real_column": "region_damage_immune",
+        "operation": "add_ceiling_bool",
+        "confidence": "confirmed",
+        "note": "ships_base.region_damage_immune is a plain boolean (True only for Erlking, the one real ship with a raw <regiondamage immune=\"1\"/>), not a percentage, even though this mod itself rolls a fractional value (e.g. 0.6-0.9) -- the real in-game mechanic this represents is binary immunity, no partial-reduction concept exists. Apply as: ceil(rolled_value) (always 1 for any positive roll) ADDED to the column's own current 0/1 value, then treat the result as True if >= 1 -- i.e. applying this mod always sets the ship to fully immune, regardless of the specific fractional value rolled."
+      }
+    ],
+    "hidecargochance": [
+      {
+        "real_table": "ships_base",
+        "real_column": "illegal_cargo_concealed",
+        "operation": "add_ceiling_bool",
+        "confidence": "confirmed",
+        "note": "Same shape as regiondamage above -- a plain boolean, always False for every real ship (no per-ship illegal-cargo-concealment data exists anywhere in the game files), rolling a value (min=max=1.0 for the one real mod) that ceils to 1 and gets ADDED, then treated as True if >= 1. There is no partial \"chance\" concept in the underlying data despite the mod's own target_stat name -- applying it always fully conceals illegal cargo from scans."
+      }
+    ]
+  },
+  "weapon": {
+    "cooling": [
+      { "real_table": "weapons_base", "real_column": "heat_coolrate", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "heatgeneration": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "heat_initial",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Not a real equipmentmods.xml target_stat -- invented so parse_chassis_integrated_mods() in generate_ships_table.py has a correctly-named, uninverted place to put a chassis's own <weapon heat=\"\"/> multiplier (e.g. the Dragon's 1.4), distinct from the real \"cooling\" mod above which targets heat_coolrate instead. GitHub issue #26's own screenshot-driven Sustained DPS modeling confirmed this chassis multiplier scales heat GENERATION, not cooling rate: Cooldown Duration never changes with it, only Time to Overheat does. Applies to BOTH heat_initial and heat_value below -- only one of the two is ever populated per weapon (discrete vs continuous heat mechanism), but the chassis multiplier scales whichever one that weapon actually uses."
+      },
+      {
+        "real_table": "bullets_base",
+        "real_column": "heat_value",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Same chassis-integrated heat generation multiplier as heat_initial above -- see that entry's own note."
+      }
+    ],
+    "damage": [
+      { "real_table": "bullets_base", "real_column": "damage_value", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "lifetime": [
+      { "real_table": "bullets_base", "real_column": "bullet_lifetime", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "rotationspeed": [
+      { "real_table": "weapons_base", "real_column": "rotation_speed", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "speed": [
+      { "real_table": "bullets_base", "real_column": "bullet_speed", "operation": "multiply", "confidence": "confirmed", "note": "" }
+    ],
+    "beamlength": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "bullet_range",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "No separate \"length\" attribute exists on any bullet macro -- a beam's own length is just its bullet_range; \"beamlength\" is this mod's own name for scaling that same field on beam-class bullets specifically."
+      }
+    ],
+    "reload": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "reload_time",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Deliberately reload_time only, never reload_rate, even though the two are mutually exclusive per bullet (85 of 186 bullets have only reload_rate, 94 only reload_time) -- by explicit product decision, this mod simply has no effect on a reload_rate-only weapon rather than trying to convert between the two."
+      }
+    ],
+    "chargetime": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "charge_time",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Real, previously-unparsed <bullet chargetime=\"\"/> attribute (charge beams only, e.g. Boron/Kha'ak) -- added as its own bullets_base column specifically so this mod has something real to apply to."
+      }
+    ],
+    "sticktime": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "stick_time",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Real, previously-unparsed <bullet sticktime=\"\"/> attribute (Split sticky/charge projectiles only) -- added as its own bullets_base column specifically so this mod has something real to apply to."
+      }
+    ],
+    "mining": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "mining_damage_multiplier",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Real, previously-unparsed <damage><multiplier mining=\"\"/></damage> nested attribute (mining lasers only) -- added as its own bullets_base column specifically so this mod has something real to apply to."
+      }
+    ],
+    "surfaceelement": [
+      {
+        "real_table": "bullets_base",
+        "real_column": "surfaceelement_damage_multiplier",
+        "operation": "multiply",
+        "confidence": "confirmed",
+        "note": "Real, previously-unparsed <damage><multiplier surfaceelement=\"\"/></damage> nested attribute (bonus damage vs. hull-mounted turrets/shield generators) -- added as its own bullets_base column specifically so this mod has something real to apply to."
+      }
+    ]
+  }
+}

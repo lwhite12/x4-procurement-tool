@@ -21,6 +21,17 @@
      non-blocking "Warnings" banner (e.g. "Currently edited ship has not
      been added to the shopping list."). */
   --warning: #e8a33d;
+  /* Green counterpart to --bg-panel/--border-blue/--accent-blue(-bright)
+     above, same darkness/contrast relationship -- used only by
+     .prebuilt-tables-band (see index.html), a light-green flat bar meant
+     to read as a clearly distinct "quick action" strip from the header's
+     own blue, not a page-navigation bar. --accent-green-bright matches
+     --success exactly on purpose (both mean "a positive, ready-to-use
+     action" in this palette). */
+  --bg-panel-green: #122819;
+  --border-green: #1f4a30;
+  --accent-green: #2f8a52;
+  --accent-green-bright: #4ade80;
 }
 
 /* Reserves the vertical scrollbar's own width permanently, whether or not
@@ -172,6 +183,107 @@ body {
   color: var(--text-primary);
 }
 
+/* "Load Prebuilt Tables" strip -- Component Analyzer page only (see
+   index.html). Same flat continuous-bar recipe as #main-header above
+   (align-items: stretch, no per-item border/radius/gap), just re-colored
+   green so it reads as a distinct quick-action strip rather than another
+   row of page navigation. margin-top cancels out #main-header's own
+   margin-bottom exactly, so the two bands sit flush against each other
+   with no gap -- #main-header's margin-bottom stays as-is (every OTHER
+   page still wants that breathing room before its own content starts),
+   this only pulls the one page that follows it with a band of its own
+   back up to meet it. */
+#prebuilt-tables-band {
+  display: flex;
+  align-items: stretch;
+  margin-top: -1.5rem;
+  margin-bottom: 1rem;
+  background: var(--bg-panel-green);
+  border-bottom: 2px solid var(--border-green);
+}
+
+.prebuilt-tables-band-label {
+  display: flex;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.prebuilt-tables-dropdown {
+  position: relative;
+  display: flex;
+}
+
+.prebuilt-tables-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.prebuilt-tables-dropdown-btn:hover,
+.prebuilt-tables-dropdown-btn[aria-expanded="true"] {
+  background: var(--accent-green);
+  color: var(--text-primary);
+}
+
+.prebuilt-tables-dropdown-caret {
+  font-size: 0.75em;
+}
+
+/* Floats below the bar rather than pushing content down -- a dropdown
+   panel, not another bar segment. */
+.prebuilt-tables-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  background: var(--bg-panel-green);
+  border: 1px solid var(--border-green);
+  border-top: none;
+}
+
+.prebuilt-tables-dropdown-menu a {
+  padding: 0.5rem 1rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.prebuilt-tables-dropdown-menu a:hover {
+  background: var(--accent-green);
+}
+
+/* Economy Wares/Missiles aren't size-tiered, so they're a single link
+   straight to the one table instead of a dropdown -- same flat-bar look
+   as .prebuilt-tables-dropdown-btn, just without the caret/menu. */
+.prebuilt-tables-link-btn {
+  display: flex;
+  align-items: center;
+  padding: 0 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.prebuilt-tables-link-btn:hover {
+  background: var(--accent-green);
+  color: var(--text-primary);
+}
+
 /* Fleet Lists section's own tab bar (see renderFleetListTabs() in app.js)
    -- same flat-bar recipe as #main-nav/.main-nav-btn above, just scoped
    to its own classes (not reusing #main-nav's) since it lives inside a
@@ -186,6 +298,105 @@ body {
   background: var(--bg-panel);
   margin-bottom: 0.75rem;
   overflow: hidden;
+}
+
+/* Ship Trials' own stat-set tabs -- same buildStatSetTabBar()/
+   buildStatSetTabButton() feature as Component Analyzer tables (switching
+   which stats show), just left-aligned and stacked vertically instead of
+   a horizontal bar (user call), so it reads as a row-label-column-style
+   switcher next to the transposed stat rows rather than a header bar
+   above ship columns. Floats beside the table body rather than pushing it
+   down -- see .ship-trial-body's own flex row. */
+.ship-trial-tabs-vertical {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  flex: 0 0 auto;
+  width: 10rem;
+  margin-bottom: 0;
+}
+
+.ship-trial-tabs-vertical .fleet-list-tab-btn {
+  justify-content: flex-start;
+}
+
+/* "Add Fleet List Ship"'s own step-1 fleet picker (see
+   openShipTrialAddFleetShipModal() in app.js) -- same vertical-stack
+   trick as .ship-trial-tabs-vertical above, just sized for a modal
+   (full width, own scroll past a handful of fleets) rather than a narrow
+   sidebar. */
+.ship-trial-fleet-picker-list {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.ship-trial-fleet-picker-row {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.ship-trial-fleet-picker-row-count {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.ship-trial-fleet-ship-back-btn {
+  margin-bottom: 0.5rem;
+}
+
+.ship-trial-fleet-picker-ship-row {
+  align-items: center;
+  cursor: default;
+}
+
+.ship-trial-fleet-picker-ship-name-stack {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Wraps one ship's own picker row plus its collapsible loadout breakdown
+   below it -- a border between consecutive ships since there's no table
+   row/cell structure here to supply one on its own. */
+.ship-trial-fleet-picker-ship-row-wrap {
+  border-bottom: 1px solid var(--border-blue-soft);
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.ship-trial-fleet-picker-ship-row-wrap:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* Same renderLoadoutCell() content/colors as the real Fleet Lists cart
+   table's own .cart-loadout cell (category headings, green item lines,
+   the +/- collapse toggle) -- that function supplies its own category-
+   row/item styling already, this just adds the indent/spacing a <td>
+   would otherwise have given it for free. */
+.ship-trial-fleet-picker-ship-loadout {
+  margin-top: 0.3rem;
+  padding-left: 2.2rem;
+  font-size: 0.85rem;
+}
+
+/* Lets the name grow to fill the tab's own fixed width (see
+   .ship-trial-tabs-vertical's own width: 10rem above), pushing the
+   rename (pencil) and remove (×) buttons that follow it in the DOM to
+   the tab's right edge -- so they line up with each other across every
+   tab regardless of how long each one's own name is, instead of sitting
+   immediately after the name text wherever that happens to end. Only
+   applies in the vertical stack: the horizontal Component Analyzer/Fleet
+   Lists tab bars size each tab to its own content, so there's no shared
+   width for this to line up against there. */
+.ship-trial-tabs-vertical .fleet-list-tab-name-stack {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .fleet-list-tab-btn {
@@ -294,6 +505,36 @@ body {
 .fleet-list-tab-remove-btn:hover {
   opacity: 1;
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* The Component Analyzer's own stat-set tab rename button -- same
+   trailing-icon-on-a-tab look as .fleet-list-tab-remove-btn above, just
+   non-destructive, so it sits before that button instead of styled like
+   it. Swaps .fleet-list-tab-name-stack for .fleet-list-tab-name-input in
+   place (see buildStatSetTabButton() in app.js). */
+.fleet-list-tab-edit-btn {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.fleet-list-tab-edit-btn:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.fleet-list-tab-name-input {
+  width: 8rem;
+  min-width: 0;
+  margin-bottom: 0;
+  font: inherit;
+  padding: 0.1rem 0.3rem;
 }
 
 .fleet-list-tab-add-btn {
@@ -425,6 +666,35 @@ body {
   flex: 1;
 }
 
+/* Reserves the same width as the Engines/Shields sections' own combined
+   mod button (see renderShipDetail()'s own "else" branch) in every other
+   section's heading row, so High Preset/Minimum Preset line up at the
+   same x position across every section regardless of whether that one
+   has a mod button of its own. Matches .component-analyzer-mod-lab-btn's
+   own 40px width exactly (that's the class buildModLabButton() itself
+   puts on every ship-builder mod button, see buildShipModLabButton()). */
+.ship-mod-lab-btn-spacer {
+  flex-shrink: 0;
+  width: 40px;
+}
+
+/* "Chassis Mod" -- the one ship-wide mod with no equipped group of its
+   own to live next to (see renderShipDetail()'s own chassisModRow),
+   right-aligned same as every section's own mod button so it all reads
+   as one consistent control column down the right edge. */
+.ship-chassis-mod-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.ship-chassis-mod-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .section-preset-btn {
   flex-shrink: 0;
   font-size: 0.8rem;
@@ -444,6 +714,19 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* A bonus shield's own mod button (see buildGroupRow()'s own
+   isLinkedShield branch) leads the row right after its "Bonus M Shield"
+   label rather than trailing it like a turret/weapon group's own mod
+   button does -- same override-margin-back-to-plain fix
+   .stat-lab-mock-mod-lab-btn already needs for the identical reason: the
+   base .component-analyzer-mod-lab-btn-row class carries margin-left:
+   auto (meant to push a *trailing* launcher to the row's far end), which
+   would otherwise shove this one away from the label it's meant to sit
+   beside. */
+.group-row-bonus-shield-mod-btn {
+  margin-left: 0;
 }
 
 .group-row label {
@@ -619,6 +902,39 @@ th, td {
   color: var(--text-primary);
 }
 
+/* Sets/clears wareCostListFocusedFleetIndex (see
+   renderWareCostListHead()/setWareCostListFocusedFleet() in app.js) --
+   deliberately its own control, separate from the .fleet-list-tab-btn
+   above it (which still only ever sets activeFleetIndex). Same base look
+   as .ware-cost-list-build-focus-btn, its own accent color when this
+   column IS the focused one (text set directly in app.js, not via a
+   `.focused` modifier class, since the label itself already changes). */
+.ware-cost-list-focus-btn {
+  display: block;
+  margin-top: 0.3rem;
+  width: 100%;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  border-color: var(--border-blue);
+}
+
+.ware-cost-list-focus-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+/* The name-row <th> of whichever column is currently focused -- a
+   distinctly different look from .fleet-list-tab-btn.active's own blue
+   fill (that's "this fleet is active elsewhere in the app", a different
+   concept -- see wareCostListFocusedFleetIndex's own comment), so the two
+   never look like the same thing when they happen to both be true. */
+.ware-cost-list-focused-column {
+  background: var(--bg-panel-hover);
+  border-bottom: 2px solid var(--accent-blue-bright) !important;
+}
+
 /* Vertical divider between adjacent columns -- excluded from collapsible
    header rows ([colspan], set via cell.colSpan = ... in app.js), which
    span every column as a single cell and shouldn't get a stray line
@@ -682,6 +998,15 @@ th, td {
 
 .ware-cost-list-diff-none {
   color: inherit;
+}
+
+/* Reserves the diff line's own height without showing anything -- see
+   appendStatComparisonDiff() in app.js: every numeric Ship Trial stat cell
+   gets one of these whenever it isn't showing a real diff (no baseline set,
+   or this IS the baseline column), so a row's own height stays identical
+   whether or not a baseline is currently active. */
+.ware-cost-list-diff-placeholder {
+  visibility: hidden;
 }
 
 input[type="number"].qty-input {
@@ -1326,7 +1651,8 @@ label {
 
 input[type="text"],
 input[type="number"],
-select {
+select,
+textarea {
   background: var(--bg-panel);
   color: var(--text-primary);
   border: 1px solid var(--border-blue);
@@ -1336,7 +1662,8 @@ select {
 
 input[type="text"]:focus,
 input[type="number"]:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--accent-blue-bright);
 }
@@ -1395,6 +1722,34 @@ input[type="checkbox"] {
    order. */
 .modal-overlay.hidden {
   display: none;
+}
+
+/* The Mod Lab is the one modal that can now open ON TOP OF another modal
+   still showing underneath it (the Stats Lab's own Mocks view, via a
+   mock-component's own Mod Lab button -- see buildMockEntryRow() in
+   app.js) rather than only ever from the plain page behind every modal.
+   Every modal shares the same .modal-overlay z-index (10), so whichever
+   one is LATER in the DOM paints on top by default -- that happened to
+   put #stat-lab-modal-overlay above #mod-lab-modal-overlay (its own
+   markup comes earlier in index.html), silently eating every click
+   meant for the Mod Lab once it's opened this way. A plain z-index bump
+   fixes it regardless of source order, for this nested case and any
+   future one. */
+#mod-lab-modal-overlay {
+  z-index: 11;
+}
+
+/* Same nested-modal case as #mod-lab-modal-overlay above, for the real
+   Ship Builder's own group-row picker and "Select Loadout" modals --
+   #ship-trial-builder-modal-overlay (see openShipTrialBuilderModal() in
+   app.js) relocates the real #ship-detail into itself, and clicking a
+   group row or "Select Loadout" from in there opens one of these two,
+   which would otherwise render BEHIND it (later markup normally wins,
+   but #ship-trial-builder-modal-overlay's own markup comes after both of
+   these in index.html). */
+#equipment-picker-modal-overlay,
+#select-game-loadout-modal-overlay {
+  z-index: 11;
 }
 
 .modal {
@@ -1492,6 +1847,26 @@ input[type="checkbox"] {
 
 .ship-name-row h3 {
   margin: 0;
+}
+
+/* The loadout's own editable name (see renderShipLoadoutNameField() in
+   app.js), right under the ship's own name so it's visible without
+   scrolling past groups/ammo/etc. to reach the "Loadout Name" field
+   further down the page -- both edit the same shipNoteInput value. */
+#ship-loadout-name-row {
+  margin-bottom: 0.5rem;
+}
+
+.ship-loadout-name-field {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.ship-loadout-name-field .editable-name-text {
+  font-style: italic;
 }
 
 /* Wraps Load/Clear/Select Filter Loadout/Add To Saved Loadouts/Add To
@@ -1603,6 +1978,204 @@ input[type="checkbox"] {
 
 .about-disclaimer a {
   color: var(--text-muted);
+}
+
+/* Ship Trials / Fleet Trials -- two real <button>s INSIDE the page's own
+   <legend> (see index.html's #proving-grounds-section) instead of plain
+   legend text, so they get the browser's native "sits in the border line"
+   legend treatment for free (no custom positioning hack needed) while
+   still being clickable, per the user's own "put them as clickable
+   buttons in the line of an outline... but selectable" spec. Clicking one
+   swaps which #proving-grounds-tab-content sibling is visible (see
+   app.js's showProvingGroundsTab()) -- same role Fleet Planner's own
+   separate Ship Builder/Fleet Lists/Calculate Production section titles
+   play, just toggled instead of all shown at once. */
+.proving-grounds-legend-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.proving-grounds-tab-btn {
+  padding: 0.1rem 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.proving-grounds-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+/* A small outline box instead of a color change -- the active tab's own
+   text stays the same color text-primary hover already uses, just with a
+   border around it (user call: no dark-green active color). */
+.proving-grounds-tab-btn.active {
+  color: var(--text-primary);
+  border-color: var(--border-blue);
+  cursor: default;
+}
+
+/* Ship Trials' own "no ships yet" placeholder body (see app.js's
+   buildShipTrialElement()) -- shown until at least one ship is added, then
+   replaced by the real transposed ship-column table (buildShipTrialBody()). */
+.ship-trial-placeholder-body {
+  padding: 1rem 0.25rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* The real transposed comparison's own body -- vertical stat-set tab
+   stack (.ship-trial-tabs-vertical, see .fleet-list-tabs' own comment)
+   beside the scrollable table itself. */
+.ship-trial-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.ship-trial-table-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* One ship column's own header -- chassis icon on top, name underneath,
+   same "like the ships displayed in the Cost Analyzer" stacked layout the
+   user asked for, plus a small remove button for that one column. */
+.ship-trial-column-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+  white-space: normal !important;
+}
+
+/* Icon + name + edited badge, separate from .ship-trial-column-actions
+   (Edit/Remove) below it -- clicking anywhere here sets this column as the
+   comparison baseline (see setShipTrialBaseline() in app.js). */
+.ship-trial-column-select-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+}
+
+.ship-trial-column-select-area:hover {
+  background: var(--bg-panel-hover);
+}
+
+/* Same 4-corner "selection box" overlay as .fleet-list-tab-ship-icon-wrap
+   (see buildShipTrialColumnIcon() in app.js) -- reuses
+   .fleet-list-tab-selection-corner's own corner images/positioning as-is,
+   just around this page's own plain .ship-icon (20px) instead of the Fleet
+   Planner tab bar's own smaller, tinted one. */
+.ship-trial-baseline-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Shown only once this column's own loadout has actually diverged from
+   whatever it was originally added with (see updateShipInTrial()'s own
+   comment) -- same warning color already used for a missing-required-
+   component marker elsewhere, not the danger/red reserved for a real
+   error, since an edited ship isn't broken, just no longer identical to
+   its source. */
+.ship-trial-edited-badge {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--warning);
+  border-radius: 3px;
+  color: var(--warning);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ship-trial-column-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.ship-trial-edit-ship-btn {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.ship-trial-remove-ship-btn {
+  padding: 0 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ship-trial-remove-ship-btn:hover {
+  color: var(--text-primary);
+}
+
+/* Mount point for the real #ship-detail node (see openShipTrialBuilderModal()
+   in app.js) -- no layout rules of its own needed since #ship-detail/
+   .group-row/etc. already bring their own, this just needs to sit inside
+   .modal-wide's own max-height/overflow-y scroll area like anything else
+   in a modal body would. */
+#ship-trial-builder-mount {
+  margin-top: 0.5rem;
+}
+
+/* Scoped to this one modal rather than .modal generally -- every other
+   modal in the app only ever has the bottom .modal-actions Cancel/Close
+   button, and this is a long, scrollable one where a second, always-
+   visible close control in the corner is worth the one-off position:
+   relative. */
+#ship-trial-builder-modal-overlay .modal {
+  position: relative;
+}
+
+.modal-close-x-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.modal-close-x-btn:hover {
+  color: var(--text-primary);
+}
+
+/* Proving Grounds' own placeholder state (see index.html's #page-proving-
+   grounds) -- a centered "under construction" glyph + label. The feature's
+   own scope description lives as the nav tab's own title/mouseover text
+   instead (see the button's data-i18n-title), not page body copy. Replaced
+   once the real page is built; this is deliberately the whole page for
+   now. */
+.proving-grounds-under-construction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1rem 1.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.proving-grounds-under-construction-icon {
+  width: 64px;
+  height: 64px;
 }
 
 /* This tool's own version row plus one row per game/DLC source (see
@@ -1799,6 +2372,56 @@ input[type="checkbox"] {
   margin-bottom: 0.5rem;
 }
 
+/* Same "toggle button row + collapsible panel below" shape as
+   .component-set-picker-search-row/#component-set-picker-filters-panel
+   above, reused by the "Select Filter Loadout" and Ship Trials "Add
+   Loadout Ship" modals' own independent chassis filter panels (see
+   buildChassisFilterPanel() in app.js). */
+#select-game-loadout-filters-row,
+.ship-trial-add-ship-filters-row {
+  display: flex;
+  margin-bottom: 0.5rem;
+}
+
+/* Two free-text filters (ship chassis name, loadout name) sitting above the
+   Filters button/panel in both loadout pickers -- see
+   renderSelectGameLoadoutList()/renderShipTrialAddShipList() in app.js for
+   the AND-combined substring matching against each. */
+.loadout-picker-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.loadout-picker-search-input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+#select-game-loadout-filters-panel,
+#ship-trial-add-ship-filters-panel {
+  margin-bottom: 0.5rem;
+}
+
+/* Widened to match the main Ship Builder's own #ship-filters row width (3 x
+   246px .filter-group boxes + 2 x 1.25rem gaps = 778px) now that these two
+   modals carry their own copy of that same filter panel (see
+   buildChassisFilterPanel() in app.js) -- without this, .modal's own
+   narrower default (min(420px, 90vw), sized for ordinary form fields) would
+   wrap the panel down to one box per row instead of matching the builder's
+   look. */
+#select-game-loadout-modal-overlay .modal,
+#ship-trial-add-ship-modal-overlay .modal {
+  /* 778px (3 x 246px .filter-group boxes + 2 x 1.25rem gaps) is the exact
+     on-paper total, but -- same "off by more than rounding" overhead
+     #ship-filters' own .filter-group width comment already ran into --
+     that exact value measurably still wraps the 3rd box down onto its own
+     row. 820px is a deliberately conservative buffer above it, confirmed
+     to render all 3 boxes per row (see this feature's own verification). */
+  width: min(820px, 90vw);
+}
+
 /* Lives on an inner <span> (index.html), not the <th> itself -- display:
    flex directly on a <th> knocks it out of table-cell layout and breaks
    #component-set-picker-thead th's own position: sticky (confirmed: the
@@ -1989,21 +2612,15 @@ input[type="checkbox"] {
   margin-left: auto;
 }
 
-/* The active stat set's own rename field, directly below its tab strip --
-   same placement relative to .fleet-list-tabs as #cart-name-input has
-   relative to #fleet-list-tabs in the Fleet Lists section. */
-/* Wraps the active stat set's rename field + "Select Stats" button side by
-   side -- same row-below-the-tab-strip placement .component-analyzer-
-   stat-set-name-input always had, just no longer alone in that row. */
+/* Holds the active stat set's "Select Stats"/"Stat Lab"/"Mocked Stats"
+   buttons, directly below the tab strip -- the stat set's own name is
+   edited on the tab itself (see .fleet-list-tab-edit-btn), not shown
+   again here. */
 .component-analyzer-stat-set-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
-}
-
-.component-analyzer-stat-set-name-field {
-  flex: 1;
 }
 
 /* Horizontal-only scroll for the stat table itself -- a table with many
@@ -2014,7 +2631,8 @@ input[type="checkbox"] {
   overflow-x: auto;
 }
 
-#component-analyzer-tables table {
+#component-analyzer-tables table,
+#ship-trials-list table {
   width: max-content;
   min-width: 100%;
   /* separate, not collapse -- collapsed borders break position: sticky on
@@ -2026,7 +2644,9 @@ input[type="checkbox"] {
 }
 
 #component-analyzer-tables th,
-#component-analyzer-tables td {
+#component-analyzer-tables td,
+#ship-trials-list th,
+#ship-trials-list td {
   text-align: left;
   padding: 0.35rem 0.5rem;
   border-bottom: 1px solid var(--border-blue-soft);
@@ -2038,13 +2658,34 @@ input[type="checkbox"] {
    scrolls horizontally past its many stat columns. Solid background is
    required so scrolled-under stat cells don't show through beneath it;
    matches .component-analyzer-table's own panel background since neither
-   header nor body rows set one of their own. */
+   header nor body rows set one of their own. Ship Trials' own table is
+   transposed (see buildShipTrialBody() in app.js), so "first cell in every
+   row" is the stat-label column instead of a component Name column, but
+   the same freeze-while-scrolling need applies identically. */
 #component-analyzer-tables th:first-child,
-#component-analyzer-tables td:first-child {
+#component-analyzer-tables td:first-child,
+#ship-trials-list th:first-child,
+#ship-trials-list td:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background: var(--bg-panel);
+}
+
+/* Fixed width for the Stats (row-label) column, so it's the same size in
+   every Trial regardless of which stats happen to be selected in it --
+   without this it auto-sizes per table to whatever its own longest
+   selected stat label happens to be (see #ship-trials-list th/td's own
+   white-space: nowrap), so switching between Trials visibly shifted this
+   column around. Overrides that nowrap just for this column so a label
+   too long for the fixed width wraps onto a second line instead of
+   forcing the column wider. */
+#ship-trials-list th.ship-trial-stats-col,
+#ship-trials-list td.ship-trial-stats-col {
+  width: 14rem;
+  min-width: 14rem;
+  max-width: 14rem;
+  white-space: normal;
 }
 
 .component-analyzer-empty-cell {
@@ -2057,6 +2698,19 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+/* A derived/pre-derived stat cell whose formula couldn't resolve one or
+   more of its own mocks (see resolveMockValue()'s own comment) -- the
+   cell itself stays blank (same "blank on missing data" contract every
+   other stat already follows), this just flags *why* rather than leaving
+   it silently indistinguishable from genuinely-missing raw data. Title
+   attribute carries the actual missing-mock name(s); cursor: help nudges
+   toward hovering for that detail. */
+.component-analyzer-missing-mock-icon {
+  margin-left: 0.3rem;
+  color: #ffb300;
+  cursor: help;
 }
 
 .component-analyzer-sort-btn {
@@ -2106,6 +2760,23 @@ input[type="checkbox"] {
   height: 32px;
 }
 
+/* Wraps the launcher's own icon -- used to be sized around a second,
+   absolutely-positioned chassis-quality icon too (removed alongside the
+   Mod Lab's chassis-slot selection feature, see .mod-lab-modal's own
+   comment), kept as its own element since the flex-centering here still
+   matters for the single icon. */
+.component-analyzer-mod-lab-btn-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.component-analyzer-mod-lab-btn-icon-main {
+  position: relative;
+  z-index: 1;
+}
+
 /* Each row's own Name cell -- name text plus a half-size Modifications Lab
    launcher (see .component-analyzer-mod-lab-btn-row below), same
    push-to-the-far-end flex layout as the header's own
@@ -2129,20 +2800,437 @@ input[type="checkbox"] {
   height: 16px;
 }
 
-/* ---- Modifications Lab modal (placeholder shell) ---- */
-.mod-lab-modal-body {
+/* ---- Modifications Lab modal ---- */
+/* Wider than the base .modal's 420px -- room for the mod picker (tabs +
+   list) plus the loaded-mod panel's own one column. Narrower than it used
+   to be: a second "Integrated Chassis Mod" column used to sit alongside
+   the standard one here, removed once the Modifier Chassis stats started
+   reading a ship's own real column directly via a cross-component mock
+   instead of a Mod Lab chassis-slot selection -- see
+   [[project-mod-modified-stats-architecture]]. Still centered by
+   .modal-overlay's own flex centering regardless of width, nothing extra
+   needed for that here. */
+.mod-lab-modal {
+  width: min(640px, 95vw);
+}
+
+.mod-lab-body {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 1rem 0;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+/* Fixed-ish width so the loaded panel gets the rest -- matches the old
+   single-pane modal's own width, just no longer the whole modal. */
+.mod-lab-picker {
+  flex: 0 0 280px;
+  min-width: 0;
+}
+
+/* One column today (see .mod-lab-modal's own comment) -- still a flex
+   container so a future second column, if one's ever reintroduced, slots
+   in without restructuring this. */
+.mod-lab-loaded-panel {
+  flex: 1;
+  display: flex;
+  gap: 1rem;
+  min-width: 0;
+  border-left: 1px solid var(--border-blue-soft);
+  padding-left: 1rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.mod-lab-loaded-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Title + its own static Clear button (see index.html -- always present,
+   only its `disabled` state changes, via updateModLabClearButtons()) on
+   one row, button right-aligned. Clear only ever touches the local editor
+   below (modLabLoaded/modLabSlotTouched) -- table.globalMods and the
+   override-empty checkbox are both entirely separate, see
+   clearModLabSlot()'s own comment. */
+.mod-lab-loaded-column-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mod-lab-loaded-column-header h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.mod-lab-loaded-column-header .mod-lab-loaded-action-btn {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.mod-lab-loaded-empty {
   font-style: italic;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* A 3-column table -- optional checkbox, then the stat's own two-line
+   label+range, then its input right-aligned in its own column -- so every
+   row's input lines up along the same right edge regardless of how long
+   that row's own label/range text runs. .mod-lab-loaded-stat-row itself
+   is `display: contents` (see below) so its own children become direct
+   grid items here instead of being nested inside their own row box, the
+   only way to get column alignment across multiple rows in CSS grid.
+   mod-name/empty/variable-header all span the full width instead of
+   sitting in one column. */
+.mod-lab-loaded-content {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 0.5rem;
+  row-gap: 0.4rem;
+  align-items: center;
+}
+
+/* Both sub-sections stay `display: contents` -- their own children (mod
+   name, stat rows, buttons) become direct grid items of
+   .mod-lab-loaded-content above, the only way nested markup can still
+   line up in the same 3-column grid as everything else (see
+   renderModLabLoadedColumn()'s own comment for why the local slot and the
+   read-only global-fallback display are two separate wrapped sections in
+   the first place -- distinguishing them lets
+   updateModLabVariableHeaderValidity() target only the local one). */
+.mod-lab-local-section,
+.mod-lab-fallback-section,
+.mod-lab-mod-display {
+  display: contents;
+}
+
+.mod-lab-loaded-empty,
+.mod-lab-loaded-mod-name,
+.mod-lab-loaded-variable-header,
+.mod-lab-fallback-title,
+.mod-lab-override-empty-label,
+.mod-lab-mod-cost {
+  grid-column: 1 / -1;
+}
+
+/* The bottom-of-display cost section for a real (non-chassis) mod -- see
+   buildModLabModCost() in app.js. A light top border separates it from
+   the stat rows above, same visual break .mod-lab-loaded-variable-header
+   already uses for its own "select N" section. */
+.mod-lab-mod-cost {
+  margin-top: 0.4rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-blue-soft);
+  font-size: 0.8rem;
+}
+
+.mod-lab-mod-cost-price {
+  font-weight: 600;
+}
+
+.mod-lab-mod-cost-header {
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.mod-lab-mod-cost-list {
+  margin: 0.15rem 0 0;
+  padding-left: 1.1rem;
   color: var(--text-muted);
 }
 
-.mod-lab-modal-icon {
-  width: 40px;
-  height: 40px;
+/* Read-only reference display of table.globalMods[slot] -- what this row
+   would inherit if it had no override of its own (see
+   renderModLabLoadedColumn()). Its own title visually separates it from
+   the editable local slot above; its own mod-name/stat rows reuse the
+   exact same classes/layout as the local slot (buildModLabModDisplay()),
+   just fed through buildModLabReadOnlyStatRow() instead -- no checkbox,
+   no input. */
+.mod-lab-fallback-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-blue-soft);
+}
+
+/* Always shown alongside the fallback display (whenever table.globalMods
+   has a mod for this slot), regardless of whether the local editor above
+   is empty or has its own mod loaded -- see toggleModLabOverrideEmpty()'s
+   own "agnostic of local" comment. */
+.mod-lab-override-empty-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  margin-top: 0.2rem;
+  cursor: pointer;
+}
+
+.mod-lab-loaded-mod-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Wraps the mod name plus its own Copy/Paste pair on one row (see
+   buildModLabModDisplay() in app.js) -- a real grid item spanning the
+   full 3-column width (same reasoning as .mod-lab-loaded-mod-name's own
+   now-redundant grid-column rule above, kept for the empty-slot row below
+   which still needs it directly), with the name and buttons pushed to
+   opposite ends. */
+.mod-lab-mod-display-header,
+.mod-lab-loaded-empty-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mod-lab-mod-actions {
+  display: flex;
+  gap: 0.3rem;
   flex-shrink: 0;
+}
+
+.mod-lab-mod-action-btn {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: 3px;
+  border: 1px solid var(--border-blue-soft);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.mod-lab-mod-action-btn:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--accent-blue);
+}
+
+.mod-lab-mod-action-btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.mod-lab-mod-action-btn-error {
+  color: #d9534f;
+  border-color: #d9534f;
+}
+
+.mod-lab-loaded-variable-header {
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+  margin-left: -0.3rem;
+}
+
+/* Fewer (or more, though the checkbox's own cap already prevents that --
+   see buildModLabLoadedStatRow()) than exactly this mod's own
+   additional_stats_count are currently checked -- same red-box treatment
+   as an individual invalid stat input (see .mod-lab-loaded-stat-input's
+   own :invalid rule), toggled by updateModLabVariableHeaderValidity(). */
+.mod-lab-loaded-variable-header-invalid {
+  border-color: #d9534f;
+}
+
+.mod-lab-loaded-stat-row {
+  display: contents;
+}
+
+.mod-lab-loaded-stat-checkbox {
+  grid-column: 1;
+}
+
+.mod-lab-loaded-stat-text {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+  font-size: 0.8rem;
+}
+
+.mod-lab-loaded-stat-range {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.mod-lab-loaded-stat-input {
+  grid-column: 3;
+  justify-self: end;
+  width: 4.5rem;
+  padding: 0.15rem 0.3rem;
+  /* Same reasoning as input[type="number"].qty-input above -- no stepper
+     buttons make sense for a free-typed roll value, native or otherwise. */
+  -moz-appearance: textfield;
+}
+
+.mod-lab-loaded-stat-input::-webkit-outer-spin-button,
+.mod-lab-loaded-stat-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Empty (required) or out-of-range -- exactly what blocks Confirm, see
+   updateModLabConfirmState() -- flagged inline so it's obvious which row
+   needs fixing, not just that the button itself is disabled. Skipped
+   while the user is still typing a partial number that hasn't resolved to
+   an in-range value yet (e.g. "-" alone, or a bare "1" before continuing
+   to "15") -- only once the field has been left. */
+.mod-lab-loaded-stat-input:invalid:not(:focus) {
+  border-color: #d9534f;
+}
+
+.mod-lab-loaded-stat-input:disabled {
+  opacity: 0.4;
+}
+
+/* Clicking a row in the picker list "loads" it into the matching column
+   above (standard tiers -> left, chassis -> right, see app.js's
+   loadModLabMod()) -- the currently-loaded mod(s) get a highlight here so
+   it's clear at a glance what's already loaded while browsing other tabs. */
+.mod-lab-mod-row {
+  cursor: pointer;
+}
+
+.mod-lab-mod-row.mod-lab-mod-row-loaded {
+  background: var(--bg-panel);
+  border-radius: 4px;
+  /* No horizontal margin here (a negative one used to bleed the highlight
+     slightly past the row's own edges) -- it pushed the row past
+     .mod-lab-mods-list's own right edge, forcing a horizontal scrollbar
+     that only ever appeared once something was loaded. The highlight
+     reads just as well filling the row's own existing width. */
+  padding: 0.3rem 0.4rem;
+}
+
+/* Four tabs: Chassis (a white corvette symbol) plus the three real
+   in-game quality tiers (each tier's own white chevron-count badge, see
+   generate_mod_lab_icons.py's own *_white.png outputs). Every tab is
+   icon-only, plain white regardless of tier -- the tier's own real color
+   (see MOD_QUALITY_COLORS in app.js -- libraries/colors.xml's own
+   equipmentmod_quality_basic/advanced/exceptional -> green_bright/
+   azure_bright/magenta_dark) is used only on each mod's own name text
+   inside the list below, not up here on the tab itself; the tab's own
+   name is available as a tooltip (title attribute, set from
+   modQualityNames for tabs 1-3, static i18n for tab 0). */
+.mod-lab-tab-bar {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-blue-soft);
+}
+
+.mod-lab-tab-btn {
+  flex: 1;
+  padding: 0.5rem 0.4rem;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+
+.mod-lab-tab-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mod-lab-tab-btn-icon img {
+  width: 44px;
+  height: 44px;
+  opacity: 0.6;
+}
+
+.mod-lab-tab-btn-icon:hover img,
+.mod-lab-tab-btn-icon.active img {
+  opacity: 1;
+}
+
+.mod-lab-tab-btn.active {
+  border-bottom-color: var(--text-primary);
+}
+
+.mod-lab-mods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+}
+
+.mod-lab-mod-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-blue-soft);
+}
+
+.mod-lab-mod-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.mod-lab-mod-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* That tier's own white chevron/corvette icon (see MOD_QUALITY_ICONS in
+   app.js) -- the shape shows the tier while staying visually neutral; the
+   name's own color (see .mod-lab-mod-name) is what actually carries the
+   real tier color. */
+.mod-lab-mod-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.mod-lab-mod-name {
+  font-size: 0.9rem;
+}
+
+/* Indented under the icon+name header, same left offset as the icon's
+   own width+gap so the effect lines visually belong to that one mod. */
+.mod-lab-mod-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-left: calc(22px + 0.5rem);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.mod-lab-mod-effect-variable-count {
+  font-style: italic;
+}
+
+.mod-lab-mod-effect-variable {
+  padding-left: 0.75rem;
+}
+
+.mod-lab-empty {
+  font-style: italic;
+  color: var(--text-muted);
+  padding: 1rem 0;
 }
 
 /* ---- Component Analyzer's "Select Stats" modal ---- */
@@ -2235,6 +3323,124 @@ input[type="checkbox"] {
   cursor: default;
 }
 
+/* Wraps one stat's own row plus its tag banner (see buildStatTagBanner()
+   in app.js) on the same line, to the right of it -- a row, not the
+   stacked-below column this used to be, so it reads the same way a
+   group's own tag now does (appended straight into
+   .stat-select-group-toggle alongside its label text). */
+.stat-select-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stat-select-stat-details-btn {
+  flex-shrink: 0;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border-blue);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stat-select-stat-details-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+/* The Statistics Lab's own tag banner (see buildStatTagBanner() in
+   app.js) -- reused identically after a group's own label and after a
+   stat's own row, labeling whichever tag actually applies ("Static",
+   "Fundamental", "Pre-Derived", and eventually "Dynamic"/"Derived" once
+   those exist). Shared base look here; each kind's own color (border +
+   text, plus a lighter/50%-transparent fill of that same hue) lives in
+   its own .stat-tag-banner-<kind> rule below, so a future kind added to
+   STAT_TAG_LABEL_KEYS needs a matching rule here to actually render
+   colored rather than blank. */
+.stat-tag-banner {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+/* Green like MOD_QUALITY_COLORS[1]'s own Basic-tier green, for a
+   consistent app-wide "green = the safe/default/built-in one" vocabulary
+   rather than a new one-off color -- a "fundamental" stat reads straight
+   off a real database column, nothing built/derived about it. */
+.stat-tag-banner-fundamental {
+  color: #4dff4d;
+  border-color: #4dff4d;
+  background: rgba(179, 255, 179, 0.5);
+}
+
+/* Yellow -- a stat GROUP's own "static" tag (every app-shipped group;
+   can't be renamed/deleted/reordered), distinct from any stat-level kind
+   above/below so a group's own tag never reads as one of a stat's. */
+.stat-tag-banner-static {
+  color: #ffd633;
+  border-color: #ffd633;
+  background: rgba(255, 242, 179, 0.5);
+}
+
+/* Blue like MOD_QUALITY_COLORS[2]'s own Enhanced-tier blue -- continues
+   that same tier vocabulary one step further than fundamental's green:
+   a "pre-derived" stat is an app-authored formula (see
+   ECONOMY_WARE_STAT_DEFINITIONS' own "price_per_volume" in app.js) built
+   on top of fundamental ones, the way Enhanced mods build on Basic.
+   Purple (MOD_QUALITY_COLORS[3]) is left free for a future user-created
+   "derived" stat to continue the progression. */
+.stat-tag-banner-pre-derived {
+  color: #4db5ff;
+  border-color: #4db5ff;
+  background: rgba(179, 224, 255, 0.5);
+}
+
+/* Orange -- a stat GROUP's own "dynamic" tag (a user-created group --
+   freely renamed/deleted/reordered), the group-level counterpart to a
+   stat's own "derived" tag just below. Shares its hex with
+   .stat-tag-banner-mod just below on purpose -- both trace back to the
+   same orange the Mod Lab's own former chassis-integrated-mod slot used
+   (MOD_QUALITY_COLORS[0], before that slot was removed, see
+   modsForComponentType()'s own comment) -- never shown on the same
+   element (one's a group tag, one's a stat tag), so there's no real
+   collision despite the shared color. */
+.stat-tag-banner-dynamic {
+  color: #ff8000;
+  border-color: #ff8000;
+  background: rgba(255, 214, 179, 0.5);
+}
+
+/* Purple like MOD_QUALITY_COLORS[3]'s own Exceptional-tier purple --
+   completes the green/blue/purple progression fundamental/pre-derived/
+   derived started (see .stat-tag-banner-pre-derived's own comment): a
+   "derived" stat is a user-authored formula, one step further from a real
+   column than an app-authored "pre-derived" one. */
+.stat-tag-banner-derived {
+  color: #b300b3;
+  border-color: #b300b3;
+  background: rgba(240, 179, 240, 0.5);
+}
+
+/* Orange -- a "mod" stat (see modifierModStatDef()'s own comment): the
+   one kind of stat whose value is genuinely live, client-side-only state
+   (the player's own current Mod Lab selection) rather than anything ever
+   extracted from the game's own files, so it gets its own tag rather than
+   folding into "pre-derived". Same hex as .stat-tag-banner-dynamic just
+   above (see that rule's own comment on why that's not a collision). */
+.stat-tag-banner-mod {
+  color: #ff8000;
+  border-color: #ff8000;
+  background: rgba(255, 214, 179, 0.5);
+}
+
 .stat-select-selected-panel {
   flex: 1;
   min-width: 0;
@@ -2281,6 +3487,28 @@ input[type="checkbox"] {
   align-items: center;
   gap: 0.5rem;
   padding: 0.2rem 0.3rem;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.stat-select-selected-row-dragging {
+  opacity: 0.5;
+}
+
+.stat-select-selected-row-drag-over {
+  border-top-color: var(--accent-blue-bright);
+}
+
+.stat-select-selected-drag-handle {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.stat-select-selected-drag-handle:active {
+  cursor: grabbing;
 }
 
 .stat-select-selected-label {
@@ -2301,4 +3529,682 @@ input[type="checkbox"] {
 .stat-select-selected-remove-btn:hover {
   opacity: 1;
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* ---- Statistics Lab (GitHub issue #26) ---- */
+
+.stat-select-modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.stat-select-modal-title-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.component-analyzer-stat-lab-btn {
+  margin-left: 0.35rem;
+}
+
+.component-analyzer-mocked-stats-btn {
+  margin-left: 0.35rem;
+}
+
+/* 50% wider than the base .modal's own default -- the Mocks view's own
+   entry rows (see .stat-lab-mock-entry-row) need room for a label, a
+   value control (a wareId picker can be a long ship/component name), a
+   small Mod Lab launcher, and move/remove buttons all on one row without
+   crowding; Browse/Builder share this same modal shell, so they get the
+   extra width too, which doesn't hurt either. */
+.stat-lab-modal {
+  width: min(1290px, 95vw);
+}
+
+/* The Statistics Lab's own "Missing Mocks" summary -- always visible
+   regardless of which of the three views (Browse/Builder/Mocks) is
+   currently showing, since it's a standing warning about the whole
+   catalog's own state, not something scoped to one view. Amber to match
+   .component-analyzer-missing-mock-icon's own color -- the same warning,
+   just aggregated across every table instead of shown per-cell. */
+.stat-lab-missing-mocks-summary {
+  border: 1px solid #ffb300;
+  background: rgba(255, 179, 0, 0.1);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.6rem;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.stat-lab-missing-mocks-heading {
+  font-weight: 700;
+  color: #ffb300;
+  margin-bottom: 0.3rem;
+}
+
+.stat-lab-missing-mocks-table {
+  margin-bottom: 0.3rem;
+}
+
+.stat-lab-missing-mocks-table-name {
+  font-weight: 600;
+}
+
+.stat-lab-missing-mocks-line {
+  padding-left: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.stat-lab-browse-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.stat-lab-browse-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.stat-lab-browse-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: var(--bg-panel);
+}
+
+.stat-lab-browse-group {
+  margin-bottom: 0.5rem;
+}
+
+.stat-lab-browse-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  padding: 0.2rem 0.3rem;
+}
+
+/* The group's own expand/collapse toggle -- a small icon-only button
+   (just the +/- glyph, see .cart-loadout-toggle-btn) rather than the
+   Select Stats modal's own whole-header toggle button
+   (.stat-select-group-toggle), since a "dynamic" group's own name field
+   here can itself be independently interactive (rename pencil + input)
+   and needs to keep taking its own clicks. */
+.stat-lab-browse-group-toggle {
+  flex-shrink: 0;
+  padding: 0.2rem 0.35rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.stat-lab-browse-group-toggle:hover {
+  background: var(--bg-panel-hover);
+}
+
+.stat-lab-browse-group-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.stat-lab-browse-group-delete-btn {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stat-lab-browse-group-delete-btn:hover {
+  color: var(--danger);
+}
+
+.stat-lab-browse-group-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0 0.3rem 1rem;
+}
+
+.stat-lab-browse-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem;
+}
+
+.stat-lab-browse-stat-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-lab-browse-stat-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.stat-lab-browse-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.3rem;
+}
+
+.stat-lab-builder-field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Same selector specificity as plain .hidden (one class each) -- without
+   this, whichever of the two is declared LATER in this file wins on a
+   tied specificity regardless of which element actually has "hidden"
+   applied, so a hidden field row would silently keep rendering as flex.
+   Two classes together always outrank one, so this wins outright. */
+.stat-lab-builder-field-row.hidden {
+  display: none;
+}
+
+.stat-lab-builder-field-row label {
+  flex-shrink: 0;
+  width: 5rem;
+  color: var(--text-muted);
+}
+
+.stat-lab-builder-field-row input[type="text"],
+.stat-lab-builder-field-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-lab-builder-expression-row textarea {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+  resize: vertical;
+}
+
+.stat-lab-builder-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.3rem;
+}
+
+/* Red -- deliberately the app's only other use of --danger for plain body
+   text (everywhere else it's a button/result state) since this is
+   genuinely a "fix this before you can save" warning, not just muted
+   informational text. Hidden entirely (see renderStatLabUnresolvedVariables()
+   in app.js) whenever nothing is unresolved, rather than shown empty. */
+.stat-lab-unresolved-variables {
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.stat-lab-builder-variables-header-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.3rem;
+}
+
+.stat-lab-builder-variables {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.stat-lab-builder-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.stat-lab-builder-group-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stat-lab-builder-group-type-label {
+  flex-shrink: 0;
+  min-width: 6rem;
+  color: var(--text-muted);
+}
+
+/* Grid, not flex -- so .stat-lab-builder-variables-columns-header (the
+   column-explainer row above the list) can line up exactly above each
+   control just by sharing this same grid-template-columns, with no flex
+   grow/shrink math to keep in sync between the two. */
+.stat-lab-builder-variable-row,
+.stat-lab-builder-variables-columns-header {
+  display: grid;
+  grid-template-columns: minmax(4rem, 12rem) 6rem 7.5rem 1fr 7rem 1.4rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stat-lab-builder-variables-columns-header {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.stat-lab-builder-variable-name {
+  font-family: monospace;
+  min-width: 0;
+}
+
+/* visibility, not display -- keeps the grid cell reserved when Limit has
+   nothing to show (aggregation "none") instead of collapsing it, which
+   would shift the remove button into this column's own slot -- see
+   renderStatLabBuilderVariables()'s own comment in app.js. */
+.stat-lab-builder-variable-limit-inactive {
+  visibility: hidden;
+}
+
+.stat-lab-builder-variable-aggregation,
+.stat-lab-builder-variable-type,
+.stat-lab-builder-variable-stat,
+.stat-lab-builder-variable-limit {
+  min-width: 0;
+  width: 100%;
+}
+
+.stat-lab-builder-variable-remove-btn {
+  flex-shrink: 0;
+  padding: 0 0.35rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stat-lab-builder-variable-remove-btn:hover {
+  color: var(--danger);
+}
+
+/* Read-only inspector (see openStatLabInspect() in app.js) -- same column
+   widths as .stat-lab-builder-variable-row above, minus its trailing
+   remove-button column, since there's nothing to remove here. */
+.stat-lab-inspect-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.stat-lab-inspect-name-row h4 {
+  margin: 0;
+}
+
+.stat-lab-inspect-expression {
+  display: block;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-blue);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.stat-lab-inspect-variables-columns-header,
+.stat-lab-inspect-variable-row {
+  display: grid;
+  /* Name column is 2.5x .stat-lab-builder-variable-row's own minmax(4rem,
+     12rem) -- some formulas' own variable names (e.g. Avg Equipped Cost's
+     own *_capacity_slots names) were wide enough to cross into the
+     Aggregation column at the original width. */
+  grid-template-columns: minmax(10rem, 30rem) 6rem 7.5rem 1fr 7rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stat-lab-inspect-variables-columns-header {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.stat-lab-inspect-variable-row {
+  font-size: 0.9rem;
+}
+
+/* A Limit cell's own text is another variable's bare identifier (e.g.
+   "countermeasure_capacity_slots", see describeFormulaVariableTarget()) --
+   no spaces to wrap at, so without this it silently overflows its 7rem
+   column (and the modal's own edge) instead of wrapping, now that the Name
+   column above grew wide enough to actually let that overflow show. */
+.stat-lab-inspect-variables-columns-header > span,
+.stat-lab-inspect-variable-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stat-lab-inspect-variable-name {
+  font-family: monospace;
+}
+
+.stat-lab-inspect-variable-cell-muted {
+  color: var(--text-muted);
+}
+
+.stat-lab-builder-eval-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.stat-lab-builder-eval-row label {
+  color: var(--text-muted);
+}
+
+.stat-lab-eval-result {
+  font-weight: 600;
+}
+
+.stat-lab-eval-result-ok {
+  color: var(--success);
+}
+
+.stat-lab-eval-result-error {
+  color: var(--danger);
+}
+
+.stat-lab-mocks-header-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* The Add Mock wizard -- an inline expanding panel (toggled by
+   #stat-lab-add-mock-btn), not a modal-within-a-modal, so it stays
+   visually part of the Mocks view it's building an entry for. */
+.stat-lab-mock-wizard {
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+  background: var(--bg-panel);
+}
+
+.stat-lab-mock-wizard-display {
+  color: var(--text-muted);
+  font-style: italic;
+  min-width: 6rem;
+}
+
+.stat-lab-mocks-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.stat-lab-mock-section {
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: var(--bg-panel);
+}
+
+.stat-lab-mock-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.stat-lab-mock-section-collapse-btn {
+  flex-shrink: 0;
+}
+
+.stat-lab-mock-section-add-btn {
+  padding: 0 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.stat-lab-mock-section-add-btn:hover {
+  color: var(--text-primary);
+}
+
+.stat-lab-mock-section-copy-btn {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.stat-lab-mock-section-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+
+.stat-lab-mock-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.stat-lab-mock-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+  flex-wrap: wrap;
+}
+
+/* The row's own Mod Lab launcher (see buildMockEntryRow() in app.js) --
+   reuses .component-analyzer-mod-lab-btn-row's own 20px/16px-icon sizing
+   verbatim (the "same small circle" the main Component Analyzer table
+   already uses), but leads this row instead of trailing it, so its own
+   base class's margin-left: auto (meant to push a *trailing* launcher to
+   a flex row's far end) needs overriding back to a plain margin here. */
+.stat-lab-mock-mod-lab-btn {
+  margin-left: 0;
+}
+
+.stat-lab-mock-entry-label {
+  flex: 1;
+  min-width: 8rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.stat-lab-mock-value-control {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.stat-lab-mock-number-input {
+  width: 6rem;
+}
+
+.stat-lab-mock-count-control {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.stat-lab-mock-count-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.stat-lab-mock-count-input {
+  width: 3.5rem;
+}
+
+/* A disabled buildMockCountControl() -- shown on a group-mode entry's row
+   in place of a live count box, purely so that row's columns (label |
+   ware picker | count box | move/remove) land in the same place as every
+   flat entry's row above/below it. Its real count lives on the separate
+   .stat-lab-mock-group-count-line below instead. */
+.stat-lab-mock-count-control-disabled {
+  opacity: 0.4;
+}
+
+.stat-lab-mock-count-control-disabled .stat-lab-mock-count-input {
+  cursor: not-allowed;
+}
+
+/* Group-mode's own count control (buildMockGroupCountControl()) always
+   gets its own line below the entry row's first line -- it holds two
+   labeled inputs (per-group, group count) so it reads better on a
+   dedicated line than crammed next to the label/ware-picker, and unlike
+   the plain flat count control, wrapping it unpredictably would make it
+   easy to misread which number is which. flex-basis: 100% on the entry
+   row's own flex-wrap forces the line break. */
+.stat-lab-mock-group-count-line {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+}
+
+/* Small "i" circle after a stat's name when it has a description -- see
+   buildStatInfoIcon() in app.js. The description itself is the native
+   title tooltip on this icon AND on the name it follows. */
+.stat-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.05em;
+  height: 1.05em;
+  margin-left: 0.35em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.7em;
+  font-weight: 700;
+  font-style: italic;
+  font-family: serif;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.stat-info-icon:hover {
+  opacity: 1;
+}
+
+/* Cell "e" icon + popover: which mocks a stat cell's value came from. */
+.stat-mock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.05em;
+  height: 1.05em;
+  margin-left: 0.35em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.7em;
+  font-weight: 700;
+  font-family: serif;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.stat-mock-icon:hover,
+.stat-mock-icon:focus-visible {
+  opacity: 1;
+}
+
+.mock-trace-popover {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(28rem, calc(100vw - 16px));
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-blue);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.mock-trace-popover-title {
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.mock-trace-popover-line {
+  margin: 0.15rem 0;
+}
+
+.mock-trace-popover-line-header {
+  font-weight: 600;
+  margin-top: 0.3rem;
+}
+
+.mock-trace-popover-line-entry {
+  padding-left: 0.9rem;
+}
+
+.mock-trace-popover-line-skipped,
+.mock-trace-popover-line-missing {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.stat-lab-mock-move-btn {
+  padding: 0 0.35rem;
+}
+
+/* The Constants page (see renderStatLabConstantsList() in app.js) -- a flat
+   list, each row reusing .stat-lab-mock-entry-row's own look. */
+.stat-lab-constants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+}
+
+.stat-lab-constant-type-label {
+  flex-shrink: 0;
+  min-width: 4.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.stat-lab-constant-value {
+  flex-shrink: 0;
+  min-width: 4.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }

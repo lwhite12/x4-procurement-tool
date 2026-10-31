@@ -258,6 +258,34 @@ def fetch_groups(conn: sqlite3.Connection, ship_id: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def fetch_groups_bulk(conn: sqlite3.Connection, ship_ids: list[str]) -> dict[str, list[sqlite3.Row]]:
+    """Same rows as fetch_groups(), for many ships in one query -- backs
+    POST /api/ships/groups_bulk, which a Component Analyzer table with many
+    rows calls ONCE for every distinct chassis it needs group data for,
+    instead of fetch_groups()'s own one-ship-at-a-time GET /api/ships/{id}/
+    groups firing a separate request per row (see app.js's own
+    chassisGroupsFor()/orderedChassisGroups() for the "group mode" mock
+    feature this backs). Every requested ship_id is present in the result
+    even with zero real groups, so a caller never re-requests a ship it
+    already asked about.
+    """
+    result: dict[str, list[sqlite3.Row]] = {sid: [] for sid in ship_ids}
+    if not ship_ids:
+        return result
+    placeholders = ", ".join("?" for _ in ship_ids)
+    rows = conn.execute(
+        f"""
+        SELECT ship_id, group_name, component_type, size, slot_count, equipment_compatibility_class, connection_names
+        FROM ship_component_groups
+        WHERE ship_id IN ({placeholders})
+        """,
+        ship_ids,
+    ).fetchall()
+    for row in rows:
+        result.setdefault(row["ship_id"], []).append(row)
+    return result
+
+
 def matching_items(
     conn: sqlite3.Connection,
     component_type: str,
@@ -268,11 +296,24 @@ def matching_items(
     lang: str = "en",
 ) -> list[dict]:
     """Every equipment_wares_base-joined row from the type's table matching
-    this group's size, whose own compatibility tag set is a *subset* of
-    this group's (comma-joined) compat_class tag set -- see the module
-    docstring for why the match direction is equipment-subset-of-group
-    rather than an equality/membership test. An unset compat_class yields
-    no matches -- see the module docstring for why.
+    this group's size, whose own compatibility tag set -- OR any of its
+    real compatibility-variant aliases' own tag set, see
+    equipment_ware_aliases' own schema comment in ships_tables.sql and
+    generate_ships_table.py's parse_equipment_component_wares() -- is a
+    *subset* of this group's (comma-joined) compat_class tag set -- see the
+    module docstring for why the match direction is equipment-subset-of-
+    group rather than an equality/membership test. An unset compat_class
+    yields no matches -- see the module docstring for why.
+
+    A canonical ware (the one row left in `table` after generate time
+    collapsed its compatibility-variant duplicates) can have more than one
+    real compatibility tag set -- e.g. a turret craftable in both a
+    "standard" and an "advanced" hull molding, same stats either way, one
+    ware_id kept as canonical with the other's own tag set recorded in
+    equipment_ware_aliases instead of a second turrets_base row. A group
+    whose own tags satisfy *either* variant's requirement must still see
+    this ware as an option, so every candidate's compatibility check tests
+    against the union of its own tag set and every alias row targeting it.
 
     `ship_is_hostile` (whether the querying ship itself is
     HOSTILE_ONLY_FACTIONS-owned -- see is_hostile_only_ware()) gates an
@@ -376,11 +417,22 @@ def matching_items(
         WHERE t.size = ? {missile_filter}
     """
     candidates = [dict(row) for row in conn.execute(query, [lang, size]).fetchall()]
-    rows = [
-        row
-        for row in candidates
-        if set(row["compatibility"].split(",") if row["compatibility"] else []) <= group_tags
-    ]
+
+    # target_ware_id -> every alias row's own compatibility, for this
+    # equip_type only -- a small table (a few dozen rows total across every
+    # type), fetched once per call rather than per candidate.
+    alias_compat_by_target: dict[str, list[str]] = {}
+    for alias_row in conn.execute(
+        "SELECT target_ware_id, compatibility FROM equipment_ware_aliases WHERE equipment_type = ?",
+        (component_type,),
+    ).fetchall():
+        alias_compat_by_target.setdefault(alias_row["target_ware_id"], []).append(alias_row["compatibility"])
+
+    def matches_group(row: dict) -> bool:
+        compat_variants = [row["compatibility"], *alias_compat_by_target.get(row["ware_id"], [])]
+        return any(set(c.split(",")) <= group_tags for c in compat_variants if c)
+
+    rows = [row for row in candidates if matches_group(row)]
     if not ship_is_hostile:
         rows = [row for row in rows if not is_hostile_only_ware(row["ware_id"], maker_races)]
     if not has_ammo_columns:
@@ -388,6 +440,81 @@ def matching_items(
             row["ammunition_tags"] = None
             row["ammunition_capacity"] = None
     return rows
+
+
+def ships_matching_ware(
+    conn: sqlite3.Connection,
+    component_type: str,
+    size: str,
+    compatibilities: list[str | None],
+    maker_races: dict[str, set[str]],
+    ware_is_hostile: bool = False,
+) -> list[str]:
+    """The reverse of matching_items() -- given one specific equipment
+    ware's own component_type/size (the same values matching_items() takes
+    a ship's own group values as, here taken from the ware's own row
+    instead) and every one of its real compatibility tag sets, every ship's
+    own ware_id (ships_base.ware_id, same as ship_component_groups.ship_id)
+    that has at least one matching-size group of that component_type whose
+    own equipment_compatibility_class is a *superset* of ANY of those tag
+    sets -- same subset test as matching_items(), the ware and the group
+    just swap roles.
+
+    `compatibilities` is plural because a canonical ware (the one row left
+    in its own table after generate time collapsed its compatibility-
+    variant duplicates -- see generate_ships_table.py's
+    parse_equipment_component_wares() and equipment_ware_aliases' own
+    schema comment in ships_tables.sql) can have more than one real
+    compatibility tag set: its own (from turrets_base/shields_base/etc.)
+    plus every alias row in equipment_ware_aliases targeting it. The
+    caller (GET /api/ship_component_compatibility) is expected to pass all
+    of them -- a ship that only satisfies one of the ware's variants must
+    still show up here. Entries that are None/empty (e.g. a software ware,
+    which has no size/compatibility concept at all -- see
+    matching_items()'s own docstring) contribute no matches, same as
+    matching_items() with no compat_class; an entirely empty or all-None
+    list yields no matches at all.
+
+    This naturally includes an L/XL ship's own bonus M shield groups for
+    an M-sized shield ware -- a dedicated medium shield protecting one of
+    an L/XL ship's engine/turret/weapon groups is an ordinary
+    ship_component_groups row, component_type="shield", size="m", exactly
+    like an S/M ship's own primary shield slot (see query_ship_groups()'s
+    own docstring on bonus shields) -- so querying ship_component_groups
+    generically by (component_type, size) picks these up with no special
+    casing needed, the same way matching_items() does for the forward
+    direction.
+
+    ware_is_hostile mirrors matching_items()'s own ship_is_hostile, roles
+    reversed: matching_items() never excludes *ordinary* equipment from
+    any ship's own results (hostile or not), only *hostile* equipment from
+    an *ordinary* ship's results -- so here, an ordinary
+    (ware_is_hostile=False) ware's matches are never filtered by faction
+    at all, while a hostile-owned (Xenon/Kha'ak-exclusive) ware only
+    matches ships that are themselves that same hostile faction (an
+    ordinary ship's own forward query would never have offered a hostile
+    ware as an option in the first place, so it shouldn't show as
+    "compatible" with one here either).
+    """
+    ware_tag_sets = [set(c.split(",")) for c in compatibilities if c]
+    if not ware_tag_sets:
+        return []
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ship_id, equipment_compatibility_class
+        FROM ship_component_groups
+        WHERE component_type = ? AND size = ?
+        """,
+        (component_type, size),
+    ).fetchall()
+    ship_ids = set()
+    for row in rows:
+        group_tags = set(row["equipment_compatibility_class"].split(",") if row["equipment_compatibility_class"] else [])
+        if any(ware_tags <= group_tags for ware_tags in ware_tag_sets):
+            ship_ids.add(row["ship_id"])
+    if ware_is_hostile:
+        ship_ids = {ship_id for ship_id in ship_ids if is_hostile_only_ware(ship_id, maker_races)}
+    return sorted(ship_ids)
 
 
 def query_ship(conn: sqlite3.Connection, identifier: str) -> dict:
@@ -445,17 +572,25 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
 
     "summary" is a small read-only readout (ship size, main shield count,
     bonus medium-shield count, missile ammo capacity, drone capacity, crew
-    capacity, cargo capacity/type, S/M docks, S/M ship storage) pulled
-    straight from ships_base -- it exists only for display, never to
+    capacity, cargo capacity/type, S/M docks, S/M ship storage, radar range,
+    region-damage immunity, countermeasure/deployable capacity, radar cloak,
+    illegal-cargo concealment) pulled straight from ships_base -- it exists
+    only for display, never to
     populate a picker's options (ships_base has no per-group size/
     compatibility info to do that correctly with). crew_capacity is
     ships_base.crew ("crew" is the summary key's own name since "crew"
     alone would collide with query_ship_groups()'s crew_base catalog
-    concept on the frontend). There's no countermeasure_capacity here at
-    all -- unlike crew, no ships_base column exists for it (see
-    generate_ships_table.py's "Countermeasures and crew" docstring
-    section); the frontend assumes a fixed default by ship size instead.
-    cargo_type is untranslated raw tag text (e.g. "container", or
+    concept on the frontend). countermeasure_capacity/deployable_capacity
+    are a real ships_base column now, but still not real per-ship game data
+    underneath -- an assumed default by ship size (see
+    COUNTERMEASURE_CAPACITY_BY_SIZE/DEPLOYABLE_CAPACITY_BY_SIZE in
+    generate_ships_table.py), just computed and stored server-side now
+    instead of the frontend re-deriving it from `size` itself. radar_cloak/
+    illegal_cargo_concealed are likewise always 1.0/False -- no ship has any
+    inherent stealth or illegal-cargo-concealment capability -- existing
+    purely so the equipment-mod system has a real column to apply a
+    radarcloak/hidecargochance mod's own effect onto. cargo_type is
+    untranslated raw tag text (e.g. "container", or
     "container solid" for a mixed hold) -- see generate_ships_table.py's
     parse_ship_docks() for what it means and GET /api/cargo_types for
     resolving it into real display names; the frontend splits and looks up
@@ -486,7 +621,9 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
     summary_row = conn.execute(
         """
         SELECT size, shields, shields_bonus_m, missile_capacity, drone_capacity, crew,
-               cargo_capacity, cargo_type, s_docks, m_docks, s_ship_storage, m_ship_storage
+               cargo_capacity, cargo_type, s_docks, m_docks, s_ship_storage, m_ship_storage,
+               radar_range, region_damage_immune, countermeasure_capacity, deployable_capacity, radar_cloak,
+               illegal_cargo_concealed
         FROM ships_base WHERE ware_id = ?
         """,
         (ship["ware_id"],),
@@ -542,6 +679,14 @@ def query_ship_groups(conn: sqlite3.Connection, identifier: str, lang: str = "en
             "m_docks": summary_row["m_docks"] if summary_row is not None else None,
             "s_ship_storage": summary_row["s_ship_storage"] if summary_row is not None else None,
             "m_ship_storage": summary_row["m_ship_storage"] if summary_row is not None else None,
+            "radar_range": summary_row["radar_range"] if summary_row is not None else None,
+            "region_damage_immune": bool(summary_row["region_damage_immune"]) if summary_row is not None else None,
+            "countermeasure_capacity": summary_row["countermeasure_capacity"] if summary_row is not None else None,
+            "deployable_capacity": summary_row["deployable_capacity"] if summary_row is not None else None,
+            "radar_cloak": summary_row["radar_cloak"] if summary_row is not None else None,
+            "illegal_cargo_concealed": (
+                bool(summary_row["illegal_cargo_concealed"]) if summary_row is not None else None
+            ),
         },
         "groups": groups,
     }

@@ -32,17 +32,27 @@ Equipment (engine/shield/weapon/turret) files have no per-size subfolder at
 all -- all sizes sit flat together under a per-type folder (assets/props/
 Engines/, assets/props/SurfaceElements/, or, for weapons/turrets which
 share the same per-damage-class subfolders, assets/props/WeaponSystems/
-<class>/) -- so their jobs instead match the size token embedded in the
-filename itself (e.g. "engine_arg_s_..."). See EQUIPMENT_TYPE_PATH_PREFIXES.
-This is a real, separate fragility from ships' own (a mod whose equipment
+<class>/). These jobs used to match a size token embedded in the filename
+itself (e.g. "engine_arg_s_...") -- a real fragility (a mod whose equipment
 filenames don't follow the type_race_size_variant_mk convention would be
-silently skipped at the extraction step, not just mis-sorted afterward) --
-not addressed by this round of changes, since equipment's own *size* comes
-from a completely different source (each component's own mount-tag, e.g.
-tags="small"/"medium", not a macro-level class attribute the way ship size
-does -- confirmed: an equipment macro's own class is its component *type*,
-e.g. class="turret"/"engine"/"shieldgenerator"/"weapon", not a size at
-all) -- revisit separately if this becomes a real problem.
+silently skipped at the extraction step, not just mis-sorted afterward),
+and the actual bug report that surfaced it: three real missile-turret/
+launcher propulsion macros (engine_missile_dumbfire_mk1_macro and two
+siblings) live in this exact Engines folder but don't follow that filename
+shape at all, so they were silently never extracted (GitHub issue #26
+phase-4/5). Equipment's own *size* was never taken from the filename or the
+folder anyway -- parse_equipment_component_wares() in
+generate_ships_table.py has always derived it from each macro's own linked
+component file's mount-tag instead (tags="small"/"medium"/...,
+parse_equipment_mount()) -- so these jobs now follow the exact same "pull
+the whole folder, sort by the file's own real <macro class="..."/> after
+extraction" shape ship_macro_jobs()/sort_ship_files_by_class() already use,
+via equipment_macro_jobs()/equipment_component_jobs()/
+sort_equipment_files_by_class() below. A macro/component's class is its
+component *type* (e.g. "turret"/"engine"/"shieldgenerator"/"weapon", or
+"missileturret"/"missilelauncher" for a missile-firing one -- see
+EQUIPMENT_TYPE_REAL_CLASSES), never a size -- size still only ever comes
+from the mount tag, unchanged.
 
 To add a new extraction (e.g. language files, ware macros), append an
 ExtractionJob to EXTRACTION_JOBS under a suitable group name.
@@ -325,6 +335,101 @@ def sort_ship_files_by_class(raw_dir: Path, child_tag: str, suffix: str) -> None
         print(f"  ({unclassified} file(s) left unsorted -- see warnings above)")
 
 
+# Real macro/component class="..." value(s) that count as a genuine
+# engine/shield/weapon/turret, once every macro/component under that type's
+# WHOLE folder has been pulled by equipment_macro_jobs()/
+# equipment_component_jobs() above -- everything else sharing the folder
+# (destructible "_video_" wreck-state duplicates, drone/mine/spacesuit
+# propulsion and hand weapons, SurfaceElements' own dockingbay/scanner/
+# hackerprobe content, the missile/mines/spacesuit WeaponSystems
+# subfolders' own non-weapon contents, ...) is simply never copied out of
+# *_raw/ by sort_equipment_files_by_class(), the same "class the file
+# itself declares, not the folder it came from" contract
+# sort_ship_files_by_class() already uses for ships. A weapon/turret that
+# fires a missile instead of a bullet carries a distinct macro class of its
+# own (missilelauncher/missileturret) rather than "weapon"/"turret" --
+# confirmed these are real, already-working rows (e.g.
+# weapon_gen_s_dumbfire_02_mk1_macro, class="missilelauncher"), so both are
+# accepted for their respective type.
+#
+# None of this can silently ADD a spurious row downstream even if a class
+# check here were ever wrong: generate_ships_table.py's
+# filter_to_real_equipment_wares() restricts every <type>s_base table to
+# ware_ids that actually exist in equipment_wares_base (built from
+# wares.xml, not from which files got extracted) -- confirmed harmless the
+# same way ships already tolerate collectables/defense-module macros living
+# alongside real ships (see ship_macro_jobs()'s own docstring): a stray
+# thruster macro (also class="engine", living in this same Engines folder)
+# or a "generic_engine"-style shared component file, if it were ever
+# mis-sorted in here, would still just be dropped at that wares.xml join,
+# the same way today's own "_video_" duplicates already are.
+EQUIPMENT_TYPE_REAL_CLASSES = {
+    "engine": {"engine"},
+    "shield": {"shieldgenerator"},
+    "weapon": {"weapon", "missilelauncher"},
+    "turret": {"turret", "missileturret"},
+}
+
+
+def sort_equipment_files_by_class(raw_dir: Path, out_dir: Path, real_classes: set[str], child_tag: str) -> None:
+    """Keeps only the files under `raw_dir` whose own real
+    <macro class="..."/> (child_tag="macro") or <component class="..."/>
+    (child_tag="component" -- falling back to the root element itself when
+    there's no separate <component> child, since a component file's own
+    root routinely IS the <component> element) is one of `real_classes`,
+    copying them flat into `out_dir` -- mirroring sort_ship_files_by_class()
+    for equipment, one shared folder per type instead of one per exact
+    class (a real engine is always exactly class="engine" with nothing
+    else to disambiguate, unlike a ship's own per-size class value).
+
+    `out_dir` is cleared and rebuilt from `raw_dir` every run rather than
+    accumulated into, so a file real_classes used to accept but no longer
+    does (or one removed from a newer game version) can't linger as stale
+    data forever -- raw_dir itself is the only thing XRCatTool ever writes
+    to, so nothing is lost by doing this.
+    """
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if not raw_dir.exists():
+        return
+    kept = 0
+    for path in sorted(raw_dir.rglob("*.xml")):
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError:
+            continue
+        el = root.find(child_tag)
+        if el is None and root.tag == child_tag:
+            el = root
+        class_value = (el.get("class") or "").strip() if el is not None else None
+        if class_value not in real_classes:
+            continue
+        shutil.copy2(path, out_dir / path.name)
+        kept += 1
+    print(f"  Sorted {kept} real file(s) from {raw_dir.name}/ into {out_dir.name}/")
+
+
+def sort_equipment_files() -> None:
+    """Runs sort_equipment_files_by_class() for every equipment type's own
+    macros_raw/ and components_raw/ -- see that function's own docstring.
+    Called from main() right after the equipment_macro_jobs()/
+    equipment_component_jobs() groups run, same "gated on which groups
+    actually ran this invocation" reasoning ships already follow.
+    """
+    for equip_type, real_classes in EQUIPMENT_TYPE_REAL_CLASSES.items():
+        type_dir = DATA_DIR / f"{equip_type}s"
+        sort_equipment_files_by_class(
+            type_dir / f"{equip_type}_macros_raw", type_dir / f"{equip_type}_macros", real_classes, "macro"
+        )
+        sort_equipment_files_by_class(
+            type_dir / f"{equip_type}_components_raw",
+            type_dir / f"{equip_type}_components",
+            real_classes,
+            "component",
+        )
+
+
 # In-catalog folder each equipment type's macro/component files live under.
 # Unlike ships (assets/units/size_X/...), these have no per-size subfolder --
 # all sizes sit flat together, so size is only recoverable from the 3rd
@@ -349,22 +454,35 @@ EQUIPMENT_TYPE_PATH_PREFIXES = {
 
 
 def equipment_macro_jobs() -> list[ExtractionJob]:
-    """Engine/shield/weapon/turret macro files, one job per type + size class."""
+    """Engine/shield/weapon/turret macro files -- one flat job per type,
+    pulling every macro under that type's own folder regardless of size or
+    filename shape (real ship engine/shield/weapon/turret alongside
+    whatever else happens to share the folder -- destructible "_video_"
+    wreck-state duplicates, drone/mine/spacesuit propulsion, SurfaceElements'
+    own dockingbay/scanner/hackerprobe content, ...). Written into a *_raw/
+    staging folder; sort_equipment_files_by_class() (called from main(),
+    right after these jobs run) keeps only the files whose own real
+    <macro class="..."/> is a genuine instance of this type (see
+    EQUIPMENT_TYPE_REAL_CLASSES) -- nothing here is filtered by filename or
+    folder any more. See this module's own docstring for the full
+    reasoning and the missile-turret/launcher propulsion macros this was
+    written to stop silently excluding.
+    """
     return [
         ExtractionJob(
-            name=f"{equip_type}_macros_size_{size}",
+            name=f"{equip_type}_macros_raw",
             group=f"{equip_type}s",
-            include_pattern=rf"{path_prefix}/macros/{equip_type}_[a-z]+_{size}_.*\.xml$",
-            out_dir=DATA_DIR / f"{equip_type}s" / f"{equip_type}_{size}_macros",
+            include_pattern=rf"{path_prefix}/macros/.*\.xml$",
+            out_dir=DATA_DIR / f"{equip_type}s" / f"{equip_type}_macros_raw",
         )
         for equip_type, path_prefix in EQUIPMENT_TYPE_PATH_PREFIXES.items()
-        for size in SHIP_SIZES
     ]
 
 
 def equipment_component_jobs() -> list[ExtractionJob]:
-    """Engine/shield/weapon/turret component/model definition files, one job
-    per type + size class.
+    """Engine/shield/weapon/turret component/model definition files -- one
+    flat job per type, same "pull the whole folder, sort by real class
+    afterward" shape as equipment_macro_jobs() above.
 
     These are what an equipment macro's own <component ref="..."/> points
     to -- for engines/shields this is a shared generic model per size (e.g.
@@ -375,13 +493,12 @@ def equipment_component_jobs() -> list[ExtractionJob]:
     """
     return [
         ExtractionJob(
-            name=f"{equip_type}_components_size_{size}",
+            name=f"{equip_type}_components_raw",
             group=f"{equip_type}s",
-            include_pattern=rf"{path_prefix}/{equip_type}_[a-z]+_{size}_[^/]*\.xml$",
-            out_dir=DATA_DIR / f"{equip_type}s" / f"{equip_type}_{size}_components",
+            include_pattern=rf"{path_prefix}/[^/]*\.xml$",
+            out_dir=DATA_DIR / f"{equip_type}s" / f"{equip_type}_components_raw",
         )
         for equip_type, path_prefix in EQUIPMENT_TYPE_PATH_PREFIXES.items()
-        for size in SHIP_SIZES
     ]
 
 
@@ -661,6 +778,68 @@ def races_xml_job() -> list[ExtractionJob]:
     ]
 
 
+def equipmentmods_xml_jobs() -> list[ExtractionJob]:
+    """libraries/equipmentmods.xml -- the game's own in-game equipment
+    modification system (loot/craftable "mods" applied via the Modify
+    Equipment screen to a weapon/engine/shield/ship -- e.g. a weapon
+    cooling mod that rolls +5-20% cooling plus a chance at a secondary
+    reload/chargetime/mining/rotationspeed bonus). NOT Steam Workshop /
+    user-created mods (SWI etc.) -- an unrelated, overloaded use of "mod".
+
+    Root <equipmentmods> has one child per category (<weapon>/<engine>/
+    <ship>/<shield> -- no <thruster>, thruster stats live under <engine>),
+    each containing repeated stat elements whose own tag name IS the stat
+    being modified (<damage>, <cooling>, <capacity>, ...), each carrying
+    ware="<mod ware id>" (already a real ware in wares.xml, tag
+    "equipmentmod"), quality="1|2|3" (Basic/Advanced/Exceptional -- matches
+    colors.xml's own equipmentmod_quality_basic/advanced/exceptional), and
+    min/max (the primary stat's own roll range). An optional nested
+    <bonus chance="0-1" max="N"> lists candidate secondary-stat rolls
+    (each with its own min/max, optionally weight="" for weighted random
+    selection when there are more candidates than N slots).
+
+    Diff-patched by exactly one extension, not zero: initially assumed
+    base-game-only (same as purposes.xml/races.xml) after probing every
+    extension's catalogs *combined* into one job matched against the base
+    game's own -- which silently returned ego_dlc_timelines' own small
+    `<diff>` patch (mission-specific mods, e.g. "mod_weapon_damage_fleet_
+    battle_1") instead of the real base file, since XRCatTool keeps only
+    the last-matched copy of a given in-catalog path when multiple sources
+    are passed to one job. Re-probed each source *separately* (same
+    mistake wares.xml's own docstring already warns about) and confirmed:
+    real base data lives in the base game's own 08.cat, and exactly one
+    extension (Timelines) patches it with `<add sel="/equipmentmods/
+    weapon">`/`<add sel="/equipmentmods/engine">` blocks of brand-new mod
+    entries (no per-mod-id patch shape seen, unlike wares.xml's own
+    ware[@id='...'] case) -- so this needs the exact same per-source,
+    diff-patched job shape as wares_xml_jobs(), not purposes.xml/races.xml's
+    simpler single-job one.
+    """
+    jobs = [
+        ExtractionJob(
+            name="equipmentmods_base",
+            group="equipmentmods_xml",
+            include_pattern=r"libraries/equipmentmods\.xml$",
+            out_dir=DATA_DIR / "libraries",
+            in_paths=catalog_files(GAME_ROOT),
+            dest_name="equipmentmods.xml",
+        )
+    ]
+    for ext_dir in extension_dirs():
+        suffix = extension_suffix(ext_dir)
+        jobs.append(
+            ExtractionJob(
+                name=f"equipmentmods_{suffix}",
+                group="equipmentmods_xml",
+                include_pattern=r"libraries/equipmentmods\.xml$",
+                out_dir=DATA_DIR / "libraries",
+                in_paths=catalog_files(ext_dir),
+                dest_name=f"equipmentmods_{suffix}.xml",
+            )
+        )
+    return jobs
+
+
 def purposes_xml_job() -> list[ExtractionJob]:
     """libraries/purposes.xml -- the game's own ship/station purpose
     category definitions (id + name="{page,id}" display-name ref -- see
@@ -724,15 +903,15 @@ def language_jobs() -> list[ExtractionJob]:
 
 
 def nav_icon_jobs() -> list[ExtractionJob]:
-    """Four station-type icons *as they actually appear on the map*
+    """Six station-type icons *as they actually appear on the map*
     (assets/textures/ui/map_objects/mapob_<type>.gz), not the plain glyph
     set under stationicon/ favicon_icon_jobs() uses -- each mapob_ texture
     already has the hexagon badge baked in (black hex fill, white glyph +
     border), unlike si_shipyard.gz which is just the bare glyph. Used for
     this website's own top-nav page icons (Fleet Planner/Cost Analysis/
-    About/Component Analyzer -- see generate_nav_icons.py, which recolors
-    the black fill to the game's own "faction_player" green from
-    libraries/colors.xml instead of shipping it black).
+    About/Component Analyzer/Proving Grounds -- see generate_nav_icons.py,
+    which recolors the black fill to the game's own "faction_player" green
+    from libraries/colors.xml instead of shipping it black).
 
     mapob_hightech.gz (a microchip glyph, used on the in-game map for
     Hi-Tech-sector production) is the closest real game asset to issue #4's
@@ -740,6 +919,18 @@ def nav_icon_jobs() -> list[ExtractionJob]:
     tab -- Advanced Electronics is itself a hitech-group ware in wares.xml,
     and there's no dedicated "electronics station" map icon in the game to
     source instead.
+
+    mapob_piratestation.gz (user call, 2026-10-28) is the Proving Grounds
+    tab's own icon -- a pirate base's map symbol, picked from the full
+    station-symbol set browsed via a one-off contact sheet of every
+    mapob_* icon the game ships (see this session's own scratch pull, not
+    part of this script).
+
+    mapob_constructionsite.gz (same call) is this page's own "under
+    construction" placeholder glyph -- a stack of boxes, used inline on
+    the page itself rather than as a nav icon (see
+    generate_nav_icons.py's own construction_site.png, no _highlight
+    variant since it's never a nav button).
 
     Also pulls widget/bordersquare.gz, the game's own generic "this map
     item is selected" white square-bracket frame (see libraries/colors.xml's
@@ -752,7 +943,7 @@ def nav_icon_jobs() -> list[ExtractionJob]:
         ExtractionJob(
             name="nav_icons",
             group="nav_icons",
-            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock|hightech)\.gz$",
+            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock|hightech|piratestation|constructionsite)\.gz$",
             out_dir=DATA_DIR / "images" / "nav_icons_raw",
         ),
         ExtractionJob(
@@ -782,6 +973,14 @@ def mod_lab_icon_jobs() -> list[ExtractionJob]:
     hexagon of stacked boxes) -- reused here as the Modifications Lab
     modal's own header icon, tinted the same "faction_player" green as
     every other nav-style icon in this app (see generate_mod_lab_icons.py).
+
+    The Modifications Lab's own "chassis mods" tab icon is NOT extracted
+    here -- by explicit request it reuses the exact same real ship-class
+    symbol PNG ship_icon_jobs()/generate_ship_icons.py already produce at
+    data/images/ships/symbols/ship_m_corvette_01.png (see shipIconUrl() in
+    app.js), rather than a separately re-extracted/tinted copy, so the tab
+    visually matches the real chassis image instead of an app-invented
+    white variant of it.
     """
     return [
         ExtractionJob(
@@ -922,6 +1121,7 @@ EXTRACTION_JOBS: list[ExtractionJob] = [
     *colors_xml_job(),
     *purposes_xml_job(),
     *races_xml_job(),
+    *equipmentmods_xml_jobs(),
     *language_jobs(),
 ]
 
@@ -1032,6 +1232,9 @@ def main() -> None:
     if "ship_components" in ran_groups:
         print("[sort_ship_components_by_class]")
         sort_ship_files_by_class(SHIPS_DIR / "components_raw", "component", "components")
+    if ran_groups & {f"{t}s" for t in EQUIPMENT_TYPE_REAL_CLASSES}:
+        print("[sort_equipment_files_by_class]")
+        sort_equipment_files()
 
 
 if __name__ == "__main__":

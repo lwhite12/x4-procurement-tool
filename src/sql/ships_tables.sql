@@ -31,6 +31,10 @@ DROP TABLE IF EXISTS deployables_base;
 DROP TABLE IF EXISTS drones_base;
 DROP TABLE IF EXISTS countermeasures_base;
 DROP TABLE IF EXISTS crew_base;
+DROP TABLE IF EXISTS equipment_mod_stats;
+DROP TABLE IF EXISTS equipment_mod_costs;
+DROP TABLE IF EXISTS mod_qualities;
+DROP TABLE IF EXISTS equipment_mods_base;
 DROP TABLE IF EXISTS ships_base;
 DROP TABLE IF EXISTS economy_wares_base;
 DROP TABLE IF EXISTS equipment_ware_aliases;
@@ -47,6 +51,7 @@ CREATE TABLE ships_base (
     production_method TEXT,
     macro TEXT,
     ship_type TEXT,
+    prestige INTEGER,
     purpose TEXT,
     icon TEXT,
     hull INTEGER,
@@ -81,6 +86,33 @@ CREATE TABLE ships_base (
     m_docks INTEGER,
     s_ship_storage INTEGER,
     m_ship_storage INTEGER,
+    -- radar_range: real on exactly 2 of 255 ships (Hyperion/Sapporo, both
+    -- hero/flagship-tier), DEFAULT_RADAR_RANGE (40000) everywhere else --
+    -- see load_macro_data()'s own comment, same "absence = a real default"
+    -- convention as the hull-wide multipliers above.
+    -- region_damage_immune: real on exactly one ship (Erlking) -- a plain
+    -- boolean flag, not a percentage (see load_macro_data()'s own comment
+    -- for how this reconciles with the equipment-mod system's own
+    -- fractional "Hazardous Region Damage Reduction Mod").
+    -- countermeasure_capacity/deployable_capacity: no real per-ship game
+    -- data exists for either (see COUNTERMEASURE_CAPACITY_BY_SIZE/
+    -- DEPLOYABLE_CAPACITY_BY_SIZE's own comment) -- an assumed default by
+    -- ship size, moved here from the frontend so the API can return a real
+    -- value instead of the client re-deriving it from `size` itself.
+    -- radar_cloak: no ship has any inherent stealth capability at all --
+    -- a flat constant 1.0 for every ship, existing purely so a radarcloak
+    -- mod has a real column to apply its own effect onto.
+    -- illegal_cargo_concealed: same situation as radar_cloak but boolean --
+    -- no ship has any inherent illegal-ware-concealment capability, always
+    -- False, existing purely so a hidecargochance mod has a real column to
+    -- apply its own effect onto (same add_ceiling_bool operation as
+    -- region_damage_immune -- see equipment_mod_target_mappings.json).
+    radar_range INTEGER,
+    region_damage_immune BOOLEAN,
+    countermeasure_capacity INTEGER,
+    deployable_capacity INTEGER,
+    radar_cloak REAL,
+    illegal_cargo_concealed BOOLEAN,
     size TEXT,
     -- The raw class="..." value this ship's own macro carried (e.g.
     -- "ship_l"), before SHIP_CLASS_TO_SIZE_CODE's mapping to `size` above
@@ -94,7 +126,8 @@ CREATE TABLE ships_base (
     missile_launchers INTEGER,
     "turret_l" INTEGER,
     "turret_m" INTEGER,
-    shields_bonus_m INTEGER
+    shields_bonus_m INTEGER,
+    shield_bonus_groups INTEGER
 );
 
 -- volume/transport are real per-ware cargo stats straight off the <ware>
@@ -143,28 +176,51 @@ CREATE TABLE equipment_wares_base (
     price_max INTEGER
 );
 
--- A macro carrying its own alias="..." attribute that this pipeline
--- determined is a true redundant duplicate (same size+compatibility as
--- its own target -- see parse_equipment_component_wares' own docstring),
--- and so was excluded from turrets_base/engines_base/shields_base/
--- weapons_base entirely. Both alias_ware_id and target_ware_id are still
--- real, independently-priced rows in equipment_wares_base -- only the
--- type-specific stats table excludes the alias side. Existing purely so
--- a ware_id sourced from *outside* this app's own picker (a real
--- player-saved ship loadout, see import_loadouts.py) can be resolved
--- back to the still-listed target the game itself treats as equivalent,
--- since the game never actually removed the alias ware -- only this
--- app's own picker does, to avoid showing two indistinguishable options.
+-- A macro this pipeline determined is a compatibility-variant duplicate of
+-- another real item -- same display name, makerrace, mk, and every
+-- type-specific stat, differing only in `compatibility` (and a resulting
+-- hull-value artifact) -- see parse_equipment_component_wares' own
+-- docstring for how this is detected (comparing actual stats, not just a
+-- macro's own alias="..." attribute) and why both rows still need
+-- representing somewhere: a ship with a "standard"-tier slot and one with
+-- an "advanced"-tier slot both need to see this as a real option, but
+-- turrets_base/engines_base/shields_base/weapons_base only keeps the one
+-- canonical row (the one with a real, non-integrated hull value) so the
+-- Component Analyzer's own picker shows one row per real item instead of
+-- one per compatibility tier. `compatibility` here is the *alias* side's
+-- own tag set (the canonical row's own is still on its own turrets_base/
+-- etc. row) -- query_ship_components.py's matching_items() (forward, ship
+-- group -> compatible equipment) and ships_matching_ware() (reverse,
+-- equipment -> compatible ships) both test a canonical ware's own
+-- compatibility AND every alias row here targeting it, so neither
+-- direction silently drops a real tier's worth of matches.
+--
+-- Both alias_ware_id and target_ware_id are still real, independently-
+-- priced rows in equipment_wares_base -- only the type-specific stats
+-- table excludes the alias side. Existing purely so a ware_id sourced from
+-- *outside* this app's own picker (a real player-saved ship loadout, see
+-- import_loadouts.py) can be resolved back to the still-listed target the
+-- game itself treats as equivalent, since the game never actually removed
+-- the alias ware -- only this app's own picker does, to avoid showing two
+-- indistinguishable options.
 CREATE TABLE equipment_ware_aliases (
     alias_ware_id TEXT PRIMARY KEY,
     target_ware_id TEXT NOT NULL,
     equipment_type TEXT NOT NULL,
+    compatibility TEXT,
     FOREIGN KEY (alias_ware_id) REFERENCES equipment_wares_base (ware_id),
     FOREIGN KEY (target_ware_id) REFERENCES equipment_wares_base (ware_id)
 );
 
 CREATE TABLE turrets_base (
     ware_id TEXT PRIMARY KEY,
+    -- Denormalized copy of equipment_wares_base.name (primary_locale's own
+    -- text, English by default) for direct queries against this table
+    -- alone, no join needed -- same convenience ships_base.name already
+    -- offers. api.py's own /api/components/<class 'type'> still prefers the live,
+    -- per-viewer i18n name (COALESCE(localized_strings.text,
+    -- equipment_wares_base.name)) over this column for the actual app.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     bullet_class TEXT,
@@ -186,6 +242,8 @@ CREATE TABLE turrets_base (
 
 CREATE TABLE engines_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     boost_duration REAL,
@@ -209,6 +267,8 @@ CREATE TABLE engines_base (
 
 CREATE TABLE shields_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     recharge_max REAL,
@@ -223,6 +283,8 @@ CREATE TABLE shields_base (
 
 CREATE TABLE weapons_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     bullet_class TEXT,
@@ -258,6 +320,8 @@ CREATE TABLE weapons_base (
 -- are rotation thrust.
 CREATE TABLE thrusters_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     thruster_class TEXT,
@@ -296,7 +360,21 @@ CREATE TABLE software_base (
 -- "mediumdumbfire") is the missile's own launcher-compatibility tag,
 -- matched against a launcher's turrets_base/weapons_base.ammunition_tags
 -- by membership -- see this module's "Missiles and deployables" docstring
--- section. Not yet used for any matching/query logic.
+-- section. Not yet used for any matching/query logic. `thrust_*` come from
+-- a real, separate <engine>-class macro this missile's own <connections>
+-- points at (never a standalone ware of its own) -- see
+-- load_engine_thrust_index()/analyze_missile_macro() in
+-- generate_ships_table.py -- NULL for the couple of missiles (heavy
+-- torpedoes) with no engine connection at all, a real absence, not a
+-- parsing gap. `anomalous_range_multiplier` is hand-measured, not derived
+-- from any game file -- see MISSILE_ANOMALOUS_RANGE_MULTIPLIER's own
+-- comment in generate_ships_table.py -- a flat correction factor on top
+-- of the computed Max Distance stat (app.js), 1.0 (a no-op) for every
+-- missile whose formula is already right. `game_value_*` are hand-measured
+-- straight from the player's own real in-game Encyclopedia screenshots
+-- (see MISSILE_GAME_VALUES' own comment in generate_ships_table.py) --
+-- reference ground truth, not a formula's output. NULL (not 0) for the two
+-- Barrage missiles, which have no screenshot.
 CREATE TABLE missiles_base (
     ware_id TEXT PRIMARY KEY,
     name TEXT,
@@ -320,7 +398,28 @@ CREATE TABLE missiles_base (
     physics_mass REAL,
     lock_time REAL,
     lock_range REAL,
-    compatibility TEXT
+    compatibility TEXT,
+    thrust_forward REAL,
+    thrust_reverse REAL,
+    thrust_strafe REAL,
+    thrust_pitch REAL,
+    thrust_yaw REAL,
+    thrust_roll REAL,
+    physics_drag_forward REAL,
+    physics_drag_reverse REAL,
+    physics_drag_horizontal REAL,
+    physics_drag_vertical REAL,
+    physics_drag_pitch REAL,
+    physics_drag_yaw REAL,
+    physics_drag_roll REAL,
+    physics_inertia_pitch REAL,
+    physics_inertia_yaw REAL,
+    physics_inertia_roll REAL,
+    anomalous_range_multiplier REAL DEFAULT 1,
+    game_value_turn_rate REAL,
+    game_value_pitch_rate REAL,
+    game_value_vertical_strafe REAL,
+    game_value_horizontal_strafe REAL
 );
 
 -- Weapon/turret projectile definitions -- what weapons_base.bullet_class/
@@ -334,12 +433,21 @@ CREATE TABLE missiles_base (
 -- sec) and reload_time (sec/shot) are mutually exclusive per row -- two
 -- different attribute names the game itself uses for the same concept
 -- depending on bullet variant. areadamage_* is only populated for
--- explosive/AOE bullets (flak etc).
+-- explosive/AOE bullets (flak etc). charge_time/stick_time/
+-- mining_damage_multiplier/surfaceelement_damage_multiplier are each only
+-- real on a small minority of bullets (charge beams, sticky/charge Split
+-- projectiles, mining lasers, anti-turret bonus-damage bullets
+-- respectively) -- NULL everywhere else, same "absence = a real, meaningful
+-- NULL" contract as every other optional column here; added specifically
+-- so the equipment-mod system's own chargetime/sticktime/mining/
+-- surfaceelement weapon mods have a real column to apply their effect onto
+-- (see equipment_mod_target_mappings.json).
 CREATE TABLE bullets_base (
     bullet_class TEXT PRIMARY KEY,
     damage_value REAL,
     damage_shield REAL,
     damage_hull REAL,
+    damage_noshield REAL,
     damage_repair REAL,
     damage_shielddisruption REAL,
     bullet_speed REAL,
@@ -347,6 +455,8 @@ CREATE TABLE bullets_base (
     bullet_range REAL,
     bullet_amount INTEGER,
     bullet_barrelamount INTEGER,
+    charge_time REAL,
+    stick_time REAL,
     reload_rate REAL,
     reload_time REAL,
     heat_value REAL,
@@ -357,7 +467,9 @@ CREATE TABLE bullets_base (
     areadamage_value REAL,
     areadamage_shield REAL,
     areadamage_shielddisruption REAL,
-    areadamage_lifetime REAL
+    areadamage_lifetime REAL,
+    mining_damage_multiplier REAL,
+    surfaceelement_damage_multiplier REAL
 );
 
 -- Satellites/resource probes/mines/lasertowers/navbeacon: standalone
@@ -424,6 +536,133 @@ CREATE TABLE crew_base (
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER
+);
+
+-- The in-game equipment "mod" system (libraries/equipmentmods.xml -- NOT
+-- Steam Workshop/user-created mods) -- see
+-- parse_equipment_mods()/equipmentmods_files()'s own docstrings above for
+-- the full story. One row per real mod (a real wares.xml ware, tag
+-- "equipmentmod"; a handful of Timelines mission-specific ones with no
+-- real ware are skipped entirely, not represented here at all) PLUS one
+-- synthetic row per ship chassis with a non-default <modifiers> block
+-- (is_chassis_mod=1 -- see parse_chassis_integrated_mods()'s own
+-- docstring). mod_level is quality (1/2/3 = Basic/Advanced/Exceptional)
+-- for a real mod; always 0 for a chassis mod (no real mod ever uses 0,
+-- so it reads as "not a real, quality-tiered mod" -- a ship either has
+-- its own fixed, non-rolled modifiers or it doesn't, no tier concept
+-- applies). mod_components is comma-joined -- always a single
+-- component_type for a real mod (weapon/engine/ship/shield); a chassis
+-- mod is the one case where a mod_id's own rows can span more than one
+-- (e.g. "shield,weapon"). additional_stats_count is the mod's own
+-- optional <bonus max=""> value (0 if it has no bonus roll at all, always
+-- 0 for a chassis mod -- its own numbers are fixed, never rolled) -- how
+-- many of equipment_mod_stats' own candidate additional-stat rows for
+-- this mod_id actually get chosen/applied, not how many candidates exist
+-- (that's just a COUNT(*) ... WHERE is_additional_stat over
+-- equipment_mod_stats). ship_icon is that originating ship's own
+-- ships_base.icon (e.g. "ship_s_fighter_01") for a chassis mod, so the
+-- Modifications Lab can show each one with its real ship's own class
+-- symbol -- NULL for every real mod, which has no owning ship at all.
+-- price_min/price_avg/price_max are what it actually costs to APPLY this
+-- mod via the in-game Modification workshop -- all three always equal
+-- (there's no real min/max range, only one flat per-tier price), sourced
+-- from MOD_QUALITY_APPLICATION_PRICE (a hardcoded constant, not this
+-- mod's own wares.xml <price> tag -- see that constant's own comment for
+-- why: that field turned out to be the ware's own market trading price,
+-- a real but different number). NULL for every chassis mod, which has no
+-- real ware/price at all (see parse_chassis_integrated_mods()'s own "no
+-- price" docstring). The materials actually consumed to *craft* one (as
+-- opposed to the flat application cost above) are equipment_mod_costs, a
+-- separate table below -- a mod's own
+-- crafting inputs are "mod part" wares (e.g. "modpart_enginefuelinjector_t1"),
+-- a different ware category from the raw/refined materials
+-- production_wares' own FK already assumes (economy_wares_base), so they
+-- don't fit that existing generic mechanism.
+CREATE TABLE equipment_mods_base (
+    mod_id TEXT PRIMARY KEY,
+    mod_name TEXT,
+    mod_level INTEGER,
+    mod_components TEXT,
+    additional_stats_count INTEGER,
+    is_chassis_mod BOOLEAN,
+    ship_icon TEXT,
+    price_min INTEGER,
+    price_avg INTEGER,
+    price_max INTEGER
+);
+
+-- One row per crafting-material ware (+ amount needed) to produce ONE of a
+-- real mod (equipment_mods_base.mod_id) -- read straight off that mod's
+-- own <production><primary><ware ware="" amount=""/></primary></production>
+-- (see parse_equipment_mods()'s own docstring; every real mod has exactly
+-- one production method, confirmed across every wares*.xml file, base
+-- game and every DLC). No FK to economy_wares_base -- these "mod part"
+-- wares (e.g. "modpart_enginefuelinjector_t1") are their own separate
+-- category, not part of PRICE_WARE_TABLES in summarize_production.py at
+-- all. ware_name is that resource ware's own English display name,
+-- denormalized here the same way equipment_mods_base.mod_name is (GET
+-- /api/equipment_mods overrides it per-language via a localized_strings
+-- join, same COALESCE pattern as every other mod field) -- these wares
+-- are never named anywhere else in this dataset, so this is the only
+-- place a real name for one exists at all. No rows at all for a chassis
+-- mod (nothing to craft -- it's not a real ware).
+CREATE TABLE equipment_mod_costs (
+    mod_id TEXT NOT NULL,
+    ware_id TEXT NOT NULL,
+    ware_name TEXT,
+    amount INTEGER NOT NULL,
+    PRIMARY KEY (mod_id, ware_id),
+    FOREIGN KEY (mod_id) REFERENCES equipment_mods_base (mod_id)
+);
+
+-- Every real stat roll a mod in equipment_mods_base can apply -- one row
+-- per primary stat (is_additional_stat=0, always guaranteed, chance=1.0)
+-- plus one row per candidate secondary/"bonus" stat
+-- (is_additional_stat=1) that mod's own optional <bonus> block lists.
+-- component_type is which of weapon/engine/ship/shield target_stat
+-- belongs to (matches this mod's own equipment_mods_base.mod_components
+-- for a real mod -- a chassis mod's own rows are the one case where two
+-- rows for the same mod_id carry different component_type values, e.g.
+-- "weapon"/"heatgeneration" alongside "shield"/"capacity"). min_value/
+-- max_value are that stat's own real roll range for a real mod (a
+-- multiplier for most stats, e.g. 1.05-1.2 = "+5% to +20%"; some are
+-- sub-1 penalties, e.g. cooling 0.684-0.736 on a damage-focused mod;
+-- ship's own "radarcloak"/"regiondamage" use negative values instead --
+-- see equipmentmods.xml's own header comment for the "min with no max"
+-- caveat this data never actually hits), or a chassis mod's own fixed
+-- (never rolled) value repeated as both min_value and max_value -- see
+-- parse_chassis_integrated_mods()'s own docstring, including why a
+-- chassis's own <weapon heat=""/> becomes target_stat "heatgeneration"
+-- here (uninverted), not "heat". chance is that candidate's own <bonus
+-- chance=""> (always 1.0 for a primary row -- guaranteed, not rolled for
+-- *whether* it applies, only for its own min/max value -- also always
+-- 1.0 for a chassis mod's own rows, for the same "always guaranteed"
+-- reason). weight is only ever present on some additional-stat rows
+-- (used for weighted random selection among candidates when a bonus
+-- offers more of them than its own additional_stats_count slots) -- NULL
+-- for every primary row, every chassis-mod row, and an additional-stat
+-- row with nothing to weigh against (e.g. exactly one candidate for one
+-- slot).
+CREATE TABLE equipment_mod_stats (
+    mod_id TEXT,
+    is_additional_stat BOOLEAN,
+    component_type TEXT,
+    target_stat TEXT,
+    min_value REAL,
+    max_value REAL,
+    chance REAL,
+    weight INTEGER,
+    PRIMARY KEY (mod_id, is_additional_stat, target_stat),
+    FOREIGN KEY (mod_id) REFERENCES equipment_mods_base (mod_id)
+);
+
+-- The 3 real in-game equipment-mod quality tiers (Basic/Enhanced/Exceptional,
+-- equipment_mods_base.mod_level) with real per-language display names -- see
+-- parse_mod_qualities()/MOD_QUALITY_NAME_REF's own docstrings above. Backs the
+-- Modifications Lab's own tab labels.
+CREATE TABLE mod_qualities (
+    mod_level INTEGER PRIMARY KEY,
+    mod_quality_name TEXT
 );
 
 -- production_ware_id references ships_base.ware_id, economy_wares_base.ware_id,

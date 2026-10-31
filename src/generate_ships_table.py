@@ -296,10 +296,10 @@ Kha'ak hulls, and a few other non-player-flyable ships, alongside their own
 missile="0"/unit="0"), and is entirely absent (not defaulted to 0) on every
 normal player-flyable ship. That means the game applies some other,
 hardcoded-in-the-engine default flare capacity for those ships that isn't
-recoverable from this XML data at all -- so it's still not captured as a
-ships_base column. See "Countermeasures and crew" below for how the
-frontend handles this instead (an assumed default by ship size, the same
-shape as its existing deployable-capacity assumption).
+recoverable from this XML data at all -- so neither attribute's own raw
+value is ever read into ships_base.countermeasure_capacity/
+deployable_capacity. See "Countermeasures and crew" below for the assumed
+default by ship size those two columns actually hold instead.
 
 Ship stats and flight model
 ----------------------------
@@ -699,10 +699,13 @@ countermeasures_base: parse_countermeasure_wares finds every ware tagged
 "equipment" plus "countermeasure" -- exactly one in the base game,
 "countermeasure_flares_01" ("Flares"), with a real production recipe
 (advancedcomposites + energycells). As covered above, there is no per-ship
-flare *capacity* anywhere in the game data (ships_base has no matching
-column) -- the frontend assumes a fixed default by ship size instead
-(COUNTERMEASURE_CAPACITY_BY_SIZE in app.js), the same shape as its existing
-DEPLOYABLE_CAPACITY_BY_SIZE assumption.
+flare *capacity* anywhere in the game data (a ship's own <storage
+countermeasure=""/> is always 0 -- see load_macro_data()'s own comment) --
+ships_base.countermeasure_capacity is instead a fixed default by ship size
+(COUNTERMEASURE_CAPACITY_BY_SIZE), same shape as deployable_capacity's own
+DEPLOYABLE_CAPACITY_BY_SIZE assumption -- both moved here from app.js
+(previously computed client-side) once the equipment-mod system needed a
+real column to apply a capacity mod's own effect onto.
 
 crew_base: parse_crew_ware finds the single ware id="crew" ("Crew") --
 unlike everything else in this module it carries no tags at all in
@@ -789,6 +792,8 @@ unfixed for the same reason, not something introduced by this pipeline.
 """
 
 import csv
+import argparse
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -847,6 +852,10 @@ DEPLOYABLES_CSV_OUT = ROOT / "src" / "csv" / "deployables_base.csv"
 DRONES_CSV_OUT = ROOT / "src" / "csv" / "drones_base.csv"
 COUNTERMEASURES_CSV_OUT = ROOT / "src" / "csv" / "countermeasures_base.csv"
 CREW_CSV_OUT = ROOT / "src" / "csv" / "crew_base.csv"
+EQUIPMENT_MODS_CSV_OUT = ROOT / "src" / "csv" / "equipment_mods_base.csv"
+EQUIPMENT_MOD_STATS_CSV_OUT = ROOT / "src" / "csv" / "equipment_mod_stats.csv"
+EQUIPMENT_MOD_COSTS_CSV_OUT = ROOT / "src" / "csv" / "equipment_mod_costs.csv"
+MOD_QUALITIES_CSV_OUT = ROOT / "src" / "csv" / "mod_qualities.csv"
 SOURCE_VERSIONS_CSV_OUT = ROOT / "src" / "csv" / "source_versions.csv"
 FACTIONS_CSV_OUT = ROOT / "src" / "csv" / "factions.csv"
 RACES_FILE = WARES_DIR / "races.xml"
@@ -869,20 +878,23 @@ LOCALIZED_RACE_NAMES_CSV_OUT = ROOT / "src" / "csv" / "localized_race_names.csv"
 LOCALIZED_RACE_SHORTNAMES_CSV_OUT = ROOT / "src" / "csv" / "localized_race_shortnames.csv"
 DB_OUT = DATA / "x4.db"
 
-EQUIPMENT_SIZES = ("s", "m", "l", "xl")
+# Flat, single folders per type (see extract_game_data.py's
+# sort_equipment_files_by_class()) -- every real size lives together, since
+# an equipment macro's own real size has never come from which folder it
+# was extracted into anyway (see parse_equipment_component_wares() below:
+# always derived from its linked component file's own mount tag).
 TURRETS_DIR = DATA / "turrets"
-TURRET_SIZES = EQUIPMENT_SIZES
-TURRET_MACRO_DIRS = {size: TURRETS_DIR / f"turret_{size}_macros" for size in TURRET_SIZES}
-TURRET_COMPONENT_DIRS = {size: TURRETS_DIR / f"turret_{size}_components" for size in TURRET_SIZES}
+TURRET_MACRO_DIR = TURRETS_DIR / "turret_macros"
+TURRET_COMPONENT_DIR = TURRETS_DIR / "turret_components"
 ENGINES_DIR = DATA / "engines"
-ENGINE_MACRO_DIRS = {size: ENGINES_DIR / f"engine_{size}_macros" for size in EQUIPMENT_SIZES}
-ENGINE_COMPONENT_DIRS = {size: ENGINES_DIR / f"engine_{size}_components" for size in EQUIPMENT_SIZES}
+ENGINE_MACRO_DIR = ENGINES_DIR / "engine_macros"
+ENGINE_COMPONENT_DIR = ENGINES_DIR / "engine_components"
 SHIELDS_DIR = DATA / "shields"
-SHIELD_MACRO_DIRS = {size: SHIELDS_DIR / f"shield_{size}_macros" for size in EQUIPMENT_SIZES}
-SHIELD_COMPONENT_DIRS = {size: SHIELDS_DIR / f"shield_{size}_components" for size in EQUIPMENT_SIZES}
+SHIELD_MACRO_DIR = SHIELDS_DIR / "shield_macros"
+SHIELD_COMPONENT_DIR = SHIELDS_DIR / "shield_components"
 WEAPONS_DIR = DATA / "weapons"
-WEAPON_MACRO_DIRS = {size: WEAPONS_DIR / f"weapon_{size}_macros" for size in EQUIPMENT_SIZES}
-WEAPON_COMPONENT_DIRS = {size: WEAPONS_DIR / f"weapon_{size}_components" for size in EQUIPMENT_SIZES}
+WEAPON_MACRO_DIR = WEAPONS_DIR / "weapon_macros"
+WEAPON_COMPONENT_DIR = WEAPONS_DIR / "weapon_components"
 # Thrusters carry no faction/tier lock in the game data (no <owner>, no
 # compatibility tag) -- this sentinel stands in for a real compatibility
 # class so thrusters_base rows and the synthesized ship_component_groups
@@ -929,6 +941,10 @@ TABLE_CSV_FILES = {
     "drones_base": DRONES_CSV_OUT,
     "countermeasures_base": COUNTERMEASURES_CSV_OUT,
     "crew_base": CREW_CSV_OUT,
+    "equipment_mods_base": EQUIPMENT_MODS_CSV_OUT,
+    "equipment_mod_stats": EQUIPMENT_MOD_STATS_CSV_OUT,
+    "equipment_mod_costs": EQUIPMENT_MOD_COSTS_CSV_OUT,
+    "mod_qualities": MOD_QUALITIES_CSV_OUT,
     "production_wares": PRODUCTION_WARES_CSV_OUT,
     "ship_component_groups": COMPONENT_GROUPS_CSV_OUT,
     "flight_model": FLIGHT_MODEL_CSV_OUT,
@@ -1005,6 +1021,25 @@ SHIP_CLASS_TO_SIZE_CODE = {
     "ship_l": "l",
     "ship_xl": "xl",
 }
+
+# No ship macro anywhere specifies a real per-ship countermeasure/deployable
+# capacity (see this module's own "Ship stats and flight model" docstring
+# section -- "deployable" is dead data where present at all, "countermeasure"
+# is either absent on a real player-flyable ship or explicitly forced to 0
+# on one that categorically can't use flares -- neither is ever a real
+# usable number) -- this app has always assumed a fixed default by ship
+# size instead. Moved here from app.js
+# (previously COUNTERMEASURE_CAPACITY_BY_SIZE/DEPLOYABLE_CAPACITY_BY_SIZE,
+# computed client-side) so it's a real ships_base column the API can just
+# return like every other capacity stat -- same values, just relocated.
+COUNTERMEASURE_CAPACITY_BY_SIZE = {"s": 4, "m": 8, "l": 20, "xl": 40}
+DEPLOYABLE_CAPACITY_BY_SIZE = {"s": 50, "m": 100, "l": 250, "xl": 450}
+
+# <radar range="X"/> is only ever present on 2 of 255 real ships (see
+# load_macro_data()'s own comment) -- every other real ship implicitly gets
+# this default instead, same "absence = a real, explicit default, not
+# unknown" spirit as this module's other hull-wide multipliers.
+DEFAULT_RADAR_RANGE = 40000
 
 # Hand-curated mapping from a ship's own real ships_base.ship_type value
 # (e.g. "destroyer") to its real in-game display name's language ref (e.g.
@@ -1374,6 +1409,68 @@ def parse_ammunition_compatibility_types(
             }
         )
     return rows_out
+
+
+def parse_chassis_mod_localized_strings(chassis_mods: list[dict], ships_by_ware_id: dict[str, dict]) -> list[dict]:
+    """Real per-language text for every synthetic ship-chassis mod's own
+    invented "<ship> Integrated Changes" name (see
+    parse_chassis_integrated_mods()'s own docstring for why this can't go
+    through parse_localized_strings() the normal way -- there's no real
+    {page,id} ref for the "Integrated Changes" phrase itself to resolve).
+
+    Composes each language's own text from two independently-real pieces:
+    the ship's own name (already a real, per-language-translatable game
+    string via its own name_ref -- resolved here directly against each
+    language's raw table, exactly like every other per-language
+    composition in this module, falling back to the ship's own base
+    English name if this specific language has no override for it, same
+    "some ship names are just proper nouns nobody bothered translating"
+    reality parse_ship_types() etc. already tolerate) and the app's own
+    i18next "equipment_mods.chassis_integrated_changes" template phrase
+    (src/static/i18n/<lang>.json -- hand-translated UI text, the OTHER
+    localization track this app has, completely separate from
+    localized_strings/game-data text -- see this module's own two-track
+    i18n note). Unlike parse_ammunition_compatibility_localized_strings()'s
+    own "skip if either piece is missing" rule, this always produces a row
+    for every language: the "Integrated Changes" translation is guaranteed
+    to exist (checked in by hand for all 14 languages), so falling back to
+    the English ship name for the other half still beats not using that
+    real translation at all.
+    """
+    i18next_templates: dict[str, str] = {}
+    for lang_id in LANGUAGE_FILES:
+        if lang_id == "en":
+            continue
+        i18n_path = ROOT / "src" / "static" / "i18n" / f"{lang_id}.json"
+        with i18n_path.open(encoding="utf-8") as f:
+            i18n_data = json.load(f)
+        i18next_templates[lang_id] = i18n_data["equipment_mods"]["chassis_integrated_changes"]
+
+    lang_tables: dict[str, dict] = {}
+    for lang_id, filename in LANGUAGE_FILES.items():
+        if lang_id == "en":
+            continue
+        path = DATA / "names" / filename
+        if path.exists():
+            lang_tables[lang_id] = load_language_table(path)
+
+    rows = []
+    for mod in chassis_mods:
+        ship = ships_by_ware_id.get(mod["mod_id"].removesuffix("_mod"))
+        if ship is None:
+            continue
+        match = FULL_REF_RE.match(ship.get("name_ref") or "")
+        for lang_id, template in i18next_templates.items():
+            table = lang_tables.get(lang_id)
+            chassis_name = ship["name"]
+            if table is not None and match:
+                raw = table.get((match.group(1), match.group(2)))
+                if raw is not None:
+                    chassis_name = resolve_text(raw, table)
+            rows.append(
+                {"ware_id": mod["mod_id"], "lang_id": lang_id, "text": template.replace("{{chassis}}", chassis_name)}
+            )
+    return rows
 
 
 def parse_ammunition_compatibility_localized_strings(ammunition_compatibility_types: list[dict]) -> list[dict]:
@@ -2014,6 +2111,453 @@ def iter_ware_elements(paths: list[Path]):
     return wares_by_id.values()
 
 
+# In-game equipment "mod" system (libraries/equipmentmods.xml -- see
+# equipmentmods_xml_jobs()'s own docstring in extract_game_data.py for the
+# full extraction story). NOT Steam Workshop/user-created mods (SWI etc.)
+# -- an unrelated, overloaded use of the word "mod": this is the loot/
+# craftable item a player applies via the in-game Modify Equipment screen
+# to change a weapon/engine/shield/ship's own stats (e.g. +5-20% weapon
+# damage), sometimes with a chance at a secondary bonus stat too.
+EQUIPMENTMODS_PATCH_SEL_RE = re.compile(r"^/equipmentmods/([a-z]+)$")
+EQUIPMENTMODS_FILE = WARES_DIR / "equipmentmods.xml"
+
+# equipmentmods_xml_jobs() (extract_game_data.py) also extracts Timelines'
+# own equipmentmods_tim.xml -- a <diff> patch adding 3 mission-scripted
+# mods (e.g. "mod_weapon_damage_fleet_battle_1"). Deliberately not read
+# here at all: these aren't real player-obtainable content (granted
+# directly by mission scripting, never lootable/craftable -- confirmed by
+# their own wares_tim.xml entries all carrying tags="crafting equipmentmod
+# noplayerblueprint", the same "noplayerblueprint" tag that rules out
+# crafting), so parse_equipment_mods() only ever reads the base file.
+
+
+def iter_equipmentmod_elements(paths: list[Path]) -> dict[str, list[ET.Element]]:
+    """{component_type: [stat elements]} merged across every file in
+    `paths` -- only ever called with [EQUIPMENTMODS_FILE] today (see that
+    constant's own comment for why Timelines' own diff-patch file is
+    deliberately excluded), but written to handle either real root shape
+    generically, same spirit as iter_ware_elements() above. Base
+    equipmentmods.xml has a plain <equipmentmods> root with one child per
+    category (<weapon>/<engine>/<ship>/<shield> -- no <thruster>, thruster
+    stats live under <engine>), each containing repeated stat elements
+    whose own tag name IS the stat being modified (<damage>, <cooling>,
+    <capacity>, ...). An extension's own file (if one were ever passed in)
+    is a <diff> patch instead, with <add sel="/equipmentmods/<category>">
+    blocks of brand-new stat elements to append to that category -- no
+    per-mod-id patch shape has ever been seen here, unlike wares.xml's own
+    ware[@id='...'] case (see iter_ware_elements() above), so this doesn't
+    need that function's own two-pass new-elements-then-patches design.
+    """
+    by_category: dict[str, list[ET.Element]] = {}
+    for path in paths:
+        root = ET.parse(path).getroot()
+        if root.tag == "equipmentmods":
+            for category_el in root:
+                by_category.setdefault(category_el.tag, []).extend(list(category_el))
+        elif root.tag == "diff":
+            for add in root.findall("add"):
+                match = EQUIPMENTMODS_PATCH_SEL_RE.match(add.get("sel") or "")
+                if match:
+                    by_category.setdefault(match.group(1), []).extend(list(add))
+        else:
+            raise ValueError(f"Unexpected root tag '{root.tag}' in {path}")
+    return by_category
+
+
+# equipment_mods_base.mod_level (1/2/3) -> its own real display name. Real refs, found by tracing a
+# real mod's own name resolution chain: wares.xml's <ware id="mod_weapon_damage_01_mk1"
+# name="{20110,100010011}".../> -> page 20110 id 100010011's own raw text,
+# "{20110,100010012} \({20110,100001} - {20110,1001}\)" -- the trailing {20110,1001} is the tier word
+# itself, standalone: page 20110 (titled "Equipment Mods") ids 1001/1101/1201 are "Basic Quality"/
+# "Enhanced Quality"/"Exceptional Quality", each real, reusable, and already embedded in every real
+# mod's own display name this app already resolves -- not app-invented UI text, so this uses the
+# game-data localization track (parse_localized_strings()), not i18next.
+MOD_QUALITY_NAME_REF = {
+    1: "{20110,1001}",
+    2: "{20110,1101}",
+    3: "{20110,1201}",
+}
+
+
+def parse_mod_qualities(lang_table: dict) -> list[dict]:
+    """One row per MOD_QUALITY_NAME_REF entry, for the mod_qualities DB table backing the
+    Modifications Lab's own tab labels with real per-language text -- same "id"+resolved "name"
+    shape as parse_ship_types()/parse_crew_roles(). "ware_id" passenger key is namespaced
+    ("mod_quality_<level>", not a bare "1"/"2"/"3") purely out of caution -- same collision-avoidance
+    reasoning as parse_deployable_types()/parse_ammunition_compatibility_types() (see their own
+    docstrings), even though a bare digit is unlikely to collide with anything real in practice.
+    """
+    return [
+        {
+            "mod_level": mod_level,
+            "mod_quality_name": resolve_ref_attr(name_ref, lang_table),
+            "ware_id": f"mod_quality_{mod_level}",
+            "name_ref": name_ref,
+        }
+        for mod_level, name_ref in MOD_QUALITY_NAME_REF.items()
+    ]
+
+
+# What it actually costs to APPLY a mod via the in-game Modification
+# workshop, by quality tier -- confirmed against real player knowledge,
+# not sourced from any wares.xml field. Deliberately NOT each mod ware's
+# own <price min="" average="" max=""/> (what parse_equipment_mods() used
+# before this constant existed): that turned out to be perfectly uniform
+# per tier too, but at the wrong numbers (50,000/250,000/1,250,000 avg for
+# tiers 1/2/3) -- apparently that ware's own market trading price, not the
+# workshop's own flat application cost, which is hardcoded here instead
+# since nothing in the extracted game data actually carries it.
+MOD_QUALITY_APPLICATION_PRICE = {1: 50_000, 2: 100_000, 3: 250_000}
+
+
+def parse_equipment_mods(
+    mod_files: list[Path], ware_files: list[Path], lang_table: dict
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Returns (equipment_mods_base rows, equipment_mod_stats rows,
+    equipment_mod_costs rows, mod_resource_wares -- {ware_id, name_ref}
+    entities for parse_localized_strings(), NOT its own DB table) -- see
+    this module's own SQL schema comments for what each column means.
+
+    Every mod ware referenced by equipmentmods.xml is confirmed unique (no
+    ware id ever appears as more than one primary stat element across the
+    whole file) and confirmed to already have its own real <ware id="..."
+    tags="crafting equipmentmod" ...> entry in wares.xml (page 20110
+    name/description/shortname refs, real price -- but no <component>
+    macro ref at all, unlike engine/shield/weapon/turret/thruster wares,
+    since a mod is a plain inventory item, never ship-mounted itself) --
+    confirmed true for every real mod, since `mod_files` is only ever
+    [EQUIPMENTMODS_FILE] (see that constant's own comment for why
+    Timelines' own mission-scripted mods, the one case this dataset has
+    of a mod with no real ware, are deliberately excluded upstream rather
+    than filtered here). A mod that somehow still has no matching ware is
+    skipped with a warning rather than crashing -- a "shouldn't happen"
+    safety net, not the mechanism doing any real exclusion today.
+
+    Each primary stat element becomes one equipment_mods_base row (mod_id
+    = ware id, mod_level = quality, mod_components = this pass's single
+    component_type -- always one value today; ship-chassis mods, added in
+    a later pass, will be the first case where one mod_id's own rows span
+    more than one component_type, e.g. "engine,shield") plus one
+    is_additional_stat=False equipment_mod_stats row. Its optional single
+    <bonus chance="" max=""> block (confirmed: never more than one per
+    primary element) contributes one is_additional_stat=True row per
+    candidate child, `chance` copied from the bonus block itself (always
+    guaranteed -- 1.0 -- for the primary row) and `weight` copied from the
+    candidate's own attribute where present (used for weighted random
+    selection among candidates when there are more of them than the
+    bonus's own "max" slot count; absent when there's nothing to weigh
+    between, e.g. exactly one candidate for one slot).
+    """
+    # ware_id -> {resources: [{ware_id, amount}]} -- every real mod ware
+    # carries exactly one <production> method with a <primary> list of
+    # crafting-material wares + amounts needed to make one (confirmed true
+    # for all 88 real mod wares across every wares*.xml file, base game and
+    # every DLC) -- captured here, in the same iter_ware_elements() pass
+    # that already resolves mod_names, rather than a second XML pass. (The
+    # mod ware's own <price> tag is deliberately NOT read here at all --
+    # see MOD_QUALITY_APPLICATION_PRICE's own comment for why the real
+    # application cost is a hardcoded per-tier constant instead.)
+    #
+    # The crafting materials themselves (tags="crafting equipmentmodpart
+    # ...", e.g. "modpart_enginefuelinjector_t1") are their own separate
+    # ware category -- not part of PRICE_WARE_TABLES (summarize_production.py),
+    # so GET /api/wares' existing name lookup never covers them -- resolved
+    # here too (resource_names, English fallback text exactly like
+    # mod_names' own "name" above) and returned as mod_resource_wares
+    # (below) so main() can fold them into the same parse_localized_strings()
+    # call every other entity list already goes through, giving them real
+    # per-language names the same way, not just a raw ware_id fallback.
+    mod_names: dict[str, dict] = {}
+    mod_costs: dict[str, dict] = {}
+    resource_names: dict[str, str] = {}
+    resource_entities: list[dict] = []
+    for ware in iter_ware_elements(ware_files):
+        tags = (ware.get("tags") or "").split()
+        if "equipmentmodpart" in tags:
+            ware_id = ware.get("id")
+            if ware_id in resource_names:
+                continue
+            name_ref = ware.get("name")
+            resource_names[ware_id] = resolve_ref_attr(name_ref, lang_table) if name_ref else ware_id.replace("_", " ").title()
+            resource_entities.append({"ware_id": ware_id, "name_ref": name_ref or ""})
+            continue
+        if "equipmentmod" not in tags:
+            continue
+        ware_id = ware.get("id")
+        name_ref = ware.get("name")
+        mod_names[ware_id] = {
+            "name": resolve_ref_attr(name_ref, lang_table) if name_ref else ware_id.replace("_", " ").title(),
+            "name_ref": name_ref or "",
+        }
+
+        resources = []
+        primary_el = ware.find("production/primary")
+        if primary_el is not None:
+            for res_el in primary_el.findall("ware"):
+                resources.append({"ware_id": res_el.get("ware"), "amount": int(res_el.get("amount"))})
+        mod_costs[ware_id] = {"resources": resources}
+
+    base_rows = []
+    stat_rows = []
+    skipped_no_ware: set[str] = set()
+    for component_type, stat_elements in iter_equipmentmod_elements(mod_files).items():
+        for stat_el in stat_elements:
+            mod_id = stat_el.get("ware")
+            mod_name = mod_names.get(mod_id)
+            if mod_name is None:
+                skipped_no_ware.add(mod_id)
+                continue
+
+            bonus_el = stat_el.find("bonus")
+            additional_stats_count = int(bonus_el.get("max")) if bonus_el is not None else 0
+            mod_level = int(stat_el.get("quality"))
+            price = MOD_QUALITY_APPLICATION_PRICE[mod_level]
+
+            base_rows.append(
+                {
+                    "mod_id": mod_id,
+                    "mod_name": mod_name["name"],
+                    "mod_level": mod_level,
+                    "mod_components": component_type,
+                    "additional_stats_count": additional_stats_count,
+                    "is_chassis_mod": 0,
+                    "ship_icon": None,
+                    "ware_id": mod_id,
+                    "name_ref": mod_name["name_ref"],
+                    "price_min": price,
+                    "price_avg": price,
+                    "price_max": price,
+                }
+            )
+            stat_rows.append(
+                {
+                    "mod_id": mod_id,
+                    "is_additional_stat": 0,
+                    "component_type": component_type,
+                    "target_stat": stat_el.tag,
+                    "min_value": float(stat_el.get("min")),
+                    "max_value": float(stat_el.get("max")),
+                    "chance": 1.0,
+                    "weight": None,
+                }
+            )
+            if bonus_el is not None:
+                chance = float(bonus_el.get("chance"))
+                for candidate in bonus_el:
+                    weight = candidate.get("weight")
+                    stat_rows.append(
+                        {
+                            "mod_id": mod_id,
+                            "is_additional_stat": 1,
+                            "component_type": component_type,
+                            "target_stat": candidate.tag,
+                            "min_value": float(candidate.get("min")),
+                            "max_value": float(candidate.get("max")),
+                            "chance": chance,
+                            "weight": int(weight) if weight is not None else None,
+                        }
+                    )
+
+    if skipped_no_ware:
+        print(
+            f"  ({len(skipped_no_ware)} equipment mod entry/entries skipped -- no matching wares.xml "
+            f"ware, e.g. Timelines mission-specific mods: {sorted(skipped_no_ware)})"
+        )
+
+    # Built from mod_costs directly (keyed by real ware_id, one entry per
+    # mod regardless of how many component_type/stat_element rows it has)
+    # rather than inside the loop above, which would emit a duplicate set
+    # of cost rows for any mod_id visited more than once -- doesn't happen
+    # for a real mod today (each has exactly one component_type), but
+    # would be a real bug the moment one ever does. Filtered to
+    # resolved_mod_ids so a mod skipped above (skipped_no_ware) never gets
+    # orphaned cost rows with nothing in equipment_mods_base to join
+    # against.
+    resolved_mod_ids = {row["mod_id"] for row in base_rows}
+    cost_rows = [
+        {
+            "mod_id": mod_id,
+            "ware_id": resource["ware_id"],
+            "ware_name": resource_names.get(resource["ware_id"], resource["ware_id"]),
+            "amount": resource["amount"],
+        }
+        for mod_id, cost in mod_costs.items()
+        if mod_id in resolved_mod_ids
+        for resource in cost["resources"]
+    ]
+
+    return base_rows, stat_rows, cost_rows, resource_entities
+
+
+# ships_base.weapon_heat_modifier/shield_capacity_modifier/
+# shield_rechargerate_modifier/shield_rechargedelay_modifier (see
+# analyze_ship_components()'s own "Hull-wide multipliers" comment) are a
+# real, separate mechanism from libraries/equipmentmods.xml -- a flat,
+# non-rolled multiplier baked directly into a small minority of ship
+# chassis' own macro (<properties><modifiers><weapon heat=""/><shield
+# capacity="" rechargerate="" rechargedelay=""/></modifiers></properties>
+# -- see that same function's own "~8% for weapon heat, ~3% for shield"
+# comment), always applied, never player-chosen/rolled/leveled the way a
+# real mod is.
+# parse_chassis_integrated_mods() folds these into the same
+# equipment_mods_base/equipment_mod_stats shape so a ship's own built-in
+# stat changes show up alongside real mods in one place, under an
+# invented mod_id/name -- see this function's own docstring.
+def parse_chassis_integrated_mods(ships: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Returns (equipment_mods_base rows, equipment_mod_stats rows) -- one
+    synthetic mod per ship whose own weapon_heat_modifier/shield_*_modifier
+    fields aren't all the implicit default of 1.0 (most ships have none of
+    these at all and get no row here whatsoever, same "absence = no
+    change" contract those fields themselves already use).
+
+    mod_id = "<ship ware_id>_mod" (invented, not a real ware -- no
+    wares.xml entry, no price, no quality tier: mod_level is always 0 (no
+    real mod ever uses this value -- quality is always 1/2/3 -- so 0
+    reads as "not a real, quality-tiered mod" rather than colliding with
+    a real Basic-tier one) and additional_stats_count is always 0, since a
+    chassis's own numbers are fixed, never rolled). mod_name = "<ship
+    name> Integrated Changes"
+    (also invented -- English only here; GET /api/equipment_mods' own
+    eventual caller needs the is_chassis_mod flag to know to reconstruct
+    this via the app's own i18next system instead of trusting mod_name
+    verbatim for every language, since there's no real {page,id} ref for
+    "Integrated Changes" to resolve through parse_localized_strings() the
+    way every other mod's own name does -- see the
+    "equipment_mods.chassis_integrated_changes" i18next key).
+
+    ship_icon = this ship's own ships_base.icon (e.g. "ship_s_fighter_01"
+    for the Asp, "ship_xl_destroyer_01" for the Rattlesnake) -- lets the
+    Modifications Lab's own Chassis tab show each row with the actual
+    originating ship's own class symbol (via app.js's shipIconUrl(), the
+    same lookup every ship picker/cart row already uses) instead of one
+    fixed icon for every chassis mod regardless of which ship it came
+    from. NULL for every real (non-chassis) mod -- see parse_equipment_mods()'s
+    own base_rows, which has no owning ship at all.
+
+    ships_base's own "heat" naming becomes target_stat "heatgeneration"
+    here, applied uninverted (heatgeneration_value = weapon_heat_modifier
+    directly) against bullets_base's own heat_initial AND heat_value
+    (both -- see equipment_mod_target_mappings.json's own "heatgeneration"
+    entry). There is no real equipmentmods.xml <cooling>-style vocabulary
+    for this: confirmed by querying every distinct (component_type,
+    target_stat) pair parse_equipment_mods() actually extracts from the
+    real game files -- only "cooling" exists for weapon heat there, and it
+    targets weapons_base.heat_coolrate (a real purchasable mod that speeds
+    up COOLING), a different stat from this chassis-integrated multiplier,
+    which GitHub issue #26's own screenshot-driven Sustained DPS modeling
+    confirmed instead scales heat GENERATION (bullets_base.heat_initial/
+    heat_value) -- Cooldown Duration never changes with this modifier,
+    only Time to Overheat does. An earlier version of this function
+    aliased weapon_heat_modifier onto the real "cooling" target_stat
+    (inverted, to match that stat's own opposite "bigger = better"
+    convention) -- that was an unverified guess that turned out wrong, now
+    corrected to its own distinct, uninverted target_stat instead of
+    colliding with the real mod's vocabulary. The three shield attributes
+    need no such correction -- ships_base's own
+    "capacity"/"rechargerate"/"rechargedelay" already match
+    equipmentmods.xml's own real <shield> stat names exactly.
+    """
+    base_rows = []
+    stat_rows = []
+    for s in ships:
+        ship_stats: list[tuple[str, str, float]] = []
+        if s["weapon_heat_modifier"] != 1.0:
+            ship_stats.append(("weapon", "heatgeneration", s["weapon_heat_modifier"]))
+        if s["shield_capacity_modifier"] != 1.0:
+            ship_stats.append(("shield", "capacity", s["shield_capacity_modifier"]))
+        if s["shield_rechargerate_modifier"] != 1.0:
+            ship_stats.append(("shield", "rechargerate", s["shield_rechargerate_modifier"]))
+        if s["shield_rechargedelay_modifier"] != 1.0:
+            ship_stats.append(("shield", "rechargedelay", s["shield_rechargedelay_modifier"]))
+
+        if not ship_stats:
+            continue
+
+        mod_id = f"{s['ware_id']}_mod"
+        base_rows.append(
+            {
+                "mod_id": mod_id,
+                "mod_name": f"{s['name']} Integrated Changes",
+                "mod_level": 0,
+                "mod_components": ",".join(sorted({component_type for component_type, _, _ in ship_stats})),
+                "additional_stats_count": 0,
+                "is_chassis_mod": 1,
+                "ship_icon": s["icon"],
+                "ware_id": mod_id,
+                "name_ref": "",
+                "price_min": None,
+                "price_avg": None,
+                "price_max": None,
+            }
+        )
+        for component_type, target_stat, value in ship_stats:
+            stat_rows.append(
+                {
+                    "mod_id": mod_id,
+                    "is_additional_stat": 0,
+                    "component_type": component_type,
+                    "target_stat": target_stat,
+                    "min_value": value,
+                    "max_value": value,
+                    "chance": 1.0,
+                    "weight": None,
+                }
+            )
+
+    return base_rows, stat_rows
+
+
+# equipment_mod_stats' own (component_type, target_stat) pair -- equipmentmods.xml's own vocabulary, see
+# parse_equipment_mods()'s docstring -- doesn't correlate with anything this pipeline actually extracts from
+# the game files (no XML anywhere states "mod stat X === raw macro attribute Y"), so unlike every other
+# _NAME_REF-style mapping in this module, the real component-table column(s) each one changes is NOT stored as
+# a DB table generated here. It lives instead as a hand-maintained static file,
+# src/static/equipment_mod_target_mappings.json -- edited directly, not regenerated from anything, and bundled
+# into the Docker image the same way src/static/i18n/*.json already is (see api.py's own StaticFiles mount).
+# validate_equipment_mod_target_mappings() below only ever reads it, to warn when it's gone stale.
+#
+# Shape: {component_type: {target_stat: [{real_table, real_column, operation, confidence, note}, ...]}} -- a
+# list (not a single object) since one target_stat can change more than one real column at once (e.g.
+# "rotationthrust" scales three separate thruster axes). "operation" says how a mod's own rolled min/max value
+# combines with the real column's own current value:
+#   - "multiply": final = current_value * rolled_value (the common case -- most equipmentmods.xml values are
+#     ratios, e.g. 1.05-1.2 = "+5% to +20%").
+#   - "add": final = current_value + rolled_value, for the handful of stats equipmentmods.xml's own header
+#     comment calls out as requiring ints (countermeasurecapacity/deployablecapacity/missilecapacity/
+#     unitcapacity all roll a raw "+1 to +4" count, not a ratio) plus radarcloak (see its own note for why an
+#     add against a synthetic baseline, not a multiply, is the right operation there).
+#   - "add_ceiling_bool": regiondamage only -- see its own note for the specific ceil-then-treat-as-boolean
+#     rule (the real underlying stat is binary immune/not-immune, never a partial percentage, even though the
+#     mod itself rolls a fractional value).
+# "confidence" is "confirmed" or "inferred" (a best-supported hypothesis, not directly proven -- see that
+# entry's own note); note is empty for a "confirmed" entry with nothing unusual to explain.
+EQUIPMENT_MOD_TARGET_MAPPINGS_FILE = ROOT / "src" / "static" / "equipment_mod_target_mappings.json"
+
+
+def validate_equipment_mod_target_mappings(equipment_mod_stats: list[dict]) -> None:
+    """Warns about any real (component_type, target_stat) pair actually present in `equipment_mod_stats` that
+    EQUIPMENT_MOD_TARGET_MAPPINGS_FILE has no entry for at all -- e.g. a future DLC patching equipmentmods.xml
+    with a target_stat nobody's worked out the real mapping for yet. Purely a validation step -- this pipeline
+    never writes to that file, only reads it (see EQUIPMENT_MOD_TARGET_MAPPINGS_FILE's own comment for why).
+    """
+    with EQUIPMENT_MOD_TARGET_MAPPINGS_FILE.open(encoding="utf-8") as f:
+        mapping = json.load(f)
+
+    real_pairs = {(row["component_type"], row["target_stat"]) for row in equipment_mod_stats}
+    mapped_pairs = {
+        (component_type, target_stat)
+        for component_type, stats in mapping.items()
+        for target_stat in stats
+    }
+    unmapped = sorted(real_pairs - mapped_pairs)
+    if unmapped:
+        print(
+            f"  WARNING: {len(unmapped)} (component_type, target_stat) pair(s) in equipment_mod_stats have no "
+            f"entry in {EQUIPMENT_MOD_TARGET_MAPPINGS_FILE.relative_to(ROOT)} -- see that file's own comment: "
+            f"{unmapped}"
+        )
+
+
 def parse_ship_wares(paths: list[Path]) -> list[dict]:
     ships = []
     for ware in iter_ware_elements(paths):
@@ -2633,60 +3177,88 @@ def _float_attr(el: ET.Element | None, attr: str) -> float | None:
 
 def parse_equipment_component_wares(
     equip_type: str,
-    macro_dirs: dict[str, Path],
-    component_dirs: dict[str, Path],
+    macro_dir: Path,
+    component_dir: Path,
     extract_fields,
-) -> tuple[list[dict], dict[str, str]]:
-    """Shared engine/shield/weapon/turret parser: walks every macro file
-    across all size folders and, for each one, looks up its linked
+) -> tuple[list[dict], list[dict]]:
+    """Shared engine/shield/weapon/turret parser: walks every macro file in
+    `macro_dir` (already sorted down to real class="engine"/"shieldgenerator"/
+    "weapon"+"missilelauncher"/"turret"+"missileturret" files by
+    extract_game_data.py's sort_equipment_files_by_class() -- see that
+    module's own docstring) and, for each one, looks up its linked
     component file's mount connection for size/compatibility, then calls
     `extract_fields(properties)` for the type-specific stat columns.
     `ware_id` is recovered from the macro's own `name` attribute, which is
     always "<ware_id>_macro" (verified against wares.xml's
     <component ref="..."/> for each type). Built entirely from
-    data/<type>s/ rather than wares.xml.
+    data/<type>s/ rather than wares.xml. `macro_dir`/`component_dir` are a
+    single flat folder each (every real size together) -- real size has
+    never come from which folder a macro was found in, only from its own
+    linked component file's mount tag below, so there was never a reason
+    for the two to be split by size in the first place.
 
-    A macro carrying its own alias="<other_macro_name>" attribute is
-    *sometimes* a redundant "virtual" duplicate of that other ware -- e.g.
-    shield_bor_m_standard_01_mk1_macro is an alias of
-    shield_bor_m_standard_02_mk1_macro, with the same name, stats, price,
-    AND compatibility class, distinguished from the real one only by
-    <hull integrated="1"/> (no actual hull value of its own) instead of a
-    real <hull max="..."/>. But the alias attribute alone isn't a safe
-    exclusion signal by itself -- confirmed by hand (a real regression
-    caught via manual testing: the Hydra lost access to Paranid Blast
-    Mortar Turrets) that some alias pairs are two genuinely different
-    compatibility tiers of the same-named item sharing the alias mechanism
-    for some other reason (e.g. turret_par_m_shotgun_01_mk1, "advanced"
-    compatibility, is marked as an alias of turret_par_m_shotgun_02_mk1,
-    "standard" compatibility -- dropping the "advanced" one the way a
-    blanket alias check would breaks any ship whose turret slot actually
-    needs that tier). So this only excludes an aliased macro when its own
-    (size, compatibility) *exactly matches* its alias target's -- a true
-    redundant duplicate -- keeping both when they differ, since then
-    they're two distinct, both-needed options that just happen to share a
-    display name. This needs every macro's own mount size/compatibility
-    already resolved to compare, so it's a second pass over `rows` after
-    the main parsing loop below, not a check made inline per-macro.
+    Some macros are a redundant "virtual" duplicate of another real ware --
+    same display name (identification name=""), same makerrace/mk, same
+    every type-specific stat -- differing *only* in `compatibility` (and a
+    resulting <hull integrated="1"/> instead of a real <hull max="..."/>,
+    since the virtual side has no independent hull of its own). This is a
+    real, common shape: e.g. turret_par_m_shotgun_01_mk1 ("advanced"
+    compatibility) and turret_par_m_shotgun_02_mk1 ("standard") are both
+    "PAR M Blast Mortar Turret Mk1" -- identical bullet_class/rotation
+    speed/price, existing only because the same craftable item needs two
+    physical hull moldings to fit both compatibility tiers of mount.
+
+    Detected by comparing every row's own stats directly (name_ref +
+    makerrace + mk + size + every extract_fields() value, excluding
+    ware_id/macro/hull/compatibility) rather than trusting a macro's own
+    alias="<other_macro_name>" attribute -- confirmed necessary two
+    different ways:
+    - The alias attribute is NOT a safe signal by itself: a real regression
+      caught by hand (the Hydra lost access to Paranid Blast Mortar
+      Turrets) showed some alias pairs are genuinely different compatibility
+      tiers of the same-named item sharing the alias mechanism for some
+      other reason, not a redundant duplicate -- dropping one broke any
+      ship whose slot needed that specific tier.
+    - The alias attribute is also not *required* for a real duplicate: the
+      ARG S Shield Generator Mk1's "racer" variant (shield_gen_s_racer_01_mk1)
+      and its "standard" sibling (shield_gen_s_virtual_01) share an
+      identical name ref and recharge stats and both carry
+      <hull integrated="1"/>, but neither macro has an alias="..." attribute
+      linking them at all -- a blanket "only ever look at alias=" check
+      would have missed this pair entirely.
+    This needs every macro's own mount size/compatibility already resolved
+    to compare, so it's a second pass over `rows` after the main parsing
+    loop below, not a check made inline per-macro. Within a group of
+    same-stat rows, the one with a real (non-None) `hull` value is kept as
+    the canonical row -- observed true on every real example (the virtual
+    side is always the one with no independent hull) -- falling back to a
+    real alias="..." attribute's own target, then the lowest ware_id, only
+    for the degenerate case of zero or multiple rows with a real hull value.
 
     Unlike the "no wares.xml entry at all" orphan macros
-    filter_to_real_equipment_wares already drops (see its own docstring),
-    a true duplicate excluded here DOES have a real, independently-priced
+    filter_to_real_equipment_wares already drops (see its own docstring), a
+    non-canonical row collapsed here DOES have a real, independently-priced
     wares.xml entry -- so equipment_wares_base alone can't tell it apart
     from a genuine ware, and it has to be excluded here instead, at the
     raw-macro level, before it'd otherwise become a second,
-    indistinguishable-looking option in the picker. The excluded ware_ids
-    are returned alongside the rows (as the second tuple element, now a
-    {alias_ware_id: target_ware_id} mapping rather than a bare set) so
-    filter_to_real_equipment_wares's own "wares.xml entry with no parsed
-    row" check can tell this apart from a genuine parsing gap, and so
-    main() can persist the mapping itself into the new
-    equipment_ware_aliases table -- a real player-saved ship loadout
-    (loadouts.xml, see import_loadouts.py) can still reference an excluded
-    alias ware_id directly (the game itself never removed it, only this
-    app's own picker treats it as redundant), so anything consuming a
-    ware_id from outside this app's own picker needs a way to resolve it
-    back to the real, still-listed target ware.
+    indistinguishable-looking option in the picker (this was the actual
+    bug report that motivated this rewrite -- two rows for one real item in
+    the Component Analyzer's own Select Components list, discovered via the
+    Modifications Lab showing different eligible ship chassis for what
+    looked like the same turret). The excluded rows are returned alongside
+    the kept rows (as the second tuple element -- a list of
+    {alias_ware_id, target_ware_id, compatibility} records, one per
+    collapsed row) so filter_to_real_equipment_wares's own "wares.xml entry
+    with no parsed row" check can tell this apart from a genuine parsing
+    gap, and so main() can persist the mapping itself into the
+    equipment_ware_aliases table, `compatibility` included -- both to let a
+    real player-saved ship loadout (loadouts.xml, see import_loadouts.py)
+    resolve an excluded alias ware_id back to the still-listed canonical
+    ware (the game itself never removed it, only this app's own picker
+    does), and so query_ship_components.py's matching_items()/
+    ships_matching_ware() can test a canonical ware's *every* real
+    compatibility variant, not just the one left on its own row, when
+    deciding which ships/slots it fits.
 
     A few macros (observed for engines/weapons/turrets, never for any real
     ware -- only already-filtered orphan/mission-only ones) use
@@ -2697,9 +3269,7 @@ def parse_equipment_component_wares(
     """
     rows = []
     alias_of: dict[str, str] = {}
-    for size, macro_dir in macro_dirs.items():
-        if not macro_dir.exists():
-            continue
+    if macro_dir.exists():
         for macro_path in sorted(macro_dir.glob("*.xml")):
             macro_el = ET.parse(macro_path).getroot().find("macro")
             if macro_el is None:
@@ -2718,26 +3288,25 @@ def parse_equipment_component_wares(
             identification = properties.find("identification") if properties is not None else None
             hull_el = properties.find("hull") if properties is not None else None
 
+            # Real size has always come from here -- the linked component
+            # file's own mount-tag -- never from which folder/job the macro
+            # itself was found in (there is no longer such a folder to fall
+            # back to at all; see this function's own docstring). A macro
+            # whose component file can't be resolved, or whose mount has no
+            # size tag, leaves size None rather than guessing.
             mount_size, compatibility = None, None
             if component_ref:
-                component_path = component_dirs[size] / f"{component_ref}.xml"
+                component_path = component_dir / f"{component_ref}.xml"
                 if component_path.exists():
                     mount_size, compatibility = parse_equipment_mount(component_path, equip_type)
                 else:
                     print(f"WARNING: {equip_type} component file not found for {ware_id} ({component_path})")
 
-            if mount_size and mount_size != size:
-                print(
-                    f"WARNING: {ware_id}: component mount size '{mount_size}' doesn't match "
-                    f"macro folder size '{size}' -- using the component's size"
-                )
-
             row = {
                 "ware_id": ware_id,
                 "macro": macro_name,
                 # Design race(s), raw and unsplit (e.g. "argon", or rarely
-                # "argon teladi") -- a passenger key like "name_ref"
-                # elsewhere in this pipeline, consumed by
+                # "argon teladi") -- a passenger key, consumed by
                 # build_maker_race_rows() in main(), never written to this
                 # table's own CSV (not in TURRET/ENGINE/SHIELD/
                 # WEAPON_FIELDNAMES -- the real per-race data lives in the
@@ -2745,37 +3314,77 @@ def parse_equipment_component_wares(
                 "makerrace": identification.get("makerrace") if identification is not None else None,
                 "mk": int(identification.get("mk")) if identification is not None and identification.get("mk") else None,
                 "hull": int(float(hull_el.get("max"))) if hull_el is not None and hull_el.get("max") else None,
-                "size": mount_size or size,
+                "size": mount_size,
                 "compatibility": compatibility,
+                # Another passenger key, popped before returning -- this
+                # macro's own real {page,id} display-name ref, used only to
+                # group compatibility-variant duplicates below (two rows
+                # sharing this exact ref are the same real item). Never
+                # written to this table's own CSV -- the real localized
+                # name lives in equipment_wares_base/localized_strings
+                # instead, resolved from wares.xml, not from here.
+                "name_ref": identification.get("name") if identification is not None else None,
             }
             row.update(extract_fields(properties))
             rows.append(row)
 
-    rows_by_id = {r["ware_id"]: r for r in rows}
-    true_duplicates: dict[str, str] = {}
-    for ware_id, target_id in alias_of.items():
-        row = rows_by_id.get(ware_id)
-        target_row = rows_by_id.get(target_id)
-        if row is None or target_row is None:
+    # Group every row by "same real item" -- name_ref + makerrace + mk +
+    # size + every extract_fields() stat, excluding the fields allowed to
+    # differ between real compatibility-tier variants (ware_id/macro/hull/
+    # compatibility itself) -- see this function's own docstring for why
+    # this compares actual stats rather than trusting alias="..." alone.
+    # Sorting each row's own remaining items by key before comparing is
+    # safe (never needs to fall back to comparing two different values
+    # against each other) since dict keys within one row are always
+    # unique.
+    excluded_keys = {"ware_id", "macro", "hull", "compatibility", "name_ref", "makerrace", "mk", "size"}
+
+    def dedupe_key(row: dict) -> tuple:
+        stat_items = tuple(sorted((k, v) for k, v in row.items() if k not in excluded_keys))
+        return (row["name_ref"], row["makerrace"], row["mk"], row["size"], stat_items)
+
+    groups: dict[tuple, list[dict]] = {}
+    for row in rows:
+        if row["name_ref"]:  # nothing safe to group rows with no real name ref against
+            groups.setdefault(dedupe_key(row), []).append(row)
+
+    alias_records: list[dict] = []
+    collapsed_ware_ids: set[str] = set()
+    alias_targets = set(alias_of.values())
+    for group_rows in groups.values():
+        if len(group_rows) < 2:
             continue
-        if row["size"] == target_row["size"] and row["compatibility"] == target_row["compatibility"]:
-            true_duplicates[ware_id] = target_id
+        with_hull = [r for r in group_rows if r["hull"] is not None]
+        if len(with_hull) == 1:
+            canonical = with_hull[0]
+        else:
+            # Degenerate case (zero or multiple rows with a real hull
+            # value) -- fall back to a real alias="..." target hint, else
+            # the lowest ware_id, for a stable, deterministic pick.
+            aliased = [r for r in group_rows if r["ware_id"] in alias_targets]
+            canonical = aliased[0] if aliased else sorted(group_rows, key=lambda r: r["ware_id"])[0]
+        for row in group_rows:
+            if row is canonical:
+                continue
+            alias_records.append(
+                {
+                    "alias_ware_id": row["ware_id"],
+                    "target_ware_id": canonical["ware_id"],
+                    "compatibility": row["compatibility"],
+                }
+            )
+            collapsed_ware_ids.add(row["ware_id"])
 
-    if true_duplicates:
+    if alias_records:
         print(
-            f"  ({len(true_duplicates)} {equip_type} macro(s) excluded as duplicate/alias wares "
-            f'(same size+compatibility as their own alias="..." target): {sorted(true_duplicates)})'
-        )
-    skipped_other_aliases = sorted(set(alias_of) - set(true_duplicates))
-    if skipped_other_aliases:
-        print(
-            f"  ({len(skipped_other_aliases)} {equip_type} macro(s) carry an alias=\"...\" attribute but "
-            f"differ in size/compatibility from their target -- kept as distinct, real options: "
-            f"{skipped_other_aliases})"
+            f"  ({len(alias_records)} {equip_type} macro(s) collapsed as compatibility-variant duplicates "
+            f"of another ware with identical stats: {sorted(collapsed_ware_ids)})"
         )
 
-    rows = [r for r in rows if r["ware_id"] not in true_duplicates]
-    return rows, true_duplicates
+    rows = [r for r in rows if r["ware_id"] not in collapsed_ware_ids]
+    for row in rows:
+        row.pop("name_ref", None)
+    return rows, alias_records
 
 
 def _ammunition_fields(properties: ET.Element | None) -> dict:
@@ -2865,20 +3474,20 @@ def _weapon_fields(properties: ET.Element | None) -> dict:
     }
 
 
-def parse_turrets(macro_dirs: dict[str, Path], component_dirs: dict[str, Path]) -> tuple[list[dict], dict[str, str]]:
-    return parse_equipment_component_wares("turret", macro_dirs, component_dirs, _turret_fields)
+def parse_turrets(macro_dir: Path, component_dir: Path) -> tuple[list[dict], list[dict]]:
+    return parse_equipment_component_wares("turret", macro_dir, component_dir, _turret_fields)
 
 
-def parse_engines(macro_dirs: dict[str, Path], component_dirs: dict[str, Path]) -> tuple[list[dict], dict[str, str]]:
-    return parse_equipment_component_wares("engine", macro_dirs, component_dirs, _engine_fields)
+def parse_engines(macro_dir: Path, component_dir: Path) -> tuple[list[dict], list[dict]]:
+    return parse_equipment_component_wares("engine", macro_dir, component_dir, _engine_fields)
 
 
-def parse_shields(macro_dirs: dict[str, Path], component_dirs: dict[str, Path]) -> tuple[list[dict], dict[str, str]]:
-    return parse_equipment_component_wares("shield", macro_dirs, component_dirs, _shield_fields)
+def parse_shields(macro_dir: Path, component_dir: Path) -> tuple[list[dict], list[dict]]:
+    return parse_equipment_component_wares("shield", macro_dir, component_dir, _shield_fields)
 
 
-def parse_weapons(macro_dirs: dict[str, Path], component_dirs: dict[str, Path]) -> tuple[list[dict], dict[str, str]]:
-    return parse_equipment_component_wares("weapon", macro_dirs, component_dirs, _weapon_fields)
+def parse_weapons(macro_dir: Path, component_dir: Path) -> tuple[list[dict], list[dict]]:
+    return parse_equipment_component_wares("weapon", macro_dir, component_dir, _weapon_fields)
 
 
 def _int_attr(el: ET.Element | None, attr: str) -> int | None:
@@ -2892,13 +3501,126 @@ MISSILE_STAT_KEYS = [
     "explosiondamage_value", "explosiondamage_shielddisruption",
     "reload_time", "hull", "weapon_system", "countermeasure_resilience", "physics_mass",
     "lock_time", "lock_range", "compatibility",
+    "thrust_forward", "thrust_reverse", "thrust_strafe", "thrust_pitch", "thrust_yaw", "thrust_roll",
+    "physics_drag_forward", "physics_drag_reverse", "physics_drag_horizontal", "physics_drag_vertical",
+    "physics_drag_pitch", "physics_drag_yaw", "physics_drag_roll",
+    "physics_inertia_pitch", "physics_inertia_yaw", "physics_inertia_roll",
 ]
 DEPLOYABLE_STAT_KEYS = [
     "hull", "radar_range", "explosion_strength", "explosion_damage", "trigger_oncollision", "physics_mass",
 ]
 
 
-def analyze_missile_macro(macro_path: Path) -> dict:
+# A missile's own propulsion is a real, separate <engine>-class macro it
+# references by name (<connections><connection><macro ref="engine_missile_
+# dumbfire_mk1_macro" connection="ship"/></connection></connections>) --
+# the exact same "generic_engine" component/<thrust forward=".."/> shape a
+# real ship engine uses (see _engine_fields()), just never itself a
+# standalone ware (no wares.xml entry -- confirmed by a direct grep; it
+# only exists to be referenced by a missile macro's own <connections>).
+# Building one flat {macro_name: {thrust_*}} index up front, from every
+# real macro already sorted into ENGINE_MACRO_DIR (extract_game_data.py's
+# sort_equipment_files_by_class() -- GitHub issue #26 phase-5), is cheap
+# (~200 tiny files) and lets analyze_missile_macro() below do a single
+# dict lookup per missile rather than re-parsing engine macros per missile
+# that shares one (three engines cover every real missile that has any
+# propulsion at all -- dumbfire/guided/swarm, one per missile "weapon
+# system" family).
+THRUST_STAT_KEYS = ["thrust_forward", "thrust_reverse", "thrust_strafe", "thrust_pitch", "thrust_yaw", "thrust_roll"]
+
+# Hand-measured, not derivable from any extracted game file (GitHub issue
+# #26 phase-7): the user compared this app's own computed Max Distance
+# (max_speed x missile_lifetime, itself thrust_forward/physics_drag_forward
+# x lifetime -- see MISSILE_FLIGHT_DERIVED_STATS in app.js) against the
+# real in-game Encyclopedia's own "Effective Range" for all 18 real
+# missiles. 13 of 18 -- every guided/smart/swarm/heatseeker/torpedo/
+# disruptor/interceptor/barrage missile -- round to a 1.00 ratio (the
+# formula is already exactly right for them). The remaining 5 are every
+# plain, unguided dumbfire-family missile (dumbfire + its "breaching"
+# variant, all three sizes) and ALL undershoot the real range by a
+# consistent ~19-27%, small-to-large -- a real, physical gap in the
+# thrust/drag/lifetime model specifically for this one missile family
+# (see MISSILE_FLIGHT_DERIVED_STATS' own missile_max_distance comment for
+# why: a missile needs real time to accelerate up to its own top speed,
+# and the compiled game engine's own actual range formula isn't readable
+# from any asset this app extracts -- confirmed via menu_encyclopedia.lua,
+# which only displays an already-computed GetLibraryEntry() result, never
+# calculates one itself). Applied as a flat multiplier on top of the
+# existing formula rather than replacing it, so the 13 already-correct
+# missiles are untouched (multiplier 1.0, the default for every ware not
+# listed here) and only the 5 known-wrong ones get corrected.
+MISSILE_ANOMALOUS_RANGE_MULTIPLIER: dict[str, float] = {
+    "missile_gen_l_dumbfire_01_mk1": 1.20,  # Heavy Cluster Rocket
+    "missile_gen_m_dumbfire_01_mk1": 1.19,  # Medium Dumbfire Rocket
+    "missile_gen_m_dumbfire_01_mk2": 1.19,  # Medium Breaching Rocket
+    "missile_gen_s_dumbfire_01_mk1": 1.27,  # Light Dumbfire Rocket
+    "missile_gen_s_dumbfire_01_mk2": 1.27,  # Light Breaching Rocket
+}
+
+# Hand-measured, not derived from any extracted game file -- the user's own
+# real in-game Encyclopedia screenshots for all 16 real, non-barrage
+# missiles (GitHub issue #26 phase-8), taken specifically to settle the
+# missile turn-rate question after two different formula guesses (a
+# thrust/drag model and a thrust/inertia model) and even a third-party
+# wiki's own published numbers all turned out wrong -- the wiki's figures
+# in particular are off by roughly 10x on every guided-family missile (e.g.
+# it lists the Light Guided Missile at 22 deg/s; the real in-game value is
+# 2 deg/s), confirmed by the one missile this app already had independent
+# proof for (the Heavy Guided Missile's own real Max Turning Rate, 0.2 deg/s,
+# matches this table exactly). These are reference values ONLY -- display
+# the real number, not a formula's guess -- not yet wired into any
+# pre-derived turn-rate stat. The two Barrage missiles have no screenshot
+# (the user doesn't own one in-game) and are deliberately left out, so they
+# default to None/NULL -- a real "unmeasured", not a guess of 0.
+# Each value is (turn_rate, pitch_rate, vertical_strafe, horizontal_strafe)
+# -- turn_rate/pitch_rate in deg/s, vertical_strafe/horizontal_strafe in m/s.
+MISSILE_GAME_VALUES: dict[str, tuple[float, float, float, float]] = {
+    "missile_gen_l_dumbfire_01_mk1": (0, 0, 0, 0),  # Heavy Cluster Rocket
+    "missile_gen_l_guided_01_mk1": (0.2, 0.2, 0, 0),  # Heavy Guided Missile
+    "missile_gen_m_dumbfire_01_mk1": (0, 0, 0, 0),  # Medium Dumbfire Rocket
+    "missile_gen_m_dumbfire_01_mk2": (0, 0, 0, 0),  # Medium Breaching Rocket
+    "missile_gen_m_guided_01_mk1": (1, 1, 2, 2),  # Medium Guided Missile
+    "missile_gen_m_smart_01_mk1": (1, 1, 2, 2),  # Medium Smart Missile
+    "missile_gen_s_dumbfire_01_mk1": (0, 0, 0, 0),  # Light Dumbfire Rocket
+    "missile_gen_s_dumbfire_01_mk2": (0, 0, 0, 0),  # Light Breaching Rocket
+    "missile_gen_s_emp_01_mk1": (3, 3, 9, 9),  # Light Guided EMP Missile
+    "missile_gen_s_guided_01_mk1": (2, 2, 2, 2),  # Light Guided Missile
+    "missile_gen_s_heatseeker_01_mk1": (2, 2, 2, 2),  # Light Heatseeker Missile
+    "missile_gen_s_smart_01_mk1": (2, 2, 2, 2),  # Light Smart Missile
+    "missile_gen_s_swarm_01_mk1": (1, 1, 4, 4),  # Light Swarm Missile
+    "missile_gen_s_torpedo_01_mk1": (0.2, 0.2, 0, 0),  # Light Torpedo
+    "missile_gen_s_interceptor_01_mk1": (7, 7, 16, 17),  # Light Interceptor Missile
+    "missile_gen_s_disruptor_01_mk1": (1, 1, 12, 10),  # Light Disruptor Missile
+}
+
+
+def load_engine_thrust_index(engine_macro_dir: Path) -> dict[str, dict[str, float | None]]:
+    index: dict[str, dict[str, float | None]] = {}
+    if not engine_macro_dir.exists():
+        return index
+    for macro_path in sorted(engine_macro_dir.glob("*.xml")):
+        macro_el = ET.parse(macro_path).getroot().find("macro")
+        if macro_el is None:
+            continue
+        macro_name = macro_el.get("name")
+        if not macro_name:
+            continue
+        properties = macro_el.find("properties")
+        thrust_el = properties.find("thrust") if properties is not None else None
+        if thrust_el is None:
+            continue
+        index[macro_name] = {
+            "thrust_forward": _float_attr(thrust_el, "forward"),
+            "thrust_reverse": _float_attr(thrust_el, "reverse"),
+            "thrust_strafe": _float_attr(thrust_el, "strafe"),
+            "thrust_pitch": _float_attr(thrust_el, "pitch"),
+            "thrust_yaw": _float_attr(thrust_el, "yaw"),
+            "thrust_roll": _float_attr(thrust_el, "roll"),
+        }
+    return index
+
+
+def analyze_missile_macro(macro_path: Path, engine_thrust_index: dict[str, dict[str, float | None]]) -> dict:
     """Read a missile macro's <properties> -- unlike engine/shield/weapon/
     turret, a missile is self-contained (no separate component file with a
     mount-tag size/compatibility to look up): its own <missile>/
@@ -2916,6 +3638,18 @@ def analyze_missile_macro(macro_path: Path) -> dict:
     model lock instead ("ship_ter_l_flagship_01"), the same pattern already
     seen on some L/XL ship-locked weapons. See the "Missiles" section of
     this module's docstring.
+
+    `thrust_forward`/`thrust_reverse`/`thrust_strafe`/`thrust_pitch`/
+    `thrust_yaw`/`thrust_roll` come from a completely different part of
+    this same macro -- its own <connections><connection><macro ref="..."/>
+    pointing at a real, separate engine macro (see
+    load_engine_thrust_index()'s own docstring) -- resolved here via
+    `engine_thrust_index`, not read from `properties` like everything else
+    this function returns. All 6 are None for a missile with no
+    <connections> block at all (confirmed real for the heavy torpedo and
+    its story variant -- a real, meaningful absence, not a parsing gap) or
+    whose connection points at an engine macro this index doesn't have
+    (shouldn't happen for any real missile, but not assumed).
     """
     macro_el = ET.parse(macro_path).getroot().find("macro")
     properties = macro_el.find("properties") if macro_el is not None else None
@@ -2929,6 +3663,33 @@ def analyze_missile_macro(macro_path: Path) -> dict:
     countermeasure = properties.find("countermeasure") if properties is not None else None
     physics = properties.find("physics") if properties is not None else None
     lock_el = properties.find("lock") if properties is not None else None
+
+    # <connections> is a sibling of <properties>, not nested inside it --
+    # see this function's own docstring. Only one real connection is ever
+    # expected to resolve to a known engine macro (con_engine01 in every
+    # real missile that has one), so the first match wins; a macro with no
+    # <connections> at all, or none matching, falls through to the
+    # all-None default below.
+    connections = macro_el.find("connections") if macro_el is not None else None
+    thrust_fields = {key: None for key in THRUST_STAT_KEYS}
+    if connections is not None:
+        for connection in connections.findall("connection"):
+            engine_ref = connection.find("macro")
+            engine_name = engine_ref.get("ref") if engine_ref is not None else None
+            if engine_name in engine_thrust_index:
+                thrust_fields = engine_thrust_index[engine_name]
+                break
+
+    # A missile's own <physics><drag .../><inertia .../></physics> -- same
+    # element shapes flight_model.py already reads generically for a ship
+    # chassis (physics_<child>_<attr>), never previously read here at all
+    # (only physics_mass was). Needed alongside physics_mass and the
+    # engine's own thrust (above) to turn raw thrust into a real speed/
+    # acceleration/turn-rate number the same way a ship's own flight stats
+    # combine engine thrust with chassis drag/mass -- see the
+    # CROSS_COMPONENT_FLIGHT_STATS analog for missiles in app.js.
+    drag_el = physics.find("drag") if physics is not None else None
+    inertia_el = physics.find("inertia") if physics is not None else None
 
     return {
         "ammunition_value": _int_attr(ammunition, "value"),
@@ -2948,6 +3709,17 @@ def analyze_missile_macro(macro_path: Path) -> dict:
         "lock_time": _float_attr(lock_el, "time"),
         "lock_range": _float_attr(lock_el, "range"),
         "compatibility": missile_el.get("tags") if missile_el is not None else None,
+        **thrust_fields,
+        "physics_drag_forward": _float_attr(drag_el, "forward"),
+        "physics_drag_reverse": _float_attr(drag_el, "reverse"),
+        "physics_drag_horizontal": _float_attr(drag_el, "horizontal"),
+        "physics_drag_vertical": _float_attr(drag_el, "vertical"),
+        "physics_drag_pitch": _float_attr(drag_el, "pitch"),
+        "physics_drag_yaw": _float_attr(drag_el, "yaw"),
+        "physics_drag_roll": _float_attr(drag_el, "roll"),
+        "physics_inertia_pitch": _float_attr(inertia_el, "pitch"),
+        "physics_inertia_yaw": _float_attr(inertia_el, "yaw"),
+        "physics_inertia_roll": _float_attr(inertia_el, "roll"),
     }
 
 
@@ -2980,6 +3752,18 @@ def parse_bullets(macro_dir: Path) -> list[dict]:
     the same real page-1040 "Weapon Systems" vocabulary already resolved
     for missiles_base (see MISSILE_WEAPON_SYSTEM_NAME_REF) -- e.g.
     "weapon_standard" -- not yet resolved to a display name here.
+
+    `charge_time`/`stick_time` (<bullet chargetime=""/sticktime=""/>) and
+    `mining_damage_multiplier`/`surfaceelement_damage_multiplier` (the
+    <damage> element's own nested <multiplier mining=""/surfaceelement=
+    ""/> child) are only ever real on a small minority of bullets (charge
+    beams, sticky/charge Split projectiles, mining lasers, and Xenon/
+    Kha'ak-vs-turret bonus-damage bullets respectively) -- None everywhere
+    else, same "absence is a real, meaningful None, not unknown" contract
+    as every other optional bullet stat here. Added specifically so the
+    equipment-mod system's own chargetime/sticktime/mining/surfaceelement
+    weapon mods have a real column to apply their effect onto -- see
+    equipment_mod_target_mappings.json.
     """
     rows = []
     seen_bullet_classes: set[str] = set()
@@ -3011,6 +3795,7 @@ def parse_bullets(macro_dir: Path) -> list[dict]:
         ammunition_el = properties.find("ammunition") if properties is not None else None
         weapon_el = properties.find("weapon") if properties is not None else None
         areadamage_el = properties.find("areadamage") if properties is not None else None
+        multiplier_el = damage_el.find("multiplier") if damage_el is not None else None
 
         rows.append(
             {
@@ -3018,6 +3803,7 @@ def parse_bullets(macro_dir: Path) -> list[dict]:
                 "damage_value": _float_attr(damage_el, "value"),
                 "damage_shield": _float_attr(damage_el, "shield"),
                 "damage_hull": _float_attr(damage_el, "hull"),
+                "damage_noshield": _float_attr(damage_el, "noshield"),
                 "damage_repair": _float_attr(damage_el, "repair"),
                 "damage_shielddisruption": _float_attr(damage_el, "shielddisruption"),
                 "bullet_speed": _float_attr(bullet_el, "speed"),
@@ -3025,6 +3811,8 @@ def parse_bullets(macro_dir: Path) -> list[dict]:
                 "bullet_range": _float_attr(bullet_el, "range"),
                 "bullet_amount": _int_attr(bullet_el, "amount"),
                 "bullet_barrelamount": _int_attr(bullet_el, "barrelamount"),
+                "charge_time": _float_attr(bullet_el, "chargetime"),
+                "stick_time": _float_attr(bullet_el, "sticktime"),
                 "reload_rate": _float_attr(reload_el, "rate"),
                 "reload_time": _float_attr(reload_el, "time"),
                 "heat_value": _float_attr(heat_el, "value"),
@@ -3036,6 +3824,8 @@ def parse_bullets(macro_dir: Path) -> list[dict]:
                 "areadamage_shield": _float_attr(areadamage_el, "shield"),
                 "areadamage_shielddisruption": _float_attr(areadamage_el, "shielddisruption"),
                 "areadamage_lifetime": _float_attr(areadamage_el, "lifetime"),
+                "mining_damage_multiplier": _float_attr(multiplier_el, "mining"),
+                "surfaceelement_damage_multiplier": _float_attr(multiplier_el, "surfaceelement"),
             }
         )
     return rows
@@ -3181,6 +3971,17 @@ def load_macro_data(macro_path: Path) -> dict:
 
     ship_el = properties.find("ship")
     result["ship_type"] = ship_el.get("type") if ship_el is not None else None
+    # The game's own UI shows this as a bucketed category ("Low"/"Normal"/
+    # etc., even "None" when absent, same treatment as
+    # weapon_heat_modifier's own "Normal"/"+40%" display) rather than the
+    # raw number -- the exact bucket thresholds aren't in this data, so
+    # only the raw score itself is captured here, same as every other
+    # stat this app exposes as a plain number rather than guessing at the
+    # game's own display categories. Absent (not 0) on every ship with no
+    # real prestige value at all (confirmed: e.g. every S-class fighter) --
+    # None here, not 0, since 0 would wrongly imply "has prestige, valued
+    # at zero" rather than "this ship has no prestige concept".
+    result["prestige"] = int(float(ship_el.get("prestige"))) if ship_el is not None and ship_el.get("prestige") else None
 
     # AI role classification, e.g. "fight"/"trade"/"mine"/"build"/
     # "auxiliary"/"racing"/"salvage"/"dismantling" -- same element
@@ -3281,6 +4082,28 @@ def load_macro_data(macro_path: Path) -> dict:
     result["shield_capacity_modifier"] = _float_attr(shield_mod_el, "capacity") or 1.0
     result["shield_rechargerate_modifier"] = _float_attr(shield_mod_el, "rechargerate") or 1.0
     result["shield_rechargedelay_modifier"] = _float_attr(shield_mod_el, "rechargedelay") or 1.0
+
+    # <radar range="X"/> -- real, but only ever present on 2 of 255 real
+    # ships (Hyperion/Sapporo, both hero/flagship-tier) plus a couple of
+    # non-ware utility macros this pipeline never turns into a ships_base
+    # row at all (lasertower deployables, escape pods -- confirmed by
+    # inspection, not guessed). Every other real ship has no <radar>
+    # element at all -- DEFAULT_RADAR_RANGE fills that gap so every ship
+    # still gets a real number here, matching this function's own
+    # "absence means an implicit default, not unknown" convention for the
+    # hull-wide multipliers above.
+    radar_el = properties.find("radar")
+    result["radar_range"] = _int_attr(radar_el, "range") if radar_el is not None else None
+
+    # <regiondamage immune="1"/> -- real, confirmed on exactly one real
+    # ship (Erlking, the Pirate XL Battleship) -- a plain boolean full-
+    # immunity flag in the raw data, never a fractional value, despite the
+    # equipment-mod system's own "Hazardous Region Damage Reduction Mod"
+    # rolling a fractional multiplier for the same underlying concept (see
+    # this table's own docstring in ships_tables.sql for how those two
+    # different shapes reconcile).
+    regiondamage_el = properties.find("regiondamage")
+    result["region_damage_immune"] = bool(_int_attr(regiondamage_el, "immune")) if regiondamage_el is not None else False
 
     return result
 
@@ -3606,6 +4429,7 @@ def analyze_ship_components(
         "missile_capacity": 0,
         "drone_capacity": 0,
         "ship_type": None,
+        "prestige": None,
         "purpose": None,
         "icon": None,
         "hull": None,
@@ -3622,6 +4446,12 @@ def analyze_ship_components(
         "cargo_type": "",
         "docks": {},
         "ship_storage": {},
+        "radar_range": DEFAULT_RADAR_RANGE,
+        "region_damage_immune": False,
+        "countermeasure_capacity": 0,
+        "deployable_capacity": 0,
+        "radar_cloak": 1.0,
+        "illegal_cargo_concealed": False,
     }
 
     if not ship["macro"]:
@@ -3673,6 +4503,7 @@ def analyze_ship_components(
     result["missile_capacity"] = macro_data.get("missile_capacity", 0)
     result["drone_capacity"] = macro_data.get("drone_capacity", 0)
     result["ship_type"] = macro_data.get("ship_type")
+    result["prestige"] = macro_data.get("prestige")
     result["purpose"] = macro_data.get("purpose")
     result["icon"] = macro_data.get("icon")
     result["hull"] = macro_data.get("hull")
@@ -3685,6 +4516,28 @@ def analyze_ship_components(
     result["jerk_fields"] = macro_data.get("jerk_fields", {})
     result["physics_fields"] = macro_data.get("physics_fields", {})
     result["steeringcurve"] = macro_data.get("steeringcurve", "")
+    result["radar_range"] = macro_data.get("radar_range") or DEFAULT_RADAR_RANGE
+    result["region_damage_immune"] = macro_data.get("region_damage_immune", False)
+
+    # Countermeasure/deployable capacity have no real per-ship game data at
+    # all (see this module's own "Ship stats and flight model" docstring
+    # section -- neither <storage countermeasure=""/deployable=""/> is ever
+    # a real usable number) -- this app has always assumed a fixed default
+    # by ship size instead (previously computed client-side, see app.js git
+    # history for COUNTERMEASURE_CAPACITY_BY_SIZE/DEPLOYABLE_CAPACITY_BY_SIZE;
+    # moved here so it's a real column the API can just return, same as
+    # every other capacity stat, instead of the frontend re-deriving it from
+    # `size` itself every time). radar_cloak/illegal_cargo_concealed have
+    # even less real data behind them -- no ship has any inherent stealth
+    # or illegal-cargo-concealment capability at all (confirmed by
+    # inspection: no hidecargo/stealth/detectab attribute exists anywhere
+    # in any ship macro) -- so both are flat constants for every ship,
+    # existing purely so the equipment-mod system has a real column to
+    # apply a radarcloak/hidecargochance mod's own effect onto.
+    result["countermeasure_capacity"] = COUNTERMEASURE_CAPACITY_BY_SIZE.get(size, 0)
+    result["deployable_capacity"] = DEPLOYABLE_CAPACITY_BY_SIZE.get(size, 0)
+    result["radar_cloak"] = 1.0
+    result["illegal_cargo_concealed"] = False
 
     # Software has no <connection> hardpoint or (size, compatibility class)
     # concept at all -- a ship's macro instead lists the exact software
@@ -3731,7 +4584,12 @@ def analyze_ship_components(
     return result
 
 
-def summarize_slots(ware_id: str, size: str | None, slot_counts: dict[tuple[str, str], int]) -> dict:
+def summarize_slots(
+    ware_id: str,
+    size: str | None,
+    slot_counts: dict[tuple[str, str], int],
+    groups: list[dict] | None = None,
+) -> dict:
     """Collapse (component_type, size) slot counts into ships_base's flat
     columns: a ship's own engines/shields/weapons always match its own size
     class, so those become single counts; turrets don't, so they stay split
@@ -3740,6 +4598,23 @@ def summarize_slots(ware_id: str, size: str | None, slot_counts: dict[tuple[str,
     and off-size weapons like the Asgard's two "large" guns alongside its
     "extralarge" main gun -- those become dynamic bonus_<size>_weapons
     columns, one per off-size actually observed.
+
+    `groups` (see ship_component_groups' own schema comment in
+    write_sql_schema()) is this same ship's own list of hardpoint GROUPS,
+    not slots -- `shield_bonus_groups` counts how many of its shield-type
+    groups are individually-targetable "bonus" ones (component_analyzer's
+    own "Avg. Group Shield" triad averages/sums across exactly these),
+    distinguished from a main shield slot by the real
+    equipment_compatibility_class tag "hittable" (a bonus/group shield can
+    be shot off the hull as its own target; a main shield can't). Checked
+    against two real hulls: the Raptor's 21 shield-type groups split 20
+    hittable (bonus) + 1 not (its own single main XL slot, tagged just
+    "standard" with no hittable/unhittable tag at all); the Hydra's 3
+    (all its own main M slots, each tagged "advanced,unhittable") split 0
+    hittable + 3 not. Checking for the SUBSTRING "hittable" would
+    misclassify "unhittable" itself (which contains that substring) as a
+    bonus group -- this splits equipment_compatibility_class on "," and
+    checks for the exact tag instead.
     """
     for (comp_type, comp_size), count in slot_counts.items():
         if comp_type == "engine" and comp_size != size:
@@ -3759,6 +4634,12 @@ def summarize_slots(ware_id: str, size: str | None, slot_counts: dict[tuple[str,
 
     turrets = {sz: count for (t, sz), count in slot_counts.items() if t == "turret"}
 
+    shield_bonus_groups = sum(
+        1
+        for g in groups or []
+        if g["component_type"] == "shield" and "hittable" in (g["equipment_compatibility_class"] or "").split(",")
+    )
+
     return {
         "engines": engines,
         "weapons": weapons,
@@ -3766,6 +4647,7 @@ def summarize_slots(ware_id: str, size: str | None, slot_counts: dict[tuple[str,
         "missile_launchers": missile_launchers,
         "shields": shields,
         "shields_bonus_m": shields_bonus_m,
+        "shield_bonus_groups": shield_bonus_groups,
         "turrets": turrets,
     }
 
@@ -3815,6 +4697,10 @@ DROP TABLE IF EXISTS deployables_base;
 DROP TABLE IF EXISTS drones_base;
 DROP TABLE IF EXISTS countermeasures_base;
 DROP TABLE IF EXISTS crew_base;
+DROP TABLE IF EXISTS equipment_mod_stats;
+DROP TABLE IF EXISTS equipment_mod_costs;
+DROP TABLE IF EXISTS mod_qualities;
+DROP TABLE IF EXISTS equipment_mods_base;
 DROP TABLE IF EXISTS ships_base;
 DROP TABLE IF EXISTS economy_wares_base;
 DROP TABLE IF EXISTS equipment_ware_aliases;
@@ -3831,6 +4717,7 @@ CREATE TABLE ships_base (
     production_method TEXT,
     macro TEXT,
     ship_type TEXT,
+    prestige INTEGER,
     purpose TEXT,
     icon TEXT,
     hull INTEGER,
@@ -3865,6 +4752,33 @@ CREATE TABLE ships_base (
     m_docks INTEGER,
     s_ship_storage INTEGER,
     m_ship_storage INTEGER,
+    -- radar_range: real on exactly 2 of 255 ships (Hyperion/Sapporo, both
+    -- hero/flagship-tier), DEFAULT_RADAR_RANGE (40000) everywhere else --
+    -- see load_macro_data()'s own comment, same "absence = a real default"
+    -- convention as the hull-wide multipliers above.
+    -- region_damage_immune: real on exactly one ship (Erlking) -- a plain
+    -- boolean flag, not a percentage (see load_macro_data()'s own comment
+    -- for how this reconciles with the equipment-mod system's own
+    -- fractional "Hazardous Region Damage Reduction Mod").
+    -- countermeasure_capacity/deployable_capacity: no real per-ship game
+    -- data exists for either (see COUNTERMEASURE_CAPACITY_BY_SIZE/
+    -- DEPLOYABLE_CAPACITY_BY_SIZE's own comment) -- an assumed default by
+    -- ship size, moved here from the frontend so the API can return a real
+    -- value instead of the client re-deriving it from `size` itself.
+    -- radar_cloak: no ship has any inherent stealth capability at all --
+    -- a flat constant 1.0 for every ship, existing purely so a radarcloak
+    -- mod has a real column to apply its own effect onto.
+    -- illegal_cargo_concealed: same situation as radar_cloak but boolean --
+    -- no ship has any inherent illegal-ware-concealment capability, always
+    -- False, existing purely so a hidecargochance mod has a real column to
+    -- apply its own effect onto (same add_ceiling_bool operation as
+    -- region_damage_immune -- see equipment_mod_target_mappings.json).
+    radar_range INTEGER,
+    region_damage_immune BOOLEAN,
+    countermeasure_capacity INTEGER,
+    deployable_capacity INTEGER,
+    radar_cloak REAL,
+    illegal_cargo_concealed BOOLEAN,
     size TEXT,
     -- The raw class="..." value this ship's own macro carried (e.g.
     -- "ship_l"), before SHIP_CLASS_TO_SIZE_CODE's mapping to `size` above
@@ -3876,7 +4790,8 @@ CREATE TABLE ships_base (
     weapons INTEGER{bonus_weapon_col_defs},
     missile_launchers INTEGER,
     {turret_col_defs},
-    shields_bonus_m INTEGER
+    shields_bonus_m INTEGER,
+    shield_bonus_groups INTEGER
 );
 
 -- volume/transport are real per-ware cargo stats straight off the <ware>
@@ -3925,28 +4840,51 @@ CREATE TABLE equipment_wares_base (
     price_max INTEGER
 );
 
--- A macro carrying its own alias="..." attribute that this pipeline
--- determined is a true redundant duplicate (same size+compatibility as
--- its own target -- see parse_equipment_component_wares' own docstring),
--- and so was excluded from turrets_base/engines_base/shields_base/
--- weapons_base entirely. Both alias_ware_id and target_ware_id are still
--- real, independently-priced rows in equipment_wares_base -- only the
--- type-specific stats table excludes the alias side. Existing purely so
--- a ware_id sourced from *outside* this app's own picker (a real
--- player-saved ship loadout, see import_loadouts.py) can be resolved
--- back to the still-listed target the game itself treats as equivalent,
--- since the game never actually removed the alias ware -- only this
--- app's own picker does, to avoid showing two indistinguishable options.
+-- A macro this pipeline determined is a compatibility-variant duplicate of
+-- another real item -- same display name, makerrace, mk, and every
+-- type-specific stat, differing only in `compatibility` (and a resulting
+-- hull-value artifact) -- see parse_equipment_component_wares' own
+-- docstring for how this is detected (comparing actual stats, not just a
+-- macro's own alias="..." attribute) and why both rows still need
+-- representing somewhere: a ship with a "standard"-tier slot and one with
+-- an "advanced"-tier slot both need to see this as a real option, but
+-- turrets_base/engines_base/shields_base/weapons_base only keeps the one
+-- canonical row (the one with a real, non-integrated hull value) so the
+-- Component Analyzer's own picker shows one row per real item instead of
+-- one per compatibility tier. `compatibility` here is the *alias* side's
+-- own tag set (the canonical row's own is still on its own turrets_base/
+-- etc. row) -- query_ship_components.py's matching_items() (forward, ship
+-- group -> compatible equipment) and ships_matching_ware() (reverse,
+-- equipment -> compatible ships) both test a canonical ware's own
+-- compatibility AND every alias row here targeting it, so neither
+-- direction silently drops a real tier's worth of matches.
+--
+-- Both alias_ware_id and target_ware_id are still real, independently-
+-- priced rows in equipment_wares_base -- only the type-specific stats
+-- table excludes the alias side. Existing purely so a ware_id sourced from
+-- *outside* this app's own picker (a real player-saved ship loadout, see
+-- import_loadouts.py) can be resolved back to the still-listed target the
+-- game itself treats as equivalent, since the game never actually removed
+-- the alias ware -- only this app's own picker does, to avoid showing two
+-- indistinguishable options.
 CREATE TABLE equipment_ware_aliases (
     alias_ware_id TEXT PRIMARY KEY,
     target_ware_id TEXT NOT NULL,
     equipment_type TEXT NOT NULL,
+    compatibility TEXT,
     FOREIGN KEY (alias_ware_id) REFERENCES equipment_wares_base (ware_id),
     FOREIGN KEY (target_ware_id) REFERENCES equipment_wares_base (ware_id)
 );
 
 CREATE TABLE turrets_base (
     ware_id TEXT PRIMARY KEY,
+    -- Denormalized copy of equipment_wares_base.name (primary_locale's own
+    -- text, English by default) for direct queries against this table
+    -- alone, no join needed -- same convenience ships_base.name already
+    -- offers. api.py's own /api/components/{type} still prefers the live,
+    -- per-viewer i18n name (COALESCE(localized_strings.text,
+    -- equipment_wares_base.name)) over this column for the actual app.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     bullet_class TEXT,
@@ -3968,6 +4906,8 @@ CREATE TABLE turrets_base (
 
 CREATE TABLE engines_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     boost_duration REAL,
@@ -3991,6 +4931,8 @@ CREATE TABLE engines_base (
 
 CREATE TABLE shields_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     recharge_max REAL,
@@ -4005,6 +4947,8 @@ CREATE TABLE shields_base (
 
 CREATE TABLE weapons_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     bullet_class TEXT,
@@ -4040,6 +4984,8 @@ CREATE TABLE weapons_base (
 -- are rotation thrust.
 CREATE TABLE thrusters_base (
     ware_id TEXT PRIMARY KEY,
+    -- See turrets_base.name's own comment -- same denormalized-copy pattern.
+    name TEXT,
     macro TEXT,
     mk INTEGER,
     thruster_class TEXT,
@@ -4078,7 +5024,21 @@ CREATE TABLE software_base (
 -- "mediumdumbfire") is the missile's own launcher-compatibility tag,
 -- matched against a launcher's turrets_base/weapons_base.ammunition_tags
 -- by membership -- see this module's "Missiles and deployables" docstring
--- section. Not yet used for any matching/query logic.
+-- section. Not yet used for any matching/query logic. `thrust_*` come from
+-- a real, separate <engine>-class macro this missile's own <connections>
+-- points at (never a standalone ware of its own) -- see
+-- load_engine_thrust_index()/analyze_missile_macro() in
+-- generate_ships_table.py -- NULL for the couple of missiles (heavy
+-- torpedoes) with no engine connection at all, a real absence, not a
+-- parsing gap. `anomalous_range_multiplier` is hand-measured, not derived
+-- from any game file -- see MISSILE_ANOMALOUS_RANGE_MULTIPLIER's own
+-- comment in generate_ships_table.py -- a flat correction factor on top
+-- of the computed Max Distance stat (app.js), 1.0 (a no-op) for every
+-- missile whose formula is already right. `game_value_*` are hand-measured
+-- straight from the player's own real in-game Encyclopedia screenshots
+-- (see MISSILE_GAME_VALUES' own comment in generate_ships_table.py) --
+-- reference ground truth, not a formula's output. NULL (not 0) for the two
+-- Barrage missiles, which have no screenshot.
 CREATE TABLE missiles_base (
     ware_id TEXT PRIMARY KEY,
     name TEXT,
@@ -4102,7 +5062,28 @@ CREATE TABLE missiles_base (
     physics_mass REAL,
     lock_time REAL,
     lock_range REAL,
-    compatibility TEXT
+    compatibility TEXT,
+    thrust_forward REAL,
+    thrust_reverse REAL,
+    thrust_strafe REAL,
+    thrust_pitch REAL,
+    thrust_yaw REAL,
+    thrust_roll REAL,
+    physics_drag_forward REAL,
+    physics_drag_reverse REAL,
+    physics_drag_horizontal REAL,
+    physics_drag_vertical REAL,
+    physics_drag_pitch REAL,
+    physics_drag_yaw REAL,
+    physics_drag_roll REAL,
+    physics_inertia_pitch REAL,
+    physics_inertia_yaw REAL,
+    physics_inertia_roll REAL,
+    anomalous_range_multiplier REAL DEFAULT 1,
+    game_value_turn_rate REAL,
+    game_value_pitch_rate REAL,
+    game_value_vertical_strafe REAL,
+    game_value_horizontal_strafe REAL
 );
 
 -- Weapon/turret projectile definitions -- what weapons_base.bullet_class/
@@ -4116,12 +5097,21 @@ CREATE TABLE missiles_base (
 -- sec) and reload_time (sec/shot) are mutually exclusive per row -- two
 -- different attribute names the game itself uses for the same concept
 -- depending on bullet variant. areadamage_* is only populated for
--- explosive/AOE bullets (flak etc).
+-- explosive/AOE bullets (flak etc). charge_time/stick_time/
+-- mining_damage_multiplier/surfaceelement_damage_multiplier are each only
+-- real on a small minority of bullets (charge beams, sticky/charge Split
+-- projectiles, mining lasers, anti-turret bonus-damage bullets
+-- respectively) -- NULL everywhere else, same "absence = a real, meaningful
+-- NULL" contract as every other optional column here; added specifically
+-- so the equipment-mod system's own chargetime/sticktime/mining/
+-- surfaceelement weapon mods have a real column to apply their effect onto
+-- (see equipment_mod_target_mappings.json).
 CREATE TABLE bullets_base (
     bullet_class TEXT PRIMARY KEY,
     damage_value REAL,
     damage_shield REAL,
     damage_hull REAL,
+    damage_noshield REAL,
     damage_repair REAL,
     damage_shielddisruption REAL,
     bullet_speed REAL,
@@ -4129,6 +5119,8 @@ CREATE TABLE bullets_base (
     bullet_range REAL,
     bullet_amount INTEGER,
     bullet_barrelamount INTEGER,
+    charge_time REAL,
+    stick_time REAL,
     reload_rate REAL,
     reload_time REAL,
     heat_value REAL,
@@ -4139,7 +5131,9 @@ CREATE TABLE bullets_base (
     areadamage_value REAL,
     areadamage_shield REAL,
     areadamage_shielddisruption REAL,
-    areadamage_lifetime REAL
+    areadamage_lifetime REAL,
+    mining_damage_multiplier REAL,
+    surfaceelement_damage_multiplier REAL
 );
 
 -- Satellites/resource probes/mines/lasertowers/navbeacon: standalone
@@ -4206,6 +5200,133 @@ CREATE TABLE crew_base (
     price_min INTEGER,
     price_avg INTEGER,
     price_max INTEGER
+);
+
+-- The in-game equipment "mod" system (libraries/equipmentmods.xml -- NOT
+-- Steam Workshop/user-created mods) -- see
+-- parse_equipment_mods()/equipmentmods_files()'s own docstrings above for
+-- the full story. One row per real mod (a real wares.xml ware, tag
+-- "equipmentmod"; a handful of Timelines mission-specific ones with no
+-- real ware are skipped entirely, not represented here at all) PLUS one
+-- synthetic row per ship chassis with a non-default <modifiers> block
+-- (is_chassis_mod=1 -- see parse_chassis_integrated_mods()'s own
+-- docstring). mod_level is quality (1/2/3 = Basic/Advanced/Exceptional)
+-- for a real mod; always 0 for a chassis mod (no real mod ever uses 0,
+-- so it reads as "not a real, quality-tiered mod" -- a ship either has
+-- its own fixed, non-rolled modifiers or it doesn't, no tier concept
+-- applies). mod_components is comma-joined -- always a single
+-- component_type for a real mod (weapon/engine/ship/shield); a chassis
+-- mod is the one case where a mod_id's own rows can span more than one
+-- (e.g. "shield,weapon"). additional_stats_count is the mod's own
+-- optional <bonus max=""> value (0 if it has no bonus roll at all, always
+-- 0 for a chassis mod -- its own numbers are fixed, never rolled) -- how
+-- many of equipment_mod_stats' own candidate additional-stat rows for
+-- this mod_id actually get chosen/applied, not how many candidates exist
+-- (that's just a COUNT(*) ... WHERE is_additional_stat over
+-- equipment_mod_stats). ship_icon is that originating ship's own
+-- ships_base.icon (e.g. "ship_s_fighter_01") for a chassis mod, so the
+-- Modifications Lab can show each one with its real ship's own class
+-- symbol -- NULL for every real mod, which has no owning ship at all.
+-- price_min/price_avg/price_max are what it actually costs to APPLY this
+-- mod via the in-game Modification workshop -- all three always equal
+-- (there's no real min/max range, only one flat per-tier price), sourced
+-- from MOD_QUALITY_APPLICATION_PRICE (a hardcoded constant, not this
+-- mod's own wares.xml <price> tag -- see that constant's own comment for
+-- why: that field turned out to be the ware's own market trading price,
+-- a real but different number). NULL for every chassis mod, which has no
+-- real ware/price at all (see parse_chassis_integrated_mods()'s own "no
+-- price" docstring). The materials actually consumed to *craft* one (as
+-- opposed to the flat application cost above) are equipment_mod_costs, a
+-- separate table below -- a mod's own
+-- crafting inputs are "mod part" wares (e.g. "modpart_enginefuelinjector_t1"),
+-- a different ware category from the raw/refined materials
+-- production_wares' own FK already assumes (economy_wares_base), so they
+-- don't fit that existing generic mechanism.
+CREATE TABLE equipment_mods_base (
+    mod_id TEXT PRIMARY KEY,
+    mod_name TEXT,
+    mod_level INTEGER,
+    mod_components TEXT,
+    additional_stats_count INTEGER,
+    is_chassis_mod BOOLEAN,
+    ship_icon TEXT,
+    price_min INTEGER,
+    price_avg INTEGER,
+    price_max INTEGER
+);
+
+-- One row per crafting-material ware (+ amount needed) to produce ONE of a
+-- real mod (equipment_mods_base.mod_id) -- read straight off that mod's
+-- own <production><primary><ware ware="" amount=""/></primary></production>
+-- (see parse_equipment_mods()'s own docstring; every real mod has exactly
+-- one production method, confirmed across every wares*.xml file, base
+-- game and every DLC). No FK to economy_wares_base -- these "mod part"
+-- wares (e.g. "modpart_enginefuelinjector_t1") are their own separate
+-- category, not part of PRICE_WARE_TABLES in summarize_production.py at
+-- all. ware_name is that resource ware's own English display name,
+-- denormalized here the same way equipment_mods_base.mod_name is (GET
+-- /api/equipment_mods overrides it per-language via a localized_strings
+-- join, same COALESCE pattern as every other mod field) -- these wares
+-- are never named anywhere else in this dataset, so this is the only
+-- place a real name for one exists at all. No rows at all for a chassis
+-- mod (nothing to craft -- it's not a real ware).
+CREATE TABLE equipment_mod_costs (
+    mod_id TEXT NOT NULL,
+    ware_id TEXT NOT NULL,
+    ware_name TEXT,
+    amount INTEGER NOT NULL,
+    PRIMARY KEY (mod_id, ware_id),
+    FOREIGN KEY (mod_id) REFERENCES equipment_mods_base (mod_id)
+);
+
+-- Every real stat roll a mod in equipment_mods_base can apply -- one row
+-- per primary stat (is_additional_stat=0, always guaranteed, chance=1.0)
+-- plus one row per candidate secondary/"bonus" stat
+-- (is_additional_stat=1) that mod's own optional <bonus> block lists.
+-- component_type is which of weapon/engine/ship/shield target_stat
+-- belongs to (matches this mod's own equipment_mods_base.mod_components
+-- for a real mod -- a chassis mod's own rows are the one case where two
+-- rows for the same mod_id carry different component_type values, e.g.
+-- "weapon"/"heatgeneration" alongside "shield"/"capacity"). min_value/
+-- max_value are that stat's own real roll range for a real mod (a
+-- multiplier for most stats, e.g. 1.05-1.2 = "+5% to +20%"; some are
+-- sub-1 penalties, e.g. cooling 0.684-0.736 on a damage-focused mod;
+-- ship's own "radarcloak"/"regiondamage" use negative values instead --
+-- see equipmentmods.xml's own header comment for the "min with no max"
+-- caveat this data never actually hits), or a chassis mod's own fixed
+-- (never rolled) value repeated as both min_value and max_value -- see
+-- parse_chassis_integrated_mods()'s own docstring, including why a
+-- chassis's own <weapon heat=""/> becomes target_stat "heatgeneration"
+-- here (uninverted), not "heat". chance is that candidate's own <bonus
+-- chance=""> (always 1.0 for a primary row -- guaranteed, not rolled for
+-- *whether* it applies, only for its own min/max value -- also always
+-- 1.0 for a chassis mod's own rows, for the same "always guaranteed"
+-- reason). weight is only ever present on some additional-stat rows
+-- (used for weighted random selection among candidates when a bonus
+-- offers more of them than its own additional_stats_count slots) -- NULL
+-- for every primary row, every chassis-mod row, and an additional-stat
+-- row with nothing to weigh against (e.g. exactly one candidate for one
+-- slot).
+CREATE TABLE equipment_mod_stats (
+    mod_id TEXT,
+    is_additional_stat BOOLEAN,
+    component_type TEXT,
+    target_stat TEXT,
+    min_value REAL,
+    max_value REAL,
+    chance REAL,
+    weight INTEGER,
+    PRIMARY KEY (mod_id, is_additional_stat, target_stat),
+    FOREIGN KEY (mod_id) REFERENCES equipment_mods_base (mod_id)
+);
+
+-- The 3 real in-game equipment-mod quality tiers (Basic/Enhanced/Exceptional,
+-- equipment_mods_base.mod_level) with real per-language display names -- see
+-- parse_mod_qualities()/MOD_QUALITY_NAME_REF's own docstrings above. Backs the
+-- Modifications Lab's own tab labels.
+CREATE TABLE mod_qualities (
+    mod_level INTEGER PRIMARY KEY,
+    mod_quality_name TEXT
 );
 
 -- production_ware_id references ships_base.ware_id, economy_wares_base.ware_id,
@@ -4453,6 +5574,7 @@ def write_ships_csv(
             "production_method",
             "macro",
             "ship_type",
+            "prestige",
             "purpose",
             "icon",
             "hull",
@@ -4470,6 +5592,12 @@ def write_ships_csv(
             "m_docks",
             "s_ship_storage",
             "m_ship_storage",
+            "radar_range",
+            "region_damage_immune",
+            "countermeasure_capacity",
+            "deployable_capacity",
+            "radar_cloak",
+            "illegal_cargo_concealed",
             "size",
             "ship_class",
             "shields",
@@ -4479,7 +5607,7 @@ def write_ships_csv(
         + [f"bonus_{size}_weapons" for size in bonus_weapon_sizes]
         + ["missile_launchers"]
         + [f"turret_{size}" for size in turret_sizes]
-        + ["shields_bonus_m"]
+        + ["shields_bonus_m", "shield_bonus_groups"]
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
@@ -4498,6 +5626,7 @@ def write_ships_csv(
                 "production_method": primary_prod["method_name"] if primary_prod else "",
                 "macro": s["macro"] or "",
                 "ship_type": s["ship_type"] or "",
+                "prestige": s["prestige"] if s["prestige"] is not None else "",
                 "purpose": s["purpose"] or "",
                 "icon": s["icon"] or "",
                 "hull": s["hull"] if s["hull"] is not None else "",
@@ -4515,6 +5644,12 @@ def write_ships_csv(
                 "m_docks": s["m_docks"],
                 "s_ship_storage": s["s_ship_storage"],
                 "m_ship_storage": s["m_ship_storage"],
+                "radar_range": s["radar_range"],
+                "region_damage_immune": int(s["region_damage_immune"]),
+                "countermeasure_capacity": s["countermeasure_capacity"],
+                "deployable_capacity": s["deployable_capacity"],
+                "radar_cloak": s["radar_cloak"],
+                "illegal_cargo_concealed": int(s["illegal_cargo_concealed"]),
                 "size": s["size"] or "",
                 "ship_class": s["ship_class"] or "",
                 "shields": s["slots"]["shields"],
@@ -4522,6 +5657,7 @@ def write_ships_csv(
                 "weapons": s["slots"]["weapons"],
                 "missile_launchers": s["slots"]["missile_launchers"],
                 "shields_bonus_m": s["slots"]["shields_bonus_m"],
+                "shield_bonus_groups": s["slots"]["shield_bonus_groups"],
             }
             for size in bonus_weapon_sizes:
                 row[f"bonus_{size}_weapons"] = s["slots"]["weapons_bonus"].get(size, "")
@@ -4790,12 +5926,12 @@ def write_equipment_component_csv(rows: list[dict], fieldnames: list[str], out_p
 
 
 TURRET_FIELDNAMES = [
-    "ware_id", "macro", "mk", "bullet_class",
+    "ware_id", "name", "macro", "mk", "bullet_class",
     "rotation_speed", "rotation_acceleration", "hull", "size", "compatibility",
     "ammunition_tags", "ammunition_capacity",
 ]
 ENGINE_FIELDNAMES = [
-    "ware_id", "macro", "mk",
+    "ware_id", "name", "macro", "mk",
     "boost_duration", "boost_recharge", "boost_thrust", "boost_acceleration",
     "boost_attack", "boost_release", "boost_coast",
     "travel_charge", "travel_thrust", "travel_attack", "travel_release",
@@ -4803,19 +5939,19 @@ ENGINE_FIELDNAMES = [
     "hull", "size", "compatibility",
 ]
 SHIELD_FIELDNAMES = [
-    "ware_id", "macro", "mk",
+    "ware_id", "name", "macro", "mk",
     "recharge_max", "recharge_rate", "recharge_delay", "recharge_disruptionstability",
     "hull", "size", "compatibility",
 ]
 WEAPON_FIELDNAMES = [
-    "ware_id", "macro", "mk", "bullet_class",
+    "ware_id", "name", "macro", "mk", "bullet_class",
     "heat_overheat", "heat_cooldelay", "heat_coolrate", "heat_reenable", "heat_overheatcooldelay",
     "rotation_speed", "rotation_acceleration", "weapon_angle",
     "hull", "size", "compatibility",
     "ammunition_tags", "ammunition_capacity",
 ]
 THRUSTER_FIELDNAMES = [
-    "ware_id", "macro", "mk", "thruster_class", "size", "compatibility",
+    "ware_id", "name", "macro", "mk", "thruster_class", "size", "compatibility",
     "thrust_strafe", "thrust_pitch", "thrust_yaw", "thrust_roll",
 ]
 SOFTWARE_FIELDNAMES = ["ware_id", "name", "category", "mk", "price_min", "price_avg", "price_max"]
@@ -4826,16 +5962,24 @@ MISSILE_FIELDNAMES = [
     "explosiondamage_value", "explosiondamage_shielddisruption",
     "reload_time", "hull", "weapon_system", "countermeasure_resilience", "physics_mass",
     "lock_time", "lock_range", "compatibility",
+    "thrust_forward", "thrust_reverse", "thrust_strafe", "thrust_pitch", "thrust_yaw", "thrust_roll",
+    "physics_drag_forward", "physics_drag_reverse", "physics_drag_horizontal", "physics_drag_vertical",
+    "physics_drag_pitch", "physics_drag_yaw", "physics_drag_roll",
+    "physics_inertia_pitch", "physics_inertia_yaw", "physics_inertia_roll",
+    "anomalous_range_multiplier",
+    "game_value_turn_rate", "game_value_pitch_rate", "game_value_vertical_strafe", "game_value_horizontal_strafe",
 ]
 BULLET_FIELDNAMES = [
     "bullet_class",
-    "damage_value", "damage_shield", "damage_hull", "damage_repair", "damage_shielddisruption",
+    "damage_value", "damage_shield", "damage_hull", "damage_noshield", "damage_repair", "damage_shielddisruption",
     "bullet_speed", "bullet_lifetime", "bullet_range", "bullet_amount", "bullet_barrelamount",
+    "charge_time", "stick_time",
     "reload_rate", "reload_time",
     "heat_value", "heat_initial",
     "ammunition_value", "ammunition_reload",
     "weapon_system",
     "areadamage_value", "areadamage_shield", "areadamage_shielddisruption", "areadamage_lifetime",
+    "mining_damage_multiplier", "surfaceelement_damage_multiplier",
 ]
 DEPLOYABLE_FIELDNAMES = [
     "ware_id", "name", "deployable_type", "macro", "price_min", "price_avg", "price_max",
@@ -4847,7 +5991,16 @@ DRONE_FIELDNAMES = [
 ]
 COUNTERMEASURE_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
 CREW_FIELDNAMES = ["ware_id", "name", "price_min", "price_avg", "price_max"]
-EQUIPMENT_WARE_ALIASES_FIELDNAMES = ["alias_ware_id", "target_ware_id", "equipment_type"]
+EQUIPMENT_MODS_FIELDNAMES = [
+    "mod_id", "mod_name", "mod_level", "mod_components", "additional_stats_count", "is_chassis_mod", "ship_icon",
+    "price_min", "price_avg", "price_max",
+]
+EQUIPMENT_MOD_STATS_FIELDNAMES = [
+    "mod_id", "is_additional_stat", "component_type", "target_stat", "min_value", "max_value", "chance", "weight",
+]
+EQUIPMENT_MOD_COSTS_FIELDNAMES = ["mod_id", "ware_id", "ware_name", "amount"]
+MOD_QUALITY_FIELDNAMES = ["mod_level", "mod_quality_name"]
+EQUIPMENT_WARE_ALIASES_FIELDNAMES = ["alias_ware_id", "target_ware_id", "equipment_type", "compatibility"]
 SOURCE_VERSIONS_FIELDNAMES = ["source_id", "source_name", "source_version"]
 FACTIONS_FIELDNAMES = ["faction_id", "faction_name", "faction_shortname"]
 RACES_FIELDNAMES = ["race_id", "race_name", "race_shortname"]
@@ -5306,8 +6459,15 @@ def parse_source_versions() -> list[dict]:
     return rows
 
 
-def main() -> None:
-    lang_table = load_language_table(LANG_FILE)
+def main(primary_locale: str = "en") -> None:
+    # Controls which language's text populates every base table's own
+    # "name" column (weapons_base.name, ships_base.name, etc.) -- the
+    # dataset's "native"/fallback language, independent of the full
+    # per-viewer i18n overlay (localized_strings, src/static/i18n/*.json),
+    # which covers all 15 languages regardless of this setting. Defaults to
+    # English, same as before this was configurable at all.
+    primary_lang_file = DATA / "names" / LANGUAGE_FILES.get(primary_locale, LANGUAGE_FILES["en"])
+    lang_table = load_language_table(primary_lang_file)
     # Built once, up front -- see index_ship_files()'s own docstring. Feeds
     # both the ship loop below (analyze_ship_components()) and the drone
     # macro lookup further down.
@@ -5317,10 +6477,10 @@ def main() -> None:
     ships = parse_ship_wares(wares_files())
     economy_wares = parse_economy_wares(wares_files())
     equipment_wares = parse_equipment_wares(wares_files())
-    turrets, turret_aliases = parse_turrets(TURRET_MACRO_DIRS, TURRET_COMPONENT_DIRS)
-    engines, engine_aliases = parse_engines(ENGINE_MACRO_DIRS, ENGINE_COMPONENT_DIRS)
-    shields, shield_aliases = parse_shields(SHIELD_MACRO_DIRS, SHIELD_COMPONENT_DIRS)
-    weapons, weapon_aliases = parse_weapons(WEAPON_MACRO_DIRS, WEAPON_COMPONENT_DIRS)
+    turrets, turret_aliases = parse_turrets(TURRET_MACRO_DIR, TURRET_COMPONENT_DIR)
+    engines, engine_aliases = parse_engines(ENGINE_MACRO_DIR, ENGINE_COMPONENT_DIR)
+    shields, shield_aliases = parse_shields(SHIELD_MACRO_DIR, SHIELD_COMPONENT_DIR)
+    weapons, weapon_aliases = parse_weapons(WEAPON_MACRO_DIR, WEAPON_COMPONENT_DIR)
     thruster_macros = parse_thruster_macros(THRUSTERS_MACRO_DIR)
     thrusters = parse_thruster_wares(wares_files(), thruster_macros)
     software_wares = parse_software_wares(wares_files())
@@ -5349,16 +6509,34 @@ def main() -> None:
     for w in software_wares:
         w["name"] = resolve_ref_attr(w["name_ref"], lang_table)
 
+    engine_thrust_index = load_engine_thrust_index(ENGINE_MACRO_DIR)
     for w in missile_wares:
         w["name"] = resolve_ref_attr(w["name_ref"], lang_table)
         for prod in w["productions"]:
             prod["method_name"] = resolve_ref_attr(prod["method_name_ref"], lang_table)
         macro_path = MISSILES_MACRO_DIR / f"{w['macro']}.xml" if w["macro"] else None
         if macro_path is not None and macro_path.exists():
-            w.update(analyze_missile_macro(macro_path))
+            w.update(analyze_missile_macro(macro_path, engine_thrust_index))
         else:
             print(f"WARNING: missile macro file not found for {w['ware_id']} ({macro_path})")
             w.update({key: None for key in MISSILE_STAT_KEYS})
+        # Hand-measured correction, not derived from the macro at all -- see
+        # MISSILE_ANOMALOUS_RANGE_MULTIPLIER's own comment. Keyed by ware_id
+        # (a ware-level concept), not by anything analyze_missile_macro()
+        # itself has access to, so it's applied here rather than there.
+        # Defaults to 1.0 (a no-op multiplier) for every ware not listed.
+        w["anomalous_range_multiplier"] = MISSILE_ANOMALOUS_RANGE_MULTIPLIER.get(w["ware_id"], 1.0)
+        # Same hand-measured, ware_id-keyed pattern as the multiplier just
+        # above -- see MISSILE_GAME_VALUES' own comment. None/NULL (not 0)
+        # for a ware with no screenshot (the two Barrage missiles) -- a
+        # real "we don't know", never a guessed value.
+        turn_rate, pitch_rate, vertical_strafe, horizontal_strafe = MISSILE_GAME_VALUES.get(
+            w["ware_id"], (None, None, None, None)
+        )
+        w["game_value_turn_rate"] = turn_rate
+        w["game_value_pitch_rate"] = pitch_rate
+        w["game_value_vertical_strafe"] = vertical_strafe
+        w["game_value_horizontal_strafe"] = horizontal_strafe
 
     for w in deployable_wares:
         w["name"] = resolve_ref_attr(w["name_ref"], lang_table)
@@ -5449,23 +6627,45 @@ def main() -> None:
     if deployable_dupes:
         print(f"WARNING: {len(deployable_dupes)} duplicate resolved deployable name(s): {deployable_dupes}")
 
-    turrets = filter_to_real_equipment_wares("turret", equipment_wares, turrets, set(turret_aliases))
-    engines = filter_to_real_equipment_wares("engine", equipment_wares, engines, set(engine_aliases))
-    shields = filter_to_real_equipment_wares("shield", equipment_wares, shields, set(shield_aliases))
-    weapons = filter_to_real_equipment_wares("weapon", equipment_wares, weapons, set(weapon_aliases))
+    turrets = filter_to_real_equipment_wares(
+        "turret", equipment_wares, turrets, {r["alias_ware_id"] for r in turret_aliases}
+    )
+    engines = filter_to_real_equipment_wares(
+        "engine", equipment_wares, engines, {r["alias_ware_id"] for r in engine_aliases}
+    )
+    shields = filter_to_real_equipment_wares(
+        "shield", equipment_wares, shields, {r["alias_ware_id"] for r in shield_aliases}
+    )
+    weapons = filter_to_real_equipment_wares(
+        "weapon", equipment_wares, weapons, {r["alias_ware_id"] for r in weapon_aliases}
+    )
 
     # Persisted so anything working from a real player-saved ship loadout
     # (loadouts.xml, not this app's own picker) can substitute an excluded
     # alias ware_id back to the real, still-listed target ware it's a
     # duplicate of -- see parse_equipment_component_wares' own docstring
-    # and import_loadouts.py's resolve_alias().
+    # and import_loadouts.py's resolve_alias(). `compatibility` (each
+    # alias's own, distinct from its target's) rides along too, so
+    # query_ship_components.py's matching_items()/ships_matching_ware() can
+    # test every real compatibility variant of a canonical ware, not just
+    # the one left on its own turrets_base/shields_base/etc. row.
     equipment_ware_aliases = (
-        [{"alias_ware_id": k, "target_ware_id": v, "equipment_type": "turret"} for k, v in turret_aliases.items()]
-        + [{"alias_ware_id": k, "target_ware_id": v, "equipment_type": "engine"} for k, v in engine_aliases.items()]
-        + [{"alias_ware_id": k, "target_ware_id": v, "equipment_type": "shield"} for k, v in shield_aliases.items()]
-        + [{"alias_ware_id": k, "target_ware_id": v, "equipment_type": "weapon"} for k, v in weapon_aliases.items()]
+        [{**r, "equipment_type": "turret"} for r in turret_aliases]
+        + [{**r, "equipment_type": "engine"} for r in engine_aliases]
+        + [{**r, "equipment_type": "shield"} for r in shield_aliases]
+        + [{**r, "equipment_type": "weapon"} for r in weapon_aliases]
     )
     thrusters = filter_to_real_equipment_wares("thruster", equipment_wares, thrusters)
+
+    # turrets/engines/shields/weapons/thrusters are parsed from macro/
+    # component XML files, not wares.xml itself, so (unlike ships/
+    # missiles/deployables/etc. above) they never had their own name_ref to
+    # resolve -- borrow the name equipment_wares already resolved for the
+    # same ware_id (primary_locale's own text) instead of re-deriving it.
+    equipment_name_by_ware_id = {w["ware_id"]: w["name"] for w in equipment_wares}
+    for component_rows in (turrets, engines, shields, weapons, thrusters):
+        for r in component_rows:
+            r["name"] = equipment_name_by_ware_id.get(r["ware_id"])
 
     turret_sizes: set[str] = set()
     bonus_weapon_sizes: set[str] = set()
@@ -5481,6 +6681,7 @@ def main() -> None:
         s["missile_capacity"] = analysis["missile_capacity"]
         s["drone_capacity"] = analysis["drone_capacity"]
         s["ship_type"] = analysis["ship_type"]
+        s["prestige"] = analysis["prestige"]
         s["purpose"] = analysis["purpose"]
         s["icon"] = analysis["icon"]
         s["hull"] = analysis["hull"]
@@ -5499,7 +6700,13 @@ def main() -> None:
         s["m_docks"] = analysis["docks"].get("m", 0)
         s["s_ship_storage"] = analysis["ship_storage"].get("s", 0)
         s["m_ship_storage"] = analysis["ship_storage"].get("m", 0)
-        s["slots"] = summarize_slots(s["ware_id"], s["size"], analysis["slot_counts"])
+        s["radar_range"] = analysis["radar_range"]
+        s["region_damage_immune"] = analysis["region_damage_immune"]
+        s["countermeasure_capacity"] = analysis["countermeasure_capacity"]
+        s["deployable_capacity"] = analysis["deployable_capacity"]
+        s["radar_cloak"] = analysis["radar_cloak"]
+        s["illegal_cargo_concealed"] = analysis["illegal_cargo_concealed"]
+        s["slots"] = summarize_slots(s["ware_id"], s["size"], analysis["slot_counts"], analysis["groups"])
         turret_sizes.update(s["slots"]["turrets"].keys())
         bonus_weapon_sizes.update(s["slots"]["weapons_bonus"].keys())
         jerk_columns.update(s["jerk_fields"].keys())
@@ -5580,6 +6787,31 @@ def main() -> None:
         countermeasure_wares, COUNTERMEASURE_FIELDNAMES, COUNTERMEASURES_CSV_OUT
     )
     crew_row_count = write_equipment_component_csv(crew_wares, CREW_FIELDNAMES, CREW_CSV_OUT)
+    equipment_mods, equipment_mod_stats, equipment_mod_costs, mod_resource_wares = parse_equipment_mods(
+        [EQUIPMENTMODS_FILE], wares_files(), lang_table
+    )
+    chassis_mods, chassis_mod_stats = parse_chassis_integrated_mods(ships)
+    equipment_mods += chassis_mods
+    equipment_mod_stats += chassis_mod_stats
+    equipment_mods_row_count = write_equipment_component_csv(
+        equipment_mods, EQUIPMENT_MODS_FIELDNAMES, EQUIPMENT_MODS_CSV_OUT
+    )
+    equipment_mod_stats_row_count = write_equipment_component_csv(
+        equipment_mod_stats, EQUIPMENT_MOD_STATS_FIELDNAMES, EQUIPMENT_MOD_STATS_CSV_OUT
+    )
+    # Chassis mods contribute none of these (parse_chassis_integrated_mods()
+    # never returns any -- see that function's own "no price" docstring),
+    # so equipment_mod_costs is equipment_mods' own real (non-chassis)
+    # subset only, unlike equipment_mods/equipment_mod_stats above which
+    # merge both.
+    equipment_mod_costs_row_count = write_equipment_component_csv(
+        equipment_mod_costs, EQUIPMENT_MOD_COSTS_FIELDNAMES, EQUIPMENT_MOD_COSTS_CSV_OUT
+    )
+    validate_equipment_mod_target_mappings(equipment_mod_stats)
+    mod_qualities = parse_mod_qualities(lang_table)
+    mod_qualities_row_count = write_equipment_component_csv(
+        mod_qualities, MOD_QUALITY_FIELDNAMES, MOD_QUALITIES_CSV_OUT
+    )
     source_versions = parse_source_versions()
     source_versions_row_count = write_equipment_component_csv(
         source_versions, SOURCE_VERSIONS_FIELDNAMES, SOURCE_VERSIONS_CSV_OUT
@@ -5658,6 +6890,8 @@ def main() -> None:
             drone_wares,
             countermeasure_wares,
             crew_wares,
+            equipment_mods,
+            mod_resource_wares,
             factions,
             purposes,
             ship_types,
@@ -5670,6 +6904,7 @@ def main() -> None:
             build_methods,
             crew_roles,
             source_versions,
+            mod_qualities,
         ]
     )
     # See strip_trailing_dev_comment()'s own docstring -- both
@@ -5696,6 +6931,11 @@ def main() -> None:
     # itself above, and this function only ever emits rows for compound
     # tags, so there's no (ware_id, lang_id) overlap between the two lists.
     localized_strings += parse_ammunition_compatibility_localized_strings(ammunition_compatibility_types)
+    # Same reasoning as the ammunition-compatibility merge above: chassis
+    # mods carry name_ref="" (see parse_chassis_integrated_mods()), so
+    # parse_localized_strings() itself produced zero rows for them -- no
+    # (ware_id, lang_id) overlap to worry about.
+    localized_strings += parse_chassis_mod_localized_strings(chassis_mods, {s["ware_id"]: s for s in ships})
     localized_strings_row_count = write_equipment_component_csv(
         localized_strings, LOCALIZED_STRINGS_FIELDNAMES, LOCALIZED_STRINGS_CSV_OUT
     )
@@ -5752,6 +6992,9 @@ def main() -> None:
         f"{drone_row_count} drones_base rows, "
         f"{countermeasure_row_count} countermeasures_base rows, "
         f"{crew_row_count} crew_base rows, "
+        f"{equipment_mods_row_count} equipment_mods_base rows, "
+        f"{equipment_mod_stats_row_count} equipment_mod_stats rows, "
+        f"{mod_qualities_row_count} mod_qualities rows, "
         f"{source_versions_row_count} source_versions rows, "
         f"{factions_row_count} factions rows, "
         f"{races_row_count} races rows, "
@@ -5791,6 +7034,10 @@ def main() -> None:
     print(f"  -> {DRONES_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {COUNTERMEASURES_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {CREW_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {EQUIPMENT_MODS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {EQUIPMENT_MOD_STATS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {EQUIPMENT_MOD_COSTS_CSV_OUT.relative_to(ROOT)}")
+    print(f"  -> {MOD_QUALITIES_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {SOURCE_VERSIONS_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {FACTIONS_CSV_OUT.relative_to(ROOT)}")
     print(f"  -> {RACES_CSV_OUT.relative_to(ROOT)}")
@@ -5815,4 +7062,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--primary-locale",
+        default="en",
+        choices=sorted(LANGUAGE_FILES),
+        help="Language that populates every base table's own 'name' column (default: en). "
+        "Independent of the full 15-language i18n overlay, which is always generated regardless.",
+    )
+    args = parser.parse_args()
+    main(primary_locale=args.primary_locale)

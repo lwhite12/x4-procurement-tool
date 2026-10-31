@@ -37,6 +37,20 @@
         </span>
         <span data-i18n="nav.component_analyzer">Component Analyzer</span>
       </button>
+      <button
+        type="button"
+        class="main-nav-btn"
+        data-page="proving-grounds"
+        title="Here, you can compare the performance stats of ships from your fleet list in the Fleet Planner, in your saved loadouts, or aggregate stats across entire fleets."
+        data-i18n-title="proving_grounds.description"
+      >
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/proving_grounds.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/proving_grounds_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        <span data-i18n="nav.proving_grounds">Proving Grounds</span>
+      </button>
       <button type="button" class="main-nav-btn" data-page="about">
         <span class="main-nav-icon-wrap">
           <img src="/images/nav_icons/about.png" alt="" class="main-nav-icon main-nav-icon-normal" />
@@ -154,6 +168,7 @@
         <button id="ship-high-preset-btn" type="button" class="section-preset-btn" data-i18n="ship_builder.high_preset">High Preset</button>
         <button id="ship-minimum-preset-btn" type="button" class="section-preset-btn" data-i18n="ship_builder.minimum_preset">Minimum Preset</button>
       </div>
+      <div id="ship-loadout-name-row"></div>
       <div id="imported-loadout-warnings" class="imported-loadout-warnings hidden"></div>
 
       <div id="ship-summary" class="summary-panel"></div>
@@ -260,8 +275,78 @@
   </div>
 
   <div id="page-component-analyzer" class="page hidden">
+  <div id="prebuilt-tables-band" class="prebuilt-tables-band">
+    <span class="prebuilt-tables-band-label" data-i18n="component_analyzer.prebuilt_tables_label">Load Prebuilt Tables</span>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="ships">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_ships_btn">Ships</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=s_ships#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_ships_s">Small Ships</a>
+        <a href="?share_component_analyzer_tables=m_ships#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_ships_m">Medium Ships</a>
+        <a href="?share_component_analyzer_tables=l_ships#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_ships_l">Large Ships</a>
+        <a href="?share_component_analyzer_tables=xl_ships#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_ships_xl">Extra Large Ships</a>
+      </div>
+    </div>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="engines">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_engines_btn">Engines</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=s_engines#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_engines_s">Small Engines</a>
+        <a href="?share_component_analyzer_tables=m_engines#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_engines_m">Medium Engines</a>
+        <a href="?share_component_analyzer_tables=l_engines#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_engines_l">Large Engines</a>
+        <a href="?share_component_analyzer_tables=xl_engines#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_engines_xl">Extra Large Engines</a>
+      </div>
+    </div>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="shields">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_shields_btn">Shields</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=s_shields#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_shields_s">Small Shields</a>
+        <a href="?share_component_analyzer_tables=m_shields#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_shields_m">Medium Shields</a>
+        <a href="?share_component_analyzer_tables=l_shields#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_shields_l">Large Shields</a>
+        <a href="?share_component_analyzer_tables=xl_shields#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_shields_xl">Extra Large Shields</a>
+      </div>
+    </div>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="weapons">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_weapons_btn">Weapons</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=s_weapons#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_weapons_s">Small Weapons</a>
+        <a href="?share_component_analyzer_tables=m_weapons#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_weapons_m">Medium Weapons</a>
+        <a href="?share_component_analyzer_tables=l_weapons#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_weapons_l">Large Weapons</a>
+        <a href="?share_component_analyzer_tables=xl_weapons#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_weapons_xl">Extra Large Weapons</a>
+      </div>
+    </div>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="turrets">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_turrets_btn">Turrets</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=m_turrets#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_turrets_m">Medium Turrets</a>
+        <a href="?share_component_analyzer_tables=l_turrets#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_turrets_l">Large Turrets</a>
+        <a href="?share_component_analyzer_tables=xl_turrets#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_turrets_xl">Extra Large Turrets</a>
+      </div>
+    </div>
+    <div class="prebuilt-tables-dropdown" data-prebuilt-dropdown="thrusters">
+      <button type="button" class="prebuilt-tables-dropdown-btn" aria-haspopup="true" aria-expanded="false">
+        <span data-i18n="component_analyzer.prebuilt_tables_thrusters_btn">Thrusters</span> <span class="prebuilt-tables-dropdown-caret">▾</span>
+      </button>
+      <div class="prebuilt-tables-dropdown-menu hidden" role="menu">
+        <a href="?share_component_analyzer_tables=s_thrusters#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_thrusters_s">Small Thrusters</a>
+        <a href="?share_component_analyzer_tables=m_thrusters#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_thrusters_m">Medium Thrusters</a>
+        <a href="?share_component_analyzer_tables=l_thrusters#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_thrusters_l">Large Thrusters</a>
+        <a href="?share_component_analyzer_tables=xl_thrusters#component-analyzer" role="menuitem" data-i18n="component_analyzer.prebuilt_tables_thrusters_xl">Extra Large Thrusters</a>
+      </div>
+    </div>
+    <a class="prebuilt-tables-link-btn" href="?share_component_analyzer_tables=missiles#component-analyzer" data-i18n="component_analyzer.prebuilt_tables_missiles_btn">Missiles</a>
+    <a class="prebuilt-tables-link-btn" href="?share_component_analyzer_tables=economy_wares#component-analyzer" data-i18n="component_analyzer.prebuilt_tables_economy_wares_btn">Economy Wares</a>
+  </div>
   <fieldset id="component-analyzer-section" class="section-box">
-    <legend class="section-box-legend" data-i18n="component_analyzer.section_title">Component Analyzer</legend>
+    <legend class="section-box-legend" data-i18n="component_analyzer.section_title">Component Tables</legend>
     <div class="component-analyzer-toolbar">
       <button type="button" id="component-analyzer-add-table-btn" data-i18n="component_analyzer.add_table_btn">+ Add Table</button>
       <button
@@ -277,6 +362,29 @@
     </div>
     <div id="component-analyzer-tables"></div>
   </fieldset>
+  </div>
+
+  <div id="page-proving-grounds" class="page hidden">
+    <fieldset id="proving-grounds-section" class="section-box" data-i18n-aria-label="proving_grounds.section_title" aria-label="Proving Grounds">
+      <legend class="section-box-legend proving-grounds-legend-tabs">
+        <button type="button" class="proving-grounds-tab-btn active" data-proving-grounds-tab="ship-trials" data-i18n="proving_grounds.ship_trials_tab">Ship Trials</button>
+        <button type="button" class="proving-grounds-tab-btn" data-proving-grounds-tab="fleet-trials" data-i18n="proving_grounds.fleet_trials_tab">Fleet Trials</button>
+      </legend>
+
+      <div id="proving-grounds-ship-trials" class="proving-grounds-tab-content">
+        <div class="component-analyzer-toolbar">
+          <button type="button" id="ship-trials-add-trial-btn" data-i18n="proving_grounds.add_trial_btn">+ Add Trial</button>
+        </div>
+        <div id="ship-trials-list"></div>
+      </div>
+
+      <div id="proving-grounds-fleet-trials" class="proving-grounds-tab-content hidden">
+        <div class="proving-grounds-under-construction">
+          <img src="/images/nav_icons/construction_site.png" alt="" class="proving-grounds-under-construction-icon" />
+          <span data-i18n="proving_grounds.under_construction">Under Construction</span>
+        </div>
+      </div>
+    </fieldset>
   </div>
 
   <div id="page-about" class="page hidden">
@@ -440,7 +548,13 @@
 
   <div id="stat-select-modal-overlay" class="modal-overlay hidden">
     <div class="modal modal-wide">
-      <h3 id="stat-select-modal-title" data-i18n="stat_select_modal.title">Select Stats</h3>
+      <div class="stat-select-modal-title-row">
+        <h3 id="stat-select-modal-title" data-i18n="stat_select_modal.title">Select Stats</h3>
+        <div class="stat-select-modal-title-actions">
+          <button type="button" id="stat-select-stat-lab-btn" data-i18n="component_analyzer.stat_lab_btn">Statistics Lab</button>
+          <button type="button" id="stat-select-mocked-stats-btn" data-i18n="stat_lab_modal.mocked_stats_btn">Mocked Stats</button>
+        </div>
+      </div>
       <div class="stat-select-modal-body">
         <div id="stat-select-groups-panel" class="stat-select-groups-panel"></div>
         <div class="stat-select-selected-panel">
@@ -459,14 +573,372 @@
   </div>
 
   <div id="mod-lab-modal-overlay" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal mod-lab-modal">
       <h3 id="mod-lab-modal-title">Modifications Lab</h3>
-      <div class="mod-lab-modal-body">
-        <img src="/images/mod_lab_icons/mods_lab.png" alt="" class="mod-lab-modal-icon" />
-        <span data-i18n="mod_lab_modal.under_construction">Under Construction</span>
+      <div class="mod-lab-body">
+        <div class="mod-lab-picker">
+          <div id="mod-lab-tab-bar" class="mod-lab-tab-bar" role="tablist">
+            <button type="button" class="mod-lab-tab-btn mod-lab-tab-btn-icon" data-quality="1" title="">
+              <img src="/images/mod_lab_icons/mods_grade_circle_01_white.png" alt="" />
+            </button>
+            <button type="button" class="mod-lab-tab-btn mod-lab-tab-btn-icon" data-quality="2" title="">
+              <img src="/images/mod_lab_icons/mods_grade_circle_02_white.png" alt="" />
+            </button>
+            <button type="button" class="mod-lab-tab-btn mod-lab-tab-btn-icon" data-quality="3" title="">
+              <img src="/images/mod_lab_icons/mods_grade_circle_03_white.png" alt="" />
+            </button>
+          </div>
+          <div id="mod-lab-mods-list" class="mod-lab-mods-list"></div>
+        </div>
+        <div class="mod-lab-loaded-panel">
+          <div class="mod-lab-loaded-column">
+            <div class="mod-lab-loaded-column-header">
+              <h4 data-i18n="mod_lab_modal.loaded_standard_header">Standard Mod</h4>
+              <button type="button" id="mod-lab-clear-standard-btn" class="mod-lab-loaded-action-btn" data-i18n="mod_lab_modal.clear">Clear</button>
+            </div>
+            <div id="mod-lab-loaded-standard" class="mod-lab-loaded-content"></div>
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
+        <button type="button" id="mod-lab-confirm-btn" data-i18n="mod_lab_modal.confirm">Confirm</button>
         <button type="button" id="mod-lab-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stat-lab-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide stat-lab-modal">
+      <h3 id="stat-lab-modal-title" data-i18n="stat_lab_modal.title">Statistics Lab</h3>
+      <div id="stat-lab-missing-mocks-summary" class="stat-lab-missing-mocks-summary hidden"></div>
+
+      <div id="stat-lab-browse-view" class="stat-lab-view">
+        <div class="stat-lab-browse-header-row">
+          <select id="stat-lab-type-select" class="stat-lab-type-select"></select>
+          <div class="stat-lab-browse-actions">
+            <button type="button" id="stat-lab-new-stat-btn" data-i18n="stat_lab_modal.new_stat_btn">+ New Stat</button>
+            <button type="button" id="stat-lab-new-group-btn" data-i18n="stat_lab_modal.new_group_btn">+ New Group</button>
+            <button type="button" id="stat-lab-constants-btn" data-i18n="stat_lab_modal.constants_btn">Constants</button>
+            <button type="button" id="stat-lab-mocks-btn" data-i18n="stat_lab_modal.mocked_stats_btn">Mocked Stats</button>
+          </div>
+        </div>
+        <div id="stat-lab-browse-list" class="stat-lab-browse-list"></div>
+        <div class="modal-actions">
+          <button type="button" id="stat-lab-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+        </div>
+      </div>
+
+      <!-- Read-only inspector for ANY stat that has a formula
+           (pre-derived/mod/derived -- a "fundamental" one reads a raw
+           column directly, so there's nothing to inspect, see the "View"
+           button's own guard in buildStatLabBrowseStatRow()). Mirrors the
+           Builder view's own Formula/Variables layout below but with plain
+           text instead of inputs/selects, and no Save/Delete/Eval -- see
+           openStatLabInspect() in app.js. -->
+      <div id="stat-lab-inspect-view" class="stat-lab-view hidden">
+        <div class="stat-lab-inspect-name-row">
+          <h4 id="stat-lab-inspect-name"></h4>
+          <span id="stat-lab-inspect-tag-container"></span>
+        </div>
+        <p id="stat-lab-inspect-description" class="stat-lab-builder-hint hidden"></p>
+        <div class="stat-lab-builder-field-row stat-lab-builder-expression-row">
+          <span data-i18n="stat_lab_modal.formula_label">Formula</span>
+          <code id="stat-lab-inspect-expression" class="stat-lab-inspect-expression"></code>
+        </div>
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.inspect_variables_hint">
+          Where each name in the formula above comes from:
+        </p>
+        <div class="stat-lab-inspect-variables-columns-header">
+          <span data-i18n="stat_lab_modal.variable_column_name">Name</span>
+          <span data-i18n="stat_lab_modal.variable_column_aggregation">Aggregation</span>
+          <span data-i18n="stat_lab_modal.variable_column_type">Component Type</span>
+          <span data-i18n="stat_lab_modal.variable_column_stat">Statistic</span>
+          <span data-i18n="stat_lab_modal.variable_column_limit">Limit</span>
+        </div>
+        <div id="stat-lab-inspect-variables" class="stat-lab-builder-variables"></div>
+        <div class="modal-actions">
+          <button type="button" id="stat-lab-inspect-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+        </div>
+      </div>
+
+      <div id="stat-lab-builder-view" class="stat-lab-view hidden">
+        <div class="stat-lab-builder-field-row">
+          <label for="stat-lab-builder-name-input" data-i18n="stat_lab_modal.stat_name_label">Name</label>
+          <input type="text" id="stat-lab-builder-name-input" />
+        </div>
+        <div class="stat-lab-builder-field-row stat-lab-builder-expression-row">
+          <label for="stat-lab-builder-description-input" data-i18n="stat_lab_modal.stat_description_label">Description</label>
+          <textarea
+            id="stat-lab-builder-description-input"
+            rows="2"
+            data-i18n-placeholder="stat_lab_modal.stat_description_placeholder"
+            placeholder="Optional -- shown as a hover tooltip next to this stat's name"
+          ></textarea>
+        </div>
+        <div class="stat-lab-builder-field-row stat-lab-builder-expression-row">
+          <label for="stat-lab-builder-expression-input" data-i18n="stat_lab_modal.formula_label">Formula</label>
+          <textarea
+            id="stat-lab-builder-expression-input"
+            rows="2"
+            data-i18n-placeholder="stat_lab_modal.formula_placeholder"
+            placeholder="e.g. damage_value * bullet_amount"
+          ></textarea>
+        </div>
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.variables_hint">
+          Every name above that isn't a number or math function needs a source:
+        </p>
+        <div id="stat-lab-unresolved-variables" class="stat-lab-unresolved-variables hidden"></div>
+        <div class="stat-lab-builder-variables-header-row">
+          <button type="button" id="stat-lab-add-variable-btn" data-i18n="stat_lab_modal.add_variable_btn">+ Add Variable</button>
+        </div>
+        <div class="stat-lab-builder-variables-columns-header">
+          <span data-i18n="stat_lab_modal.variable_column_name" data-i18n-title="stat_lab_modal.variable_column_name_title" title="The name this variable is referenced by inside the formula expression.">Name</span>
+          <span data-i18n="stat_lab_modal.variable_column_aggregation" data-i18n-title="stat_lab_modal.variable_column_aggregation_title" title="None reads one value directly. Sum/Average/Count combine this stat across every matching mock configured in scope, instead of reading a single value.">Aggregation</span>
+          <span data-i18n="stat_lab_modal.variable_column_type" data-i18n-title="stat_lab_modal.variable_column_type_title" title="Which component type this variable's statistic belongs to.">Component Type</span>
+          <span data-i18n="stat_lab_modal.variable_column_stat" data-i18n-title="stat_lab_modal.variable_column_stat_title" title="Which statistic on that component type this variable reads.">Statistic</span>
+          <span data-i18n="stat_lab_modal.variable_column_limit" data-i18n-title="stat_lab_modal.variable_column_limit_title" title="For Sum/Average/Count only: another variable above whose own value caps how many configured mocks get folded in.">Limit</span>
+          <span></span>
+        </div>
+        <div id="stat-lab-builder-variables" class="stat-lab-builder-variables"></div>
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.groups_hint">
+          This stat will be selectable from every component type below -- choose which group it files under on each:
+        </p>
+        <div id="stat-lab-builder-groups" class="stat-lab-builder-groups"></div>
+        <div class="stat-lab-builder-eval-row">
+          <label for="stat-lab-builder-preview-type-select" data-i18n="stat_lab_modal.eval_preview_type_label">Preview as</label>
+          <select id="stat-lab-builder-preview-type-select"></select>
+          <label for="stat-lab-builder-eval-component-select" data-i18n="stat_lab_modal.eval_component_label">Test against</label>
+          <select id="stat-lab-builder-eval-component-select"></select>
+          <button type="button" id="stat-lab-builder-eval-btn" data-i18n="stat_lab_modal.eval_btn">Eval</button>
+          <span id="stat-lab-builder-eval-result" class="stat-lab-eval-result"></span>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="stat-lab-builder-delete-btn" class="hidden" data-i18n="stat_lab_modal.delete_btn">Delete</button>
+          <button type="button" id="stat-lab-builder-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+          <button type="button" id="stat-lab-builder-save-btn" data-i18n="stat_select_modal.save">Save</button>
+        </div>
+      </div>
+
+      <div id="stat-lab-mocks-view" class="stat-lab-view hidden">
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.mocks_hint">
+          Cross-component-type inputs your formulas need, with no real row to read from -- configure a fallback value here.
+        </p>
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.mocks_priority_hint">Mocks in a scope form a priority list: they apply top to bottom, and the first one that fits the component and has a value wins. Individual-stat mocks are tried before full-component ones. If nothing in a scope fits, the next broader scope is used.</p>
+        <div class="stat-lab-mocks-header-row">
+          <button type="button" id="stat-lab-add-mock-btn" data-i18n="stat_lab_modal.add_mock_btn">+ Add Mock</button>
+          <button type="button" id="stat-lab-mocks-statistics-lab-btn" data-i18n="component_analyzer.stat_lab_btn">Statistics Lab</button>
+        </div>
+
+        <div id="stat-lab-mock-wizard" class="stat-lab-mock-wizard hidden">
+          <div class="stat-lab-builder-field-row">
+            <label for="stat-lab-mock-wizard-type-select" data-i18n="stat_lab_modal.mock_wizard_type_label">Mock Type</label>
+            <select id="stat-lab-mock-wizard-type-select">
+              <option value="stat" data-i18n="stat_lab_modal.mock_type_stat">Individual Stat</option>
+              <option value="component" data-i18n="stat_lab_modal.mock_type_component">Full Component</option>
+            </select>
+            <label for="stat-lab-mock-wizard-level-select" data-i18n="stat_lab_modal.mock_wizard_scope_label">Scope</label>
+            <select id="stat-lab-mock-wizard-level-select"></select>
+            <select id="stat-lab-mock-wizard-table-select" class="hidden"></select>
+            <select id="stat-lab-mock-wizard-tab-select" class="hidden"></select>
+            <select id="stat-lab-mock-wizard-row-select" class="hidden"></select>
+          </div>
+          <div class="stat-lab-builder-field-row">
+            <label for="stat-lab-mock-wizard-component-type-select" data-i18n="stat_lab_modal.mock_wizard_component_type_label">Component Type</label>
+            <select id="stat-lab-mock-wizard-component-type-select"></select>
+          </div>
+          <div id="stat-lab-mock-wizard-stat-row" class="stat-lab-builder-field-row">
+            <label data-i18n="stat_lab_modal.mock_wizard_stat_label">Stat</label>
+            <button type="button" id="stat-lab-mock-wizard-pick-stat-btn" data-i18n="stat_lab_modal.pick_stat_btn">Pick Stat</button>
+            <span id="stat-lab-mock-wizard-stat-display" class="stat-lab-mock-wizard-display"></span>
+          </div>
+          <div id="stat-lab-mock-wizard-value-row" class="stat-lab-builder-field-row">
+            <label for="stat-lab-mock-wizard-value-mode-select" data-i18n="stat_lab_modal.mock_wizard_value_label">Value</label>
+            <select id="stat-lab-mock-wizard-value-mode-select">
+              <option value="literal" data-i18n="stat_lab_modal.mock_mode_literal">Number</option>
+              <option value="component_ref" data-i18n="stat_lab_modal.mock_mode_component">Component</option>
+            </select>
+            <input type="number" id="stat-lab-mock-wizard-number-input" step="any" />
+            <button
+              type="button"
+              id="stat-lab-mock-wizard-pick-value-component-btn"
+              class="hidden"
+              data-i18n="stat_lab_modal.pick_component_btn"
+            >
+              Pick Component
+            </button>
+            <span id="stat-lab-mock-wizard-value-component-display" class="stat-lab-mock-wizard-display hidden"></span>
+          </div>
+          <div id="stat-lab-mock-wizard-full-component-row" class="stat-lab-builder-field-row hidden">
+            <label data-i18n="stat_lab_modal.mock_wizard_component_label">Component</label>
+            <button type="button" id="stat-lab-mock-wizard-pick-full-component-btn" data-i18n="stat_lab_modal.pick_component_btn">
+              Pick Component
+            </button>
+            <span id="stat-lab-mock-wizard-full-component-display" class="stat-lab-mock-wizard-display"></span>
+          </div>
+          <div id="stat-lab-mock-wizard-group-mode-row" class="stat-lab-builder-field-row hidden">
+            <label
+              for="stat-lab-mock-wizard-group-mode-checkbox"
+              data-i18n-title="stat_lab_modal.mock_group_order_tooltip"
+              title="Claims whole chassis groups in this mock's list order -- list it before flat entries that could otherwise claim the same groups first."
+            >
+              <input type="checkbox" id="stat-lab-mock-wizard-group-mode-checkbox" />
+              <span data-i18n="stat_lab_modal.mock_wizard_group_mode_label">Mock a component group</span>
+            </label>
+          </div>
+          <div id="stat-lab-mock-wizard-count-row" class="stat-lab-builder-field-row">
+            <label for="stat-lab-mock-wizard-full-component-count-input" data-i18n="stat_lab_modal.mock_wizard_count_label">Count</label>
+            <input type="number" id="stat-lab-mock-wizard-full-component-count-input" min="1" step="1" value="1" />
+          </div>
+          <div id="stat-lab-mock-wizard-group-counts-row" class="stat-lab-builder-field-row hidden">
+            <label for="stat-lab-mock-wizard-per-group-count-input" data-i18n="stat_lab_modal.mock_wizard_per_group_count_label"
+              >Per group</label
+            >
+            <input type="number" id="stat-lab-mock-wizard-per-group-count-input" min="1" step="1" value="1" />
+            <label for="stat-lab-mock-wizard-group-count-input" data-i18n="stat_lab_modal.mock_wizard_group_count_label"
+              >Number of groups</label
+            >
+            <input type="number" id="stat-lab-mock-wizard-group-count-input" min="1" step="1" value="1" />
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="stat-lab-mock-wizard-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+            <button type="button" id="stat-lab-mock-wizard-add-btn" data-i18n="stat_lab_modal.add_mock_confirm_btn">Add</button>
+          </div>
+        </div>
+
+        <div id="stat-lab-copy-scope-wizard" class="stat-lab-mock-wizard hidden">
+          <p id="stat-lab-copy-scope-source-hint" class="stat-lab-builder-hint"></p>
+          <div class="stat-lab-builder-field-row">
+            <label for="stat-lab-copy-scope-level-select" data-i18n="stat_lab_modal.mock_wizard_scope_label">Scope</label>
+            <select id="stat-lab-copy-scope-level-select"></select>
+            <select id="stat-lab-copy-scope-table-select" class="hidden"></select>
+            <select id="stat-lab-copy-scope-tab-select" class="hidden"></select>
+            <select id="stat-lab-copy-scope-row-select" class="hidden"></select>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="stat-lab-copy-scope-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+            <button type="button" id="stat-lab-copy-scope-confirm-btn" data-i18n="stat_lab_modal.copy_scope_confirm_btn">
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <div id="stat-lab-mocks-sections" class="stat-lab-mocks-sections"></div>
+        <div class="modal-actions">
+          <button type="button" id="stat-lab-mocks-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+        </div>
+      </div>
+
+      <div id="stat-lab-constants-view" class="stat-lab-view hidden">
+        <p class="stat-lab-builder-hint" data-i18n="stat_lab_modal.constants_hint">
+          Curated numbers a formula can reference the same way it references a stat, for inputs that don't belong to
+          any one component type.
+        </p>
+        <div class="stat-lab-mocks-header-row">
+          <button type="button" id="stat-lab-add-constant-btn" data-i18n="stat_lab_modal.add_constant_btn">+ Add Constant</button>
+          <button type="button" id="stat-lab-constants-statistics-lab-btn" data-i18n="component_analyzer.stat_lab_btn">
+            Statistics Lab
+          </button>
+        </div>
+
+        <div id="stat-lab-constant-wizard" class="stat-lab-mock-wizard hidden">
+          <div class="stat-lab-builder-field-row">
+            <label for="stat-lab-constant-wizard-name-input" data-i18n="stat_lab_modal.constant_name_label">Name</label>
+            <input type="text" id="stat-lab-constant-wizard-name-input" />
+          </div>
+          <div class="stat-lab-builder-field-row stat-lab-builder-expression-row">
+            <label for="stat-lab-constant-wizard-description-input" data-i18n="stat_lab_modal.stat_description_label">
+              Description
+            </label>
+            <textarea id="stat-lab-constant-wizard-description-input" rows="2"></textarea>
+          </div>
+          <div class="stat-lab-builder-field-row">
+            <label for="stat-lab-constant-wizard-type-select" data-i18n="stat_lab_modal.constant_type_label">Type</label>
+            <select id="stat-lab-constant-wizard-type-select">
+              <option value="literal" data-i18n="stat_lab_modal.constant_type_literal">Number</option>
+              <option value="formula" data-i18n="stat_lab_modal.constant_type_formula">Formula</option>
+            </select>
+          </div>
+          <div id="stat-lab-constant-wizard-value-row" class="stat-lab-builder-field-row">
+            <label for="stat-lab-constant-wizard-value-input" data-i18n="stat_lab_modal.constant_value_label">Value</label>
+            <input type="number" id="stat-lab-constant-wizard-value-input" step="any" />
+          </div>
+          <div id="stat-lab-constant-wizard-formula-row" class="stat-lab-builder-field-row stat-lab-builder-expression-row hidden">
+            <label for="stat-lab-constant-wizard-formula-input" data-i18n="stat_lab_modal.formula_label">Formula</label>
+            <textarea
+              id="stat-lab-constant-wizard-formula-input"
+              rows="2"
+              data-i18n-placeholder="stat_lab_modal.constant_formula_placeholder"
+              placeholder="e.g. base_value * blend_exponent"
+            ></textarea>
+          </div>
+          <div id="stat-lab-constant-wizard-variables-section" class="hidden">
+            <div class="stat-lab-builder-variables-header-row">
+              <button
+                type="button"
+                id="stat-lab-constant-wizard-add-variable-btn"
+                data-i18n="stat_lab_modal.add_variable_btn"
+              >
+                + Add Variable
+              </button>
+            </div>
+            <div id="stat-lab-constant-wizard-variables" class="stat-lab-builder-variables"></div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="stat-lab-constant-wizard-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+            <button type="button" id="stat-lab-constant-wizard-add-btn" data-i18n="stat_lab_modal.add_mock_confirm_btn">
+              Add
+            </button>
+          </div>
+        </div>
+
+        <div id="stat-lab-constants-list" class="stat-lab-constants-list"></div>
+        <div class="modal-actions">
+          <button type="button" id="stat-lab-constants-close-btn" data-i18n="mod_lab_modal.close">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="mock-component-picker-modal-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3 id="mock-component-picker-modal-title" data-i18n="component_set_picker_modal.title">Select Components</h3>
+      <div class="component-set-picker-search-row">
+        <input
+          id="mock-component-picker-search-input"
+          type="text"
+          class="component-set-picker-search-input"
+          placeholder="Search…"
+          data-i18n-placeholder="component_set_picker_modal.search_placeholder"
+        />
+        <button type="button" id="mock-component-picker-filters-btn" class="hidden"></button>
+      </div>
+      <div id="mock-component-picker-filters-panel" class="hidden">
+        <div id="mock-component-picker-filters-grid" class="filter-panel-grid"></div>
+        <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+      </div>
+      <div id="mock-component-picker-modal-status" class="equipment-picker-modal-status hidden"></div>
+      <div id="mock-component-picker-table-wrapper" class="equipment-picker-table-wrapper">
+        <table id="mock-component-picker-table">
+          <thead>
+            <tr>
+              <th data-i18n="component_set_picker_modal.table_name_header">Name</th>
+            </tr>
+          </thead>
+          <tbody id="mock-component-picker-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="mock-component-picker-cancel-btn" data-i18n="component_set_picker_modal.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stat-pick-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="stat-pick-modal-title" data-i18n="stat_lab_modal.pick_stat_title">Pick Stat</h3>
+      <div id="stat-pick-list" class="stat-lab-browse-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="stat-pick-cancel-btn" data-i18n="component_set_picker_modal.cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -595,9 +1067,130 @@
   <div id="select-game-loadout-modal-overlay" class="modal-overlay hidden">
     <div class="modal">
       <h3 id="select-game-loadout-modal-title" data-i18n="select_game_loadout_modal.title">Select Filter Loadout</h3>
+      <div class="loadout-picker-search-row">
+        <input
+          type="text"
+          id="select-game-loadout-chassis-search"
+          class="loadout-picker-search-input"
+          placeholder="Search ship name…"
+          data-i18n-placeholder="select_game_loadout_modal.chassis_search_placeholder"
+        />
+        <input
+          type="text"
+          id="select-game-loadout-name-search"
+          class="loadout-picker-search-input"
+          placeholder="Search loadout name…"
+          data-i18n-placeholder="select_game_loadout_modal.name_search_placeholder"
+        />
+      </div>
+      <div id="select-game-loadout-filters-row" class="hidden">
+        <button type="button" id="select-game-loadout-filters-btn" data-i18n="select_game_loadout_modal.filters_btn">Filters</button>
+      </div>
+      <div id="select-game-loadout-filters-panel" class="hidden">
+        <div id="select-game-loadout-filters-grid" class="filter-panel-grid"></div>
+        <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+      </div>
       <div id="select-game-loadout-list" class="select-game-loadout-list"></div>
       <div class="modal-actions">
         <button type="button" id="select-game-loadout-cancel-btn" data-i18n="select_game_loadout_modal.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ship Trials' own "Add Ship" picker -- same row shape/markup as
+       #select-game-loadout-modal-overlay above (reuses its
+       .select-game-loadout-list/-row CSS as-is), sourced from the same
+       importedLoadoutsResult.ships working set, just without that modal's
+       own "load into the Ship Builder" click behavior -- picking a row
+       here adds a new column to whichever Trial opened this instead. Also
+       gets its own independent chassis filter panel (buildChassisFilterPanel()),
+       same as the one above. -->
+  <div id="ship-trial-add-ship-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 data-i18n="proving_grounds.add_ship_modal_title">Add Ship</h3>
+      <div class="loadout-picker-search-row">
+        <input
+          type="text"
+          id="ship-trial-add-ship-chassis-search"
+          class="loadout-picker-search-input"
+          placeholder="Search ship name…"
+          data-i18n-placeholder="select_game_loadout_modal.chassis_search_placeholder"
+        />
+        <input
+          type="text"
+          id="ship-trial-add-ship-name-search"
+          class="loadout-picker-search-input"
+          placeholder="Search loadout name…"
+          data-i18n-placeholder="select_game_loadout_modal.name_search_placeholder"
+        />
+      </div>
+      <div class="ship-trial-add-ship-filters-row">
+        <button type="button" id="ship-trial-add-ship-filters-btn" data-i18n="proving_grounds.filters_btn">Filters</button>
+      </div>
+      <div id="ship-trial-add-ship-filters-panel" class="hidden">
+        <div id="ship-trial-add-ship-filters-grid" class="filter-panel-grid"></div>
+        <p class="filter-hint" data-i18n="filter.hint">Check none in a group to remove the filter.</p>
+      </div>
+      <div id="ship-trial-add-ship-list" class="select-game-loadout-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="ship-trial-add-ship-cancel-btn" data-i18n="select_game_loadout_modal.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Add Fleet List Ship" -- two steps in one modal (see
+       openShipTrialAddFleetShipModal() in app.js): pick one of the user's
+       own Fleet Planner fleets (vertical list, same ship-icon/active-box
+       styling buildFleetTabShipIcon() already gives the real horizontal
+       fleet tabs), then pick a ship within it (same icon/name/note look
+       as that fleet's own cart-table rows). Read-only throughout -- never
+       calls setActiveFleet() or touches a fleet's own cart. -->
+  <div id="ship-trial-fleet-ship-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="ship-trial-fleet-ship-modal-title"></h3>
+      <div id="ship-trial-fleet-ship-fleet-step">
+        <div id="ship-trial-fleet-ship-fleet-list" class="fleet-list-tabs ship-trial-fleet-picker-list"></div>
+      </div>
+      <div id="ship-trial-fleet-ship-ship-step" class="hidden">
+        <button
+          type="button"
+          id="ship-trial-fleet-ship-back-btn"
+          class="ship-trial-fleet-ship-back-btn"
+          data-i18n="proving_grounds.fleet_ship_back_btn"
+        >← Back to Fleets</button>
+        <div id="ship-trial-fleet-ship-ship-list" class="select-game-loadout-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="ship-trial-fleet-ship-cancel-btn" data-i18n="select_game_loadout_modal.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Opened by a Ship Trial ship's own "Edit" button (populated from its
+       loadout) or by "Add Builder Ship" (opened blank, chassis picker and
+       all) -- NOT a second Ship Builder, the literal same #picker-section
+       node (chassis picker/filters/Loadout Manager AND #ship-detail, its
+       own last child) gets relocated into #ship-trial-builder-mount below
+       for the duration (see openShipTrialBuilderModal()/
+       closeShipTrialBuilderModal() in app.js), so every bit of picking/
+       group/ammo/drone/etc. rendering and editing already built for the
+       Fleet Planner page works here unchanged, including its own Add To
+       Fleet List button -- repurposed as this modal's own "Add to Trial"/
+       "Update Trial" action (see setAddToCartBtnLabel()'s own
+       shipTrialBuilderContext check) rather than hidden and rebuilt. -->
+  <div id="ship-trial-builder-modal-overlay" class="modal-overlay hidden">
+    <div id="ship-trial-builder-modal-box" class="modal modal-wide">
+      <button
+        type="button"
+        id="ship-trial-builder-close-x-btn"
+        class="modal-close-x-btn"
+        aria-label="Close"
+        data-i18n-aria-label="proving_grounds.close"
+      >×</button>
+      <h3 id="ship-trial-builder-modal-title"></h3>
+      <div id="ship-trial-builder-mount"></div>
+      <div class="modal-actions">
+        <button type="button" id="ship-trial-builder-close-btn" data-i18n="proving_grounds.close">Close</button>
       </div>
     </div>
   </div>
@@ -645,6 +1238,7 @@
   </div>
 
   <script src="vendor/i18next.min.js"></script>
+  <script src="vendor/math.min.js"></script>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>

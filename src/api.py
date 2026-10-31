@@ -169,6 +169,36 @@ Endpoints:
                                              scoped to any one ship's own
                                              hardpoints. See
                                              COMPONENT_LIST_SPECS
+  GET  /api/equipment_mods                -- every real in-game equipment
+                                             mod plus every synthetic
+                                             ship-chassis "Integrated
+                                             Changes" mod, each with its
+                                             own nested "stats" array
+                                             (equipment_mods_base +
+                                             equipment_mod_stats) -- NOT
+                                             Steam Workshop/user-created
+                                             mods. Fetched once, whole
+                                             dataset (a few tens of KB) --
+                                             see this endpoint's own
+                                             docstring. The target_stat ->
+                                             real column mapping itself is
+                                             a separate static file,
+                                             /equipment_mod_target_mappings.json,
+                                             not served from here
+  GET  /api/mod_qualities                 -- mod_level (1/2/3) -> real
+                                             display name ("Basic
+                                             Quality"/"Enhanced
+                                             Quality"/"Exceptional
+                                             Quality") for the
+                                             Modifications Lab's own tab
+                                             labels
+  GET  /api/ship_component_compatibility  -- given one weapon/turret/engine/
+                                             thruster/shield ware_id, every
+                                             ship ware_id that can equip it
+                                             (reverse of GET
+                                             /api/ships/{id}/groups) -- backs
+                                             the Modifications Lab's own
+                                             per-row Chassis tab filter
   GET  /api/factions                      -- faction_id -> faction_name/
                                              faction_shortname for every
                                              real faction (factions table --
@@ -399,7 +429,15 @@ from pydantic import BaseModel
 
 from component_export import build_csv_zip, build_xlsx_zip
 from import_loadouts import build_saved_loadout_entry, parse_loadouts_xml
-from query_ship_components import query_ship_groups
+from query_ship_components import (
+    COMPONENT_TYPE_TABLES,
+    fetch_groups_bulk,
+    is_hostile_only_ware,
+    load_maker_races,
+    query_ship_groups,
+    ships_matching_ware,
+)
+from prebuilt_table_titles import PREBUILT_TABLE_KEYS, localize_prebuilt_tables
 from share_storage import get_share, put_share
 from summarize_production import (
     ABSOLUTE_MAX_DEPTH,
@@ -491,6 +529,10 @@ class Level1PartsRequest(BaseModel):
     lang: str = "en"
 
 
+class ShipGroupsBulkRequest(BaseModel):
+    ware_ids: list[str]
+
+
 class ImportLoadoutsRequest(BaseModel):
     # Exactly one of these two is expected -- `path` reads the file
     # server-side (the "path to a loadout file" case, e.g. pasting in
@@ -557,6 +599,25 @@ async def no_cache_api_responses(request: Request, call_next):
     return response
 
 
+# Same motivation as the middleware above, but for the "/" StaticFiles mount
+# near the bottom of this file (index.html, app.js, style.css, i18n/*.json,
+# vendor/*.js). With no Cache-Control header at all, browsers fall back to
+# heuristic caching and can keep serving a stale app.js/index.html for a long
+# time -- exactly what happened during one debugging session (confirmed via
+# `curl -I`, no header present) even across a hard refresh. "no-cache" forces
+# a conditional GET every time, so a new deploy is always picked up -- a
+# cheap 304 (StaticFiles already sets etag/last-modified) when nothing
+# changed, a fresh body when it did. The /images/... mount is deliberately
+# excluded: ship symbol PNGs are keyed by ware_id and effectively immutable,
+# so letting browsers cache those normally is fine and saves real bandwidth.
+@app.middleware("http")
+async def no_cache_static_responses(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/") and not request.url.path.startswith("/images/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/api/ships")
 def list_ships(lang: str = "en") -> list[dict]:
     """`lang` (default "en", the only language guaranteed correct today --
@@ -580,10 +641,12 @@ def list_ships(lang: str = "en") -> list[dict]:
     any fleet list ever renders.
 
     Also carries every other ships_base stat (hull/crew/traveldrivestability/
-    weapon_heat_modifier/shield_capacity_modifier/shield_rechargerate_modifier/
+    prestige/weapon_heat_modifier/shield_capacity_modifier/shield_rechargerate_modifier/
     shield_rechargedelay_modifier/missile_capacity/drone_capacity/
-    cargo_capacity/cargo_type/shields/engines/weapons/missile_launchers/
-    turret_<size>/bonus_<size>_weapons/shields_bonus_m/price_min/price_avg/
+    cargo_capacity/cargo_type/radar_range/region_damage_immune/
+    countermeasure_capacity/deployable_capacity/radar_cloak/
+    illegal_cargo_concealed/shields/engines/weapons/missile_launchers/
+    turret_<size>/bonus_<size>_weapons/shields_bonus_m/shield_bonus_groups/price_min/price_avg/
     price_max/production_time) plus a LEFT JOIN of every flight_model column
     (flight_model.ware_id is a real FK to ships_base.ware_id, a clean 1:1 --
     every ship has exactly one row) -- together these back the Component
@@ -596,6 +659,12 @@ def list_ships(lang: str = "en") -> list[dict]:
     capacity="..." rechargerate="..." rechargedelay="..."/></modifiers>
     block; absence there means an implicit, unmodified 1.0, not unknown, so
     every ship always has a real value for all four, never NULL.
+    radar_range/region_damage_immune/countermeasure_capacity/
+    deployable_capacity/radar_cloak/illegal_cargo_concealed exist for the
+    same equipment-mod-system reason as the four *_modifier columns above --
+    see generate_ships_table.py's own comments on each for what real data
+    (if any) backs it; most are a flat default (real per-ship data exists
+    for radar_range/region_damage_immune only, on a small handful of ships).
     turret_<size>/bonus_<size>_weapons are the two dynamically-
     named column families explained in generate_ships_table.py's
     write_ships_csv() -- only the sizes actually present across this
@@ -612,6 +681,7 @@ def list_ships(lang: str = "en") -> list[dict]:
                 ships_base.ware_id AS ware_id,
                 ships_base.size AS size,
                 ships_base.ship_type AS ship_type,
+                ships_base.prestige AS prestige,
                 ships_base.purpose AS purpose,
                 ships_base.owners AS owners,
                 ships_base.icon AS icon,
@@ -631,8 +701,15 @@ def list_ships(lang: str = "en") -> list[dict]:
                 ships_base.drone_capacity AS drone_capacity,
                 ships_base.cargo_capacity AS cargo_capacity,
                 ships_base.cargo_type AS cargo_type,
+                ships_base.radar_range AS radar_range,
+                ships_base.region_damage_immune AS region_damage_immune,
+                ships_base.countermeasure_capacity AS countermeasure_capacity,
+                ships_base.deployable_capacity AS deployable_capacity,
+                ships_base.radar_cloak AS radar_cloak,
+                ships_base.illegal_cargo_concealed AS illegal_cargo_concealed,
                 ships_base.shields AS shields,
                 ships_base.shields_bonus_m AS shields_bonus_m,
+                ships_base.shield_bonus_groups AS shield_bonus_groups,
                 ships_base.engines AS engines,
                 ships_base.weapons AS weapons,
                 ships_base.bonus_l_weapons AS bonus_l_weapons,
@@ -705,6 +782,38 @@ def ship_groups(identifier: str, lang: str = "en") -> dict:
     conn = get_connection()
     try:
         return query_ship_groups(conn, identifier, lang)
+    finally:
+        conn.close()
+
+
+# Lightweight bulk counterpart to the single-ship endpoint just above --
+# one query for every requested ship_id's own group_name/component_type/
+# slot_count, with no per-group `options` catalog lookup (query_ship_groups()'s
+# own matching_items() call, the expensive part -- this never backs a
+# picker UI, only "group mode" mock resolution's own need for group counts
+# and sizes, see app.js's chassisGroupsFor()/orderedChassisGroups()). A
+# Component Analyzer table with many rows calls this ONCE with every
+# distinct chassis ware_id it needs, instead of firing one GET .../groups
+# request per row.
+@app.post("/api/ships/groups_bulk")
+def ship_groups_bulk(request: ShipGroupsBulkRequest) -> dict:
+    conn = get_connection()
+    try:
+        groups_by_ship = fetch_groups_bulk(conn, request.ware_ids)
+        return {
+            ship_id: [
+                {
+                    "group_name": g["group_name"],
+                    "component_type": g["component_type"],
+                    "size": g["size"],
+                    "slot_count": g["slot_count"],
+                    "compatibility": g["equipment_compatibility_class"],
+                    "connection_names": g["connection_names"],
+                }
+                for g in groups
+            ]
+            for ship_id, groups in groups_by_ship.items()
+        }
     finally:
         conn.close()
 
@@ -794,7 +903,28 @@ def list_missiles(lang: str = "en") -> list[dict]:
                 missiles_base.physics_mass AS physics_mass,
                 missiles_base.lock_time AS lock_time,
                 missiles_base.lock_range AS lock_range,
-                missiles_base.compatibility AS compatibility
+                missiles_base.compatibility AS compatibility,
+                missiles_base.thrust_forward AS thrust_forward,
+                missiles_base.thrust_reverse AS thrust_reverse,
+                missiles_base.thrust_strafe AS thrust_strafe,
+                missiles_base.thrust_pitch AS thrust_pitch,
+                missiles_base.thrust_yaw AS thrust_yaw,
+                missiles_base.thrust_roll AS thrust_roll,
+                missiles_base.physics_drag_forward AS physics_drag_forward,
+                missiles_base.physics_drag_reverse AS physics_drag_reverse,
+                missiles_base.physics_drag_horizontal AS physics_drag_horizontal,
+                missiles_base.physics_drag_vertical AS physics_drag_vertical,
+                missiles_base.physics_drag_pitch AS physics_drag_pitch,
+                missiles_base.physics_drag_yaw AS physics_drag_yaw,
+                missiles_base.physics_drag_roll AS physics_drag_roll,
+                missiles_base.physics_inertia_pitch AS physics_inertia_pitch,
+                missiles_base.physics_inertia_yaw AS physics_inertia_yaw,
+                missiles_base.physics_inertia_roll AS physics_inertia_roll,
+                missiles_base.anomalous_range_multiplier AS anomalous_range_multiplier,
+                missiles_base.game_value_turn_rate AS game_value_turn_rate,
+                missiles_base.game_value_pitch_rate AS game_value_pitch_rate,
+                missiles_base.game_value_vertical_strafe AS game_value_vertical_strafe,
+                missiles_base.game_value_horizontal_strafe AS game_value_horizontal_strafe
             FROM missiles_base
             LEFT JOIN localized_strings
                 ON localized_strings.ware_id = missiles_base.ware_id AND localized_strings.lang_id = ?
@@ -1070,20 +1200,27 @@ def list_components(component_type: str, lang: str = "en") -> list[dict]:
         # thruster_class that type's own table has) -- backs the Component
         # Analyzer's per-type stat catalogs (app.js's ENGINE_STAT_DEFINITIONS/
         # SHIELD_STAT_DEFINITIONS/WEAPON_STAT_DEFINITIONS/TURRET_STAT_DEFINITIONS/
-        # THRUSTER_STAT_DEFINITIONS). No column-name collision with the
-        # explicitly-aliased ones below -- none of these five tables has its
-        # own "name"/"owners"/"production_method"/"price_*" column (those
-        # only live on equipment_wares_base, joined in separately).
+        # THRUSTER_STAT_DEFINITIONS). These five tables DO each carry their own
+        # "name" column now (primary_locale's own text, a denormalized copy of
+        # equipment_wares_base.name -- see generate_ships_table.py's own
+        # comment on turrets_base.name), which collides on column NAME with
+        # the COALESCE(...) AS name below once {spec["table"]}.* expands --
+        # deliberately listed FIRST so it wins: sqlite3.Row -> dict() keeps the
+        # FIRST occurrence of a repeated key (confirmed empirically, not
+        # Python's usual last-write-wins dict() behavior), so the live,
+        # per-viewer i18n name always shadows the table's own raw column here.
+        # "owners"/"production_method"/"price_*" have no such collision --
+        # those still only live on equipment_wares_base.
         rows = conn.execute(
             f"""
             SELECT
-                {spec["table"]}.*{bullets_select},
                 COALESCE(localized_strings.text, equipment_wares_base.name) AS name,
                 equipment_wares_base.owners AS owners,
                 equipment_wares_base.production_method AS production_method,
                 equipment_wares_base.price_min AS price_min,
                 equipment_wares_base.price_avg AS price_avg,
-                equipment_wares_base.price_max AS price_max
+                equipment_wares_base.price_max AS price_max,
+                {spec["table"]}.*{bullets_select}
             FROM {spec["table"]}
             JOIN equipment_wares_base ON equipment_wares_base.ware_id = {spec["table"]}.ware_id
             LEFT JOIN localized_strings
@@ -1112,6 +1249,199 @@ def list_components(component_type: str, lang: str = "en") -> list[dict]:
             component["maker_races"] = maker_races_by_ware_id.get(component["ware_id"], [])
 
         return components
+    finally:
+        conn.close()
+
+
+# Every real in-game equipment mod (loot/craftable, applied via the Modify
+# Equipment screen) PLUS every synthetic ship-chassis "Integrated Changes"
+# mod (is_chassis_mod=1 -- see generate_ships_table.py's
+# parse_chassis_integrated_mods() docstring), each with its own nested
+# "stats" array (equipment_mod_stats rows for that mod_id) -- see that
+# table's own schema comment in ships_tables.sql for what each stat field
+# means (is_additional_stat/component_type/target_stat/min_value/
+# max_value/chance/weight).
+#
+# This is a small, fixed dataset (132 mods, 267 stat rows as of this
+# writing -- a few tens of KB even uncompressed) meant to be fetched once
+# and cached client-side, the same "load everything up front, filter/join
+# in JS" pattern as loadShipTypeNames()/loadCompatibilityTypeNames()/etc,
+# not paginated or filtered server-side.
+#
+# mod_name is real, already-localized text for a real mod (via
+# localized_strings, same COALESCE pattern as every other named lookup
+# table) but always English for a chassis mod -- there's no real {page,id}
+# ref for its own invented "<ship> Integrated Changes" phrase to resolve
+# through that mechanism (see parse_chassis_integrated_mods()'s own
+# docstring); the frontend needs the is_chassis_mod flag to know to
+# reconstruct that name via the app's own i18next
+# "equipment_mods.chassis_integrated_changes" key instead of trusting
+# mod_name verbatim for every language.
+#
+# The actual target_stat -> real column mapping (which table/column each
+# stat row's own target_stat changes) is NOT served here -- it's a
+# separate, hand-maintained static file, src/static/equipment_mod_target_mappings.json,
+# fetched directly by the client the same way src/static/i18n/*.json
+# already is (see this module's own StaticFiles mount) rather than an API
+# endpoint, since it isn't derived from anything in the database at all.
+#
+# ship_icon is that originating ship's own ships_base.icon (e.g.
+# "ship_s_fighter_01" for the Asp, "ship_xl_destroyer_01" for the
+# Rattlesnake) for a chassis mod, so the Modifications Lab's own Chassis
+# tab can show each row with that real ship's own class symbol via
+# app.js's shipIconUrl() -- null for every real (non-chassis) mod, which
+# has no owning ship at all.
+#
+# price_min/price_avg/price_max and `costs` (that mod's own real crafting
+# material list -- one {ware_id, ware_name, amount} per row from
+# equipment_mod_costs, see that table's own schema comment -- ware_name is
+# already resolved to this request's own `lang` here, same COALESCE-onto-
+# localized_strings pattern mod_name itself uses above) are both null/empty
+# for a chassis mod, which is no real ware at all and so has no cost of any
+# kind -- the Mod Lab's own cost display skips chassis mods entirely rather
+# than showing an empty section, see buildModLabModDisplay() in app.js.
+@app.get("/api/equipment_mods")
+def list_equipment_mods(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        mods = conn.execute(
+            """
+            SELECT
+                equipment_mods_base.mod_id AS mod_id,
+                COALESCE(localized_strings.text, equipment_mods_base.mod_name) AS mod_name,
+                equipment_mods_base.mod_level AS mod_level,
+                equipment_mods_base.mod_components AS mod_components,
+                equipment_mods_base.additional_stats_count AS additional_stats_count,
+                equipment_mods_base.is_chassis_mod AS is_chassis_mod,
+                equipment_mods_base.ship_icon AS ship_icon,
+                equipment_mods_base.price_min AS price_min,
+                equipment_mods_base.price_avg AS price_avg,
+                equipment_mods_base.price_max AS price_max
+            FROM equipment_mods_base
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = equipment_mods_base.mod_id AND localized_strings.lang_id = ?
+            ORDER BY mod_name
+            """,
+            (lang,),
+        ).fetchall()
+        mods = [dict(row) for row in mods]
+
+        stat_rows = conn.execute(
+            """
+            SELECT mod_id, is_additional_stat, component_type, target_stat, min_value, max_value, chance, weight
+            FROM equipment_mod_stats
+            ORDER BY mod_id, is_additional_stat, target_stat
+            """
+        ).fetchall()
+        stats_by_mod_id: dict[str, list[dict]] = {}
+        for row in stat_rows:
+            row = dict(row)
+            stats_by_mod_id.setdefault(row.pop("mod_id"), []).append(row)
+        for mod in mods:
+            mod["stats"] = stats_by_mod_id.get(mod["mod_id"], [])
+
+        cost_rows = conn.execute(
+            """
+            SELECT
+                equipment_mod_costs.mod_id AS mod_id,
+                equipment_mod_costs.ware_id AS ware_id,
+                COALESCE(localized_strings.text, equipment_mod_costs.ware_name) AS ware_name,
+                equipment_mod_costs.amount AS amount
+            FROM equipment_mod_costs
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = equipment_mod_costs.ware_id AND localized_strings.lang_id = ?
+            ORDER BY equipment_mod_costs.mod_id, equipment_mod_costs.ware_id
+            """,
+            (lang,),
+        ).fetchall()
+        costs_by_mod_id: dict[str, list[dict]] = {}
+        for row in cost_rows:
+            row = dict(row)
+            costs_by_mod_id.setdefault(row.pop("mod_id"), []).append(row)
+        for mod in mods:
+            mod["costs"] = costs_by_mod_id.get(mod["mod_id"], [])
+
+        return mods
+    finally:
+        conn.close()
+
+
+# Which ships can actually equip a given weapon/turret/engine/thruster/shield
+# ware -- the reverse of GET /api/ships/{id}/groups' own forward direction
+# (given a ship, which equipment fits; see query_ship_groups()/matching_items()
+# in query_ship_components.py). Backs the Modifications Lab's own "specific
+# component selector" (a per-row launcher button, one specific ware) so its
+# Chassis tab can show only the ship-integrated mods belonging to ships that
+# could actually mount this exact ware -- ships_matching_ware() does the
+# actual tag-subset-test work; see its own docstring, including why an L/XL
+# ship's own bonus M shield groups are picked up with no special casing, and
+# why an ordinary vs. hostile-owned (Xenon/Kha'ak) ware's matches are
+# filtered differently.
+#
+# component_type is restricted to the mod system's own vocabulary
+# (weapon/turret/engine/thruster/shield) rather than every
+# COMPONENT_TYPE_TABLES key -- "software" has no size/compatibility columns
+# at all (a different matching scheme entirely, see matching_items()'s own
+# docstring) and "missile_launcher" has no MOD_LAB_COMPONENT_TYPE_MAP entry
+# client-side (no equipmentmods.xml category targets it), so neither is a
+# real caller of this endpoint; rejecting them outright here (empty result,
+# not a 500) keeps that contract explicit instead of relying on a caller to
+# never pass them.
+SHIP_COMPONENT_COMPATIBILITY_TYPES = {"weapon", "turret", "engine", "thruster", "shield"}
+
+
+@app.get("/api/ship_component_compatibility")
+def list_ship_component_compatibility(ware_id: str, component_type: str) -> dict:
+    conn = get_connection()
+    try:
+        if component_type not in SHIP_COMPONENT_COMPATIBILITY_TYPES:
+            return {"ship_ware_ids": []}
+        table = COMPONENT_TYPE_TABLES[component_type]
+        row = conn.execute(f"SELECT size, compatibility FROM {table} WHERE ware_id = ?", (ware_id,)).fetchone()
+        if row is None:
+            return {"ship_ware_ids": []}
+        # A canonical ware can have more than one real compatibility tag
+        # set -- its own, plus every equipment_ware_aliases row targeting
+        # it (a compatibility-variant duplicate collapsed at generate time,
+        # see that table's own schema comment) -- ships_matching_ware()
+        # needs all of them, not just the one left on this row, or a ship
+        # that only satisfies the alias side's own tier would be missed.
+        alias_rows = conn.execute(
+            "SELECT compatibility FROM equipment_ware_aliases WHERE target_ware_id = ?", (ware_id,)
+        ).fetchall()
+        compatibilities = [row["compatibility"], *(r["compatibility"] for r in alias_rows)]
+        maker_races = load_maker_races(conn)
+        ware_is_hostile = is_hostile_only_ware(ware_id, maker_races)
+        ship_ware_ids = ships_matching_ware(
+            conn, component_type, row["size"], compatibilities, maker_races, ware_is_hostile
+        )
+        return {"ship_ware_ids": ship_ware_ids}
+    finally:
+        conn.close()
+
+
+# mod_level (1/2/3) -> real display name ("Basic Quality"/"Enhanced Quality"/"Exceptional Quality")
+# -- backs the Modifications Lab's own tab labels. "?lang=de" works the same way as GET
+# /api/ship_types' own -- see parse_mod_qualities()/MOD_QUALITY_NAME_REF's own docstrings in
+# generate_ships_table.py for where the real refs (page 20110) come from.
+@app.get("/api/mod_qualities")
+def list_mod_qualities(lang: str = "en") -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                mod_qualities.mod_level AS mod_level,
+                COALESCE(localized_strings.text, mod_qualities.mod_quality_name) AS mod_quality_name
+            FROM mod_qualities
+            LEFT JOIN localized_strings
+                ON localized_strings.ware_id = 'mod_quality_' || mod_qualities.mod_level
+                    AND localized_strings.lang_id = ?
+            ORDER BY mod_level
+            """,
+            (lang,),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
@@ -1734,10 +2064,16 @@ def create_share_endpoint(section: ShareSection, request: ShareCreateRequest) ->
 
 
 @app.get("/api/share/{section}/{share_uuid}")
-def read_share_endpoint(section: ShareSection, share_uuid: str) -> dict:
+def read_share_endpoint(section: ShareSection, share_uuid: str, lang: str = "en") -> dict:
     data = get_share(section, share_uuid)
     if data is None:
         return {"error": "This share link doesn't exist (it may be mistyped, or the share may have been removed)."}
+    # Only ever touches one of the "Load Prebuilt Tables" band's own known
+    # keys (s_ships, m_weapons, missiles, ...) -- see prebuilt_table_titles.py's
+    # own docstring for why a real user's own shared table (always a random
+    # uuid4, never one of these short readable keys) is never affected.
+    if section == "component_analyzer_tables" and share_uuid in PREBUILT_TABLE_KEYS:
+        data = localize_prebuilt_tables(data, share_uuid, lang)
     return {"data": data}
 
 
@@ -1756,6 +2092,15 @@ class ComponentAnalyzerExportSheet(BaseModel):
 class ComponentAnalyzerExportRequest(BaseModel):
     format: Literal["csv", "xlsx"]
     sheets: list[ComponentAnalyzerExportSheet]
+    # Pre-serialized JSON string (see app.js's own buildComponentAnalyzerModsPayload()),
+    # not a modeled field -- this endpoint has no opinion on the Mod Lab's
+    # own data shape, same "generic blob mover" spirit component_export.py
+    # already documents for `sheets`' own row values. Written verbatim into
+    # the zip as mods.json when present -- the csv/xlsx sheets themselves
+    # only ever contain resolved numbers (see gatherComponentAnalyzerExportSheets()
+    # in app.js), so this is the only place a mod actually applied to a
+    # table survives that export at all.
+    mods_json: str | None = None
 
 
 # The Component Analyzer's own "Export" modal's csv/xlsx paths (its json
@@ -1766,10 +2111,10 @@ class ComponentAnalyzerExportRequest(BaseModel):
 def export_component_analyzer(request: ComponentAnalyzerExportRequest) -> Response:
     sheets = [sheet.model_dump() for sheet in request.sheets]
     if request.format == "csv":
-        content = build_csv_zip(sheets)
+        content = build_csv_zip(sheets, mods_json=request.mods_json)
         filename = "component_analyzer_export_csv.zip"
     else:
-        content = build_xlsx_zip(sheets)
+        content = build_xlsx_zip(sheets, mods_json=request.mods_json)
         filename = "component_analyzer_export_xlsx.zip"
     return Response(
         content=content,
