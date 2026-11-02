@@ -16,6 +16,8 @@ Reads:
     docstring in extract_game_data.py)
   - data/images/nav_icons_raw/mapob_piratestation.gz (the Proving Grounds
     tab's own icon -- see nav_icon_jobs()'s own docstring)
+  - data/images/nav_icons_raw/mapob_shiptech.gz (the User Guide tab's own
+    icon -- see nav_icon_jobs()'s own docstring)
   - data/images/nav_icons_raw/mapob_constructionsite.gz (the Proving
     Grounds page's own inline "under construction" glyph -- see
     nav_icon_jobs()'s own docstring)
@@ -27,7 +29,7 @@ Reads:
     files)
 
 Writes, per station type ("fleet_planner"/"cost_analysis"/"about"/
-"component_analyzer"/"proving_grounds"):
+"component_analyzer"/"proving_grounds"/"user_guide"):
   - data/images/nav_icons/<name>.png            (normal, unselected page)
   - data/images/nav_icons/<name>_highlight.png   (that page currently selected)
 
@@ -144,6 +146,7 @@ ICON_MAP = {
     "mapob_equipmentdock": "about",
     "mapob_hightech": "component_analyzer",
     "mapob_piratestation": "proving_grounds",
+    "mapob_shiptech": "user_guide",
 }
 
 # The Proving Grounds page's own inline "under construction" glyph -- same

@@ -116,8 +116,16 @@ function t(key, options) {
 }
 
 function applyTranslations(root = document) {
-  for (const el of root.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  // data-i18n-html runs FIRST, not last -- a data-i18n-html value can itself
+  // contain nested elements carrying their own data-i18n (see the User
+  // Guide's inline stat-tag badges, src/static/index.html) -- those only
+  // exist in the live DOM once this pass's own innerHTML assignment has run,
+  // so the data-i18n pass right after is what actually picks them up. Doing
+  // it the other way around (data-i18n first) would translate once, then
+  // immediately discard that work the moment the surrounding block's own
+  // innerHTML gets overwritten.
   for (const el of root.querySelectorAll("[data-i18n-html]")) el.innerHTML = t(el.dataset.i18nHtml);
+  for (const el of root.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
   for (const el of root.querySelectorAll("[data-i18n-placeholder]")) {
     el.setAttribute("placeholder", t(el.dataset.i18nPlaceholder));
   }

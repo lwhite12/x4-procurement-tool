@@ -45,6 +45,12 @@
    change tabs" symptom this fixes. */
 html {
   scrollbar-gutter: stable;
+  /* Smooths any anchor-link/#hash jump (e.g. the User Guide's own ToC
+     links, style.css's .user-guide-toc-*-link) into a scroll instead of an
+     instant jump -- only affects browser-initiated/CSS-driven scrolling
+     like this, never ordinary mouse-wheel/trackpad scrolling, which stays
+     exactly as responsive as before. */
+  scroll-behavior: smooth;
 }
 
 body {
@@ -419,6 +425,23 @@ body {
 
 .fleet-list-tab-btn.active {
   background: var(--accent-blue);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+/* Cost Analyzer's own "this fleet list is focused for comparison" look
+   (see buildFleetTabButton()'s own isSelected/selectedClassName comment,
+   user call 2026-11-01) -- deliberately NO background of its own (unlike
+   .active just above): the tab sits on top of its own <th>, which already
+   gets the comparison's own highlight color (.ware-cost-list-focused-column,
+   bg-panel-hover -- see renderWareCostListHead()) the instant it's
+   selected, so leaving this transparent just lets that same tint show
+   through underneath rather than drawing a second, differently-colored box
+   on top of it. User call (2026-11-01, follow-up): an earlier version gave
+   this its own solid accent-blue-bright fill -- reads as its own distinct
+   "box" around the name/icon, which the user explicitly didn't want; the
+   column highlight alone is the only color this state should ever add. */
+.fleet-list-tab-btn.cost-analyzer-selected {
   color: var(--text-primary);
   cursor: default;
 }
@@ -902,37 +925,30 @@ th, td {
   color: var(--text-primary);
 }
 
-/* Sets/clears wareCostListFocusedFleetIndex (see
-   renderWareCostListHead()/setWareCostListFocusedFleet() in app.js) --
-   deliberately its own control, separate from the .fleet-list-tab-btn
-   above it (which still only ever sets activeFleetIndex). Same base look
-   as .ware-cost-list-build-focus-btn, its own accent color when this
-   column IS the focused one (text set directly in app.js, not via a
-   `.focused` modifier class, since the label itself already changes). */
-.ware-cost-list-focus-btn {
-  display: block;
-  margin-top: 0.3rem;
-  width: 100%;
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  background: var(--bg-panel);
-  color: var(--text-muted);
-  border-color: var(--border-blue);
-}
-
-.ware-cost-list-focus-btn:hover {
-  background: var(--bg-panel-hover);
-  color: var(--text-primary);
-}
-
 /* The name-row <th> of whichever column is currently focused -- a
    distinctly different look from .fleet-list-tab-btn.active's own blue
    fill (that's "this fleet is active elsewhere in the app", a different
    concept -- see wareCostListFocusedFleetIndex's own comment), so the two
-   never look like the same thing when they happen to both be true. */
+   never look like the same thing when they happen to both be true.
+   User call (2026-11-01): the separate "Focus"/"Focused" button this used
+   to sit next to is gone -- clicking the fleet tab itself (name/icon) now
+   toggles focus directly (see renderWareCostListHead()'s own comment), and
+   the highlight now covers the WHOLE column, not just this header cell --
+   see .ware-cost-list-focused-column-cell just below for the rest of it. */
 .ware-cost-list-focused-column {
   background: var(--bg-panel-hover);
   border-bottom: 2px solid var(--accent-blue-bright) !important;
+}
+
+/* Every OTHER cell (the "Amount" sub-header, and every data <td> down the
+   column -- see appendComparisonCell()'s own fleetIndex parameter) in a
+   focused column -- same background tint as .ware-cost-list-focused-column
+   above, just without its header-only accent border-bottom (that one stays
+   reserved for marking the top of the column, not repeated down every row,
+   which would read as stripes rather than one continuous highlighted
+   column). */
+.ware-cost-list-focused-column-cell {
+  background: var(--bg-panel-hover);
 }
 
 /* Vertical divider between adjacent columns -- excluded from collapsible
@@ -2044,14 +2060,25 @@ input[type="checkbox"] {
 
 /* One ship column's own header -- chassis icon on top, name underneath,
    same "like the ships displayed in the Cost Analyzer" stacked layout the
-   user asked for, plus a small remove button for that one column. */
+   user asked for, plus a small remove button for that one column.
+   white-space stays nowrap (the #ship-trials-list th/td default) rather
+   than allowing the name to wrap -- User call (2026-11-01): once this
+   column's own width: 1% (see ship-trial-ship-col's own CSS comment) was
+   added so it stops stretching to fill leftover table width, allowing
+   wrap here meant the browser computed this column's required width from
+   the WRAPPED (minimum-content) size of the name instead of its natural
+   single-line size -- correct for a column that's allowed to wrap, but
+   this one visually never actually wants to (the stacked icon/name/
+   buttons layout already keeps even a Trial with many ships reasonably
+   narrow per column), so the result was every ship's own name cramming
+   down onto 2+ lines even when there was plenty of real width to spare,
+   not just for genuinely long names. */
 .ship-trial-column-header {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
   text-align: center;
-  white-space: normal !important;
 }
 
 /* Icon + name + edited badge, separate from .ship-trial-column-actions
@@ -2634,13 +2661,30 @@ input[type="checkbox"] {
 #component-analyzer-tables table,
 #ship-trials-list table {
   width: max-content;
-  min-width: 100%;
   /* separate, not collapse -- collapsed borders break position: sticky on
      <th>/<td> in Chromium (same fix as #equipment-picker-table/
      #component-set-picker-table; needed here for the frozen Name column
      below). */
   border-collapse: separate;
   border-spacing: 0;
+}
+
+/* min-width: 100% is back (see ship-trial-row-filler further down for
+   why it's safe again) -- User call (2026-11-01, same day): with it
+   removed entirely (this file's own immediately-prior fix), a Trial with
+   few ships/short stat values shrank the WHOLE table down to its own
+   content width, leaving a visible gap of plain card background between
+   the table's own right edge and the card's, with no row background to
+   fill it. Restoring min-width: 100% here, now that every REAL column
+   (ship-trial-stats-col and ship-trial-ship-col both) is pinned to
+   width: 1%, means 100%-minus-real-content's leftover width has nowhere
+   left to go but the one column that isn't pinned: the trailing filler.
+   Real columns stay exactly as narrow as their own content either way
+   (unlike before the prior fix, which is still what stops them
+   stretching) -- only the invisible filler at the end absorbs the slack
+   now, instead of nothing claiming it at all. */
+#ship-trials-list table {
+  min-width: 100%;
 }
 
 #component-analyzer-tables th,
@@ -2672,21 +2716,56 @@ input[type="checkbox"] {
   background: var(--bg-panel);
 }
 
-/* Fixed width for the Stats (row-label) column, so it's the same size in
-   every Trial regardless of which stats happen to be selected in it --
-   without this it auto-sizes per table to whatever its own longest
-   selected stat label happens to be (see #ship-trials-list th/td's own
-   white-space: nowrap), so switching between Trials visibly shifted this
-   column around. Overrides that nowrap just for this column so a label
-   too long for the fixed width wraps onto a second line instead of
-   forcing the column wider. */
+/* Stats (row-label) column -- relies on #ship-trials-list th/td's own
+   default white-space: nowrap, auto-sizing to whichever selected stat
+   label in THIS Trial happens to be longest. User call (2026-11-01):
+   previously fixed at a flat 14rem with white-space: normal so a too-long
+   label wrapped onto a second line instead of widening the column -- but a
+   wrapped label's own row then needed MORE height than every other row's
+   shared placeholder/diff line accounts for (see
+   appendStatComparisonDiff()'s own comment), so a Trial with a long stat
+   name in it always had at least one visibly taller row. Letting the
+   column auto-size instead means no label ever wraps, so every row in a
+   Trial is now uniformly the same height -- the tradeoff is the column's
+   own width can now differ between Trials with different stats selected,
+   which no longer matters once it can't affect row height.
+   width: 1% is the standard "shrink this nowrap column to its own content,
+   hand any leftover width to the OTHER columns instead" trick -- without
+   it, #ship-trials-list table's own `min-width: 100%` (so a Trial with
+   only 1-2 ship columns doesn't look comically narrow) dumped every bit of
+   that leftover width into this now-unconstrained column instead of the
+   actual ship value columns, which is obviously wrong once there's more
+   than a couple of ships and a short stat label to leave it mostly empty
+   next to.
+   Each ship's own value column (ship-trial-ship-col) gets the same
+   treatment, for the same reason (see buildShipTrialBody()'s own comment
+   in app.js) -- otherwise min-width: 100%'s leftover width would just
+   move one column group over and split across every ship column instead,
+   rather than being soaked up by ship-trial-row-filler below. */
 #ship-trials-list th.ship-trial-stats-col,
-#ship-trials-list td.ship-trial-stats-col {
-  width: 14rem;
-  min-width: 14rem;
-  max-width: 14rem;
-  white-space: normal;
+#ship-trials-list td.ship-trial-stats-col,
+#ship-trials-list th.ship-trial-ship-col,
+#ship-trials-list td.ship-trial-ship-col {
+  width: 1%;
 }
+
+/* Trailing, always-empty column at the end of every row (see
+   buildShipTrialBody()'s own comment in app.js) -- the one column left
+   unpinned, so it's the one that receives 100%-minus-real-content's
+   leftover width once the table's own min-width: 100% forces the table
+   wider than its real columns need. Needs no background rule of its own
+   at all: the generic `th, td` rule up top already paints every cell
+   app-wide (including this one, header or body) with --bg-section, on
+   purpose at low specificity so it stays out of a cell's way everywhere
+   that actually wants something else (e.g. the sticky Stats column's own
+   `--bg-panel` a bit further up, so it reads as a frozen pane rather than
+   blending into the scrolling row band). This filler cell's only real job
+   is to simply EXIST as a real table cell, so that baseline rule has
+   something to paint all the way out to the table's forced full width --
+   user call (2026-11-01): without it, a narrow table (few ships/short
+   stat values) left the gap between the table's own right edge and the
+   card's showing plain card background instead, looking like unfilled
+   empty space. */
 
 .component-analyzer-empty-cell {
   color: var(--text-muted);
@@ -2780,10 +2859,19 @@ input[type="checkbox"] {
 /* Each row's own Name cell -- name text plus a half-size Modifications Lab
    launcher (see .component-analyzer-mod-lab-btn-row below), same
    push-to-the-far-end flex layout as the header's own
-   .component-analyzer-stat-header row. */
+   .component-analyzer-stat-header row. align-items: flex-start (not the
+   more typical center) -- user call, found live via screenshot: every
+   OTHER cell in these tables is a plain <td> that top-aligns its text by
+   default, but this one flex-centered its own text instead, so on any row
+   taller than this cell's own single line (Ship Trials' own placeholder/
+   diff line being the common case, see appendStatComparisonDiff()), the
+   name text visibly sat lower than its row's own value text, with empty
+   space ABOVE it instead of below -- most noticeable on a table's very
+   first row, where there's no adjacent row above to make the mismatch
+   look like part of a consistent pattern. */
 .component-analyzer-name-cell {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.35rem;
 }
@@ -3439,6 +3527,19 @@ input[type="checkbox"] {
   color: #ff8000;
   border-color: #ff8000;
   background: rgba(255, 214, 179, 0.5);
+}
+
+/* Red -- a generated "production" stat (see buildGeneratedProductionCatalog()
+   in app.js), user call (2026-11-01): a new axis of its own, not another
+   step in the fundamental/pre-derived/derived tier progression those
+   colors already read as (see .stat-tag-banner-pre-derived's own comment),
+   so it gets a color none of those use rather than reusing/extending that
+   vocabulary. Matches --danger exactly -- intentional, red already means
+   "cost" everywhere else credits/prices show as a negative in this app. */
+.stat-tag-banner-production {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+  background: rgba(255, 179, 179, 0.5);
 }
 
 .stat-select-selected-panel {
@@ -4207,4 +4308,144 @@ input[type="checkbox"] {
   min-width: 4.5rem;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- User Guide page (user call, 2026-11-01) ----
+   Two-column layout -- real content on the left, a table of contents on
+   the right that's `position: sticky` (travels with scrolling, stops at
+   `top`) rather than fixed, so it still scrolls away naturally with the
+   rest of the page on a short viewport instead of ever overlapping the
+   footer/next section. initUserGuideScrollSpy() (app.js) toggles `.active`
+   on whichever subsection link's own target is currently in view. */
+.user-guide-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+}
+
+.user-guide-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-guide-toc {
+  flex-shrink: 0;
+  width: 15rem;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: var(--bg-panel);
+}
+
+/* Narrower viewports (anything that can't comfortably fit a 15rem rail
+   alongside real reading width) drop the ToC back into the normal document
+   flow above the content instead of squeezing both into too little space
+   -- same breakpoint reasoning as the rest of this stylesheet's own
+   mobile-ish fallbacks. */
+@media (max-width: 900px) {
+  .user-guide-layout {
+    flex-direction: column;
+  }
+
+  .user-guide-toc {
+    position: static;
+    width: 100%;
+    max-height: none;
+  }
+}
+
+.user-guide-toc-title {
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.user-guide-toc-section + .user-guide-toc-section {
+  margin-top: 0.6rem;
+}
+
+.user-guide-toc-section-link {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+  padding: 0.15rem 0;
+  border-left: 2px solid transparent;
+}
+
+.user-guide-toc-subsection-link {
+  display: block;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.2rem 0 0.2rem 0.6rem;
+  font-size: 0.85rem;
+  border-left: 2px solid transparent;
+}
+
+.user-guide-toc-section-link:hover,
+.user-guide-toc-subsection-link:hover {
+  color: var(--accent-blue-bright);
+}
+
+/* Whichever heading (h2 section or h3 subsection) is currently nearest the
+   top of the viewport -- see initUserGuideScrollSpy() in app.js -- same
+   accent-blue-bright already used for a column highlight/comparison focus
+   elsewhere in this app, for the same "this one is the current one"
+   meaning. Both link levels share this rule since scroll-spy can land on
+   either (an H2's own intro text counts as "in" that section too, before
+   its first H3 is reached). */
+.user-guide-toc-section-link.active,
+.user-guide-toc-subsection-link.active {
+  color: var(--accent-blue-bright);
+  border-left-color: var(--accent-blue-bright);
+}
+
+/* scroll-margin-top keeps a heading from landing flush against the
+   viewport's own top edge when scrolled to via a ToC link or #hash --
+   same reasoning .ware-cost-list-collapsible's own sticky header offsets
+   already account for elsewhere, just via scroll-margin instead of
+   padding since this page has no sticky header of its own to clear. */
+.user-guide-content h2,
+.user-guide-content h3 {
+  scroll-margin-top: 1rem;
+}
+
+.user-guide-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.user-guide-nav-icon {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+/* A real site icon/badge dropped inline into a sentence (the Mod Lab
+   button, a mod-quality circle, ...) -- sized to sit on the text baseline
+   rather than its own natural (usually larger, meant for a button) size. */
+.user-guide-inline-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: text-bottom;
+  margin: 0 0.15rem;
+}
+
+/* A stat-tag-banner (see app.js's own STAT_TAG_LABEL_KEYS) dropped inline
+   into guide text reads oddly at its usual baseline alignment next to
+   lowercase prose -- nudged up slightly so its all-caps text optically
+   centers against the surrounding line instead of sitting low. */
+.user-guide-content .stat-tag-banner {
+  vertical-align: middle;
+  margin: 0 0.1rem;
 }

@@ -15,6 +15,8 @@ it.
 
 ## [Unreleased] - Development
 
+## [0.7.0] - 2026-11-02 - Production
+
 ### Added
 
 - **Statistics Lab**: author your own custom stats right inside the Component Analyzer -- formulas
@@ -51,6 +53,14 @@ it.
   mod is later weakened or removed.
 - Static site assets now always revalidate with the server instead of being cached indefinitely, so
   a deployed update is visible without a hard refresh.
+- **User Guide** (new top-level page): a full written guide covering every page and feature, with
+  real site icons/stat-tag badges injected directly into the text, and a sticky table of contents
+  that tracks scroll position as you read.
+- New **Production** stat group: per-build-method raw-material costs (e.g. "Universal - Energy
+  Cells"), generated directly from the game's own production-ware data rather than hand-maintained,
+  shown as whole numbers with their own red "Production" stat tag.
+- Proving Grounds: new Trials now start pre-populated with a sensible default stat set instead of an
+  empty table.
 
 ### Changed
 
@@ -60,6 +70,16 @@ it.
 - Shield (MJ)/Recharge Rate/Recharge Delay are no longer a naive sum across every mounted shield --
   rewritten to match how the game itself actually computes them (the main shield slot alone, plus a
   real per-hardpoint-group average for bonus shields), verified against real in-game loadouts.
+- Cost Analyzer: comparing fleets no longer uses a separate "Focus" button -- click a fleet's own
+  name/icon in the comparison header to set it as the baseline (click again to clear it), the same
+  single interaction everywhere else in the app. This is completely independent of the Fleet
+  Planner's own active fleet -- comparing fleets in the Cost Analyzer never changes what the Ship
+  Builder is editing.
+- Ship picker list: ships are now grouped by chassis -- the same underlying hull model shared across
+  races (e.g. every race's destroyer built on the same hull) sorts together -- and sized smallest to
+  largest (S, M, L, XL) instead of largest to smallest.
+- About page: "Future Plans" is now a short pointer to the GitHub issues page instead of a
+  hand-maintained list, since the roadmap had grown too large to keep duplicated in two places.
 
 ### Fixed
 
@@ -68,10 +88,17 @@ it.
   happened to be opened elsewhere first.
 - A pure area-damage weapon (the Paranid Blast Mortar/Flak family) no longer silently breaks its
   own Hull/Shield Damage per Shot calculation.
+- Exporting loadouts back to the game used to silently drop station modules and any ship loadout
+  that failed to parse -- both are now preserved in the exported file.
+- Some equipment that's a real, distinct item but marked internally as an "alias" of another ware
+  (a handful of turrets/shields) could be wrongly treated as incompatible in mocks, the Statistics
+  Lab, and Ship Trials. Alias resolution now matches how the rest of the app already looks up wares.
+- Proving Grounds: a Trial's stat table could show its "Stats" label column visibly out of alignment
+  with its value columns, row by row.
 - A weapon with no heat generation at all now correctly contributes its full burst DPS to a ship's
   Sustained DPS total instead of being dropped.
 
-## [0.6.0] - 2026-09-06 - Production
+## [0.6.0] - 2026-09-06
 
 ### Added
 

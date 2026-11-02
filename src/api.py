@@ -1390,6 +1390,65 @@ def list_equipment_mods(lang: str = "en") -> list[dict]:
 SHIP_COMPONENT_COMPATIBILITY_TYPES = {"weapon", "turret", "engine", "thruster", "shield"}
 
 
+# Every real alias -> canonical-ware mapping, flat and un-filtered (a few
+# dozen rows total -- see equipment_ware_aliases' own schema comment in
+# ships_tables.sql) -- lets the frontend resolve an alias ware_id it
+# encounters from a source OUTSIDE its own picker (a real player-saved
+# loadout, or a mock/loadout persisted before this resolution existed) back
+# to the one ware_id this app's own catalogs (GET /api/components/<type>)
+# actually carry a row for, before looking anything up by it. No lang
+# parameter -- these are bare ware_ids, nothing to localize.
+@app.get("/api/equipment_ware_aliases")
+def list_equipment_ware_aliases() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT alias_ware_id, target_ware_id FROM equipment_ware_aliases").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# The Component Analyzer's own "Production" stat group (user call,
+# 2026-11-01) -- catalog metadata for which generated stats exist at all,
+# one row per distinct (component_type, build_method, raw ware) triple;
+# see production_stat_definitions' own schema comment in ships_tables.sql
+# and generate_ships_table.py's build_production_stat_rows(). Flat and
+# un-filtered -- ~200 rows total, loaded once at bootstrap (app.js) the
+# same way equipment_ware_aliases above is. No lang parameter: build_method
+# is resolved through the existing GET /api/build_method_names (already
+# loaded at bootstrap), and ware through GET /api/wares (ditto) -- both
+# already real localized display-name lookups this app has, so this
+# endpoint only ever needs to hand back bare ids.
+@app.get("/api/production_stat_definitions")
+def list_production_stat_definitions() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT component_type, stat_id, build_method, ware FROM production_stat_definitions").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+# This generated stat group's own actual per-component values -- one row
+# per production_wares row, already reshaped/rounded at generation time
+# (see production_stats' own schema comment in ships_tables.sql). The
+# frontend merges these directly onto each component's own row object
+# (loadShips()/fetchComponentList() in app.js) keyed by stat_id, so
+# resolveStatValue()'s existing row[statDef.key] lookup picks them up with
+# no changes of its own -- same reasoning as GET /api/equipment_ware_aliases
+# above, just for values instead of alias ids. ~3,300 rows -- small enough
+# to load whole, same as every other bootstrap-time bulk fetch this app
+# already does.
+@app.get("/api/production_stats")
+def list_production_stats() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT ware_id, stat_id, value FROM production_stats").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 @app.get("/api/ship_component_compatibility")
 def list_ship_component_compatibility(ware_id: str, component_type: str) -> dict:
     conn = get_connection()

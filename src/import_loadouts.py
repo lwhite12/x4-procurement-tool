@@ -34,8 +34,18 @@ project's own investigation notes)
 revision>, each either a real ship (macro resolves to a real ships_base
 ware_id) or a *station module* (macro like "defence_bor_tube_01_macro",
 "storage_par_l_container_01_macro" -- a turret/shield/storage module, not a
-ship at all). Station loadouts are always skipped entirely -- see
-classify_loadout().
+ship at all). Station loadouts are never loaded into this app's own Ship
+Builder -- see classify_loadout() -- but, like any ship loadout that fails
+to parse (match_grouped()/match_ungrouped()/etc. raising), their own
+original <loadout> element is still kept verbatim in the result's
+extra_raw_xml (user call, 2026-11-01: "Export Loadouts" re-emits only
+`ships[].rawXml` by itself, so without this, re-exporting an imported file
+would silently drop every station loadout and every ship loadout that
+didn't parse -- a real risk given the app's own export warning already
+tells the user they might use this to overwrite their real loadouts.xml).
+This module makes no attempt to interpret either kind -- they're carried
+through as opaque XML purely so round-tripping through this app doesn't
+lose data the app itself never touched.
 
 Within a ship loadout:
   - <macros>: ungrouped hardpoints, addressed by connection path
@@ -751,6 +761,12 @@ def parse_loadouts_xml(xml_text: str, conn: sqlite3.Connection) -> dict:
 
     ships: list[dict] = []
     failed: list[dict] = []
+    # Verbatim <loadout>...</loadout> XML for every entry that ISN'T in
+    # `ships` above -- a station module, or a ship loadout that threw during
+    # parse_ship_loadout() -- so "Export Loadouts" (app.js) can still hand
+    # all of it back unchanged even though this app never did anything with
+    # it. See this module's own docstring.
+    extra_raw_xml: list[str] = []
     skipped_station_count = 0
     total = 0
 
@@ -766,6 +782,7 @@ def parse_loadouts_xml(xml_text: str, conn: sqlite3.Connection) -> dict:
         ship_ware_id = classify_loadout(loadout_el, catalog)
         if ship_ware_id is None:
             skipped_station_count += 1
+            extra_raw_xml.append(ET.tostring(loadout_el, encoding="unicode"))
             continue
 
         try:
@@ -774,10 +791,12 @@ def parse_loadouts_xml(xml_text: str, conn: sqlite3.Connection) -> dict:
             ships.append(parse_ship_loadout(loadout_el, ship_ware_id, conn, catalog))
         except Exception as exc:  # noqa: BLE001 -- one bad loadout shouldn't abort the whole import
             failed.append({"id": loadout_el.get("id"), "name": loadout_el.get("name") or "", "reason": str(exc)})
+            extra_raw_xml.append(ET.tostring(loadout_el, encoding="unicode"))
 
     return {
         "ships": ships,
         "failed": failed,
+        "extra_raw_xml": extra_raw_xml,
         "total_loadouts": total,
         "skipped_station_loadouts": skipped_station_count,
     }

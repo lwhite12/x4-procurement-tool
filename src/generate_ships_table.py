@@ -101,7 +101,7 @@ Reads:
                                    shortcodes" below)
 
 Writes:
-  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 30 tables)
+  - src/sql/ships_tables.sql          (CREATE TABLE schema for all 43 tables)
   - src/csv/ships_base.csv            (one row per ship ware)
   - src/csv/production_wares.csv      (one row per ware needed by a ship's,
                                         economy ware's, equipment ware's,
@@ -109,6 +109,21 @@ Writes:
                                         production -- shared by all five,
                                         see "Economy wares"/"Equipment
                                         wares" below)
+  - src/csv/production_stat_definitions.csv
+                                       (one row per distinct (component_type,
+                                        build_method, raw ware) triple seen
+                                        anywhere in production_wares above --
+                                        the Component Analyzer's new
+                                        "Production" stat group's own catalog
+                                        metadata; see build_production_stat_rows()
+                                        below)
+  - src/csv/production_stats.csv      (one row per production_wares row,
+                                        reshaped to (ware_id, stat_id, value)
+                                        -- value is amount/produced_amount,
+                                        rounded to a whole number, read
+                                        directly as that generated stat's own
+                                        value by src/static/app.js; see
+                                        build_production_stat_rows() below)
   - src/csv/ship_component_groups.csv (one row per named engine/turret/
                                         thruster/software group)
   - src/csv/flight_model.csv          (one row per ship: jerk/physics
@@ -835,6 +850,8 @@ EXTENSIONS_DIR = DATA / "extensions"
 SQL_OUT = ROOT / "src" / "sql" / "ships_tables.sql"
 SHIPS_CSV_OUT = ROOT / "src" / "csv" / "ships_base.csv"
 PRODUCTION_WARES_CSV_OUT = ROOT / "src" / "csv" / "production_wares.csv"
+PRODUCTION_STAT_DEFINITIONS_CSV_OUT = ROOT / "src" / "csv" / "production_stat_definitions.csv"
+PRODUCTION_STATS_CSV_OUT = ROOT / "src" / "csv" / "production_stats.csv"
 COMPONENT_GROUPS_CSV_OUT = ROOT / "src" / "csv" / "ship_component_groups.csv"
 FLIGHT_MODEL_CSV_OUT = ROOT / "src" / "csv" / "flight_model.csv"
 ECONOMY_WARES_CSV_OUT = ROOT / "src" / "csv" / "economy_wares_base.csv"
@@ -946,6 +963,8 @@ TABLE_CSV_FILES = {
     "equipment_mod_costs": EQUIPMENT_MOD_COSTS_CSV_OUT,
     "mod_qualities": MOD_QUALITIES_CSV_OUT,
     "production_wares": PRODUCTION_WARES_CSV_OUT,
+    "production_stat_definitions": PRODUCTION_STAT_DEFINITIONS_CSV_OUT,
+    "production_stats": PRODUCTION_STATS_CSV_OUT,
     "ship_component_groups": COMPONENT_GROUPS_CSV_OUT,
     "flight_model": FLIGHT_MODEL_CSV_OUT,
     "source_versions": SOURCE_VERSIONS_CSV_OUT,
@@ -4685,6 +4704,8 @@ DROP TABLE IF EXISTS source_versions;
 DROP TABLE IF EXISTS flight_model;
 DROP TABLE IF EXISTS ship_component_groups;
 DROP TABLE IF EXISTS production_wares;
+DROP TABLE IF EXISTS production_stat_definitions;
+DROP TABLE IF EXISTS production_stats;
 DROP TABLE IF EXISTS turrets_base;
 DROP TABLE IF EXISTS engines_base;
 DROP TABLE IF EXISTS shields_base;
@@ -5358,6 +5379,44 @@ CREATE TABLE production_wares (
     FOREIGN KEY (ware) REFERENCES economy_wares_base (ware_id)
 );
 
+-- The Component Analyzer's own "Production" stat group (user call,
+-- 2026-11-01) -- see build_production_stat_rows()'s own docstring. One row
+-- per distinct (component_type, build_method, raw ware) triple actually
+-- seen in production_wares above, component_type being whichever of this
+-- app's own component types that triple's production_ware_id belongs to
+-- (ships -> "chassis", economy wares -> "economy_ware", missiles ->
+-- "missile", etc. -- an equipment ware's own engine/shield/weapon/turret/
+-- thruster split comes from its own equipment_type). stat_id is this
+-- triple's own stable key everywhere else in the app treats a stat by
+-- (the frontend's own STAT_CATALOG_BY_TYPE definitions, selectedStats,
+-- sort state, ...) -- see slugify_build_method()'s own comment for its
+-- shape. build_method is kept unslugified too, so the frontend can resolve
+-- its own real display name (GET /api/build_method_names) directly, same
+-- as any other build method anywhere else in this app, with no need to
+-- reverse the slug.
+CREATE TABLE production_stat_definitions (
+    component_type TEXT NOT NULL,
+    stat_id TEXT NOT NULL,
+    build_method TEXT NOT NULL,
+    ware TEXT NOT NULL,
+    PRIMARY KEY (component_type, stat_id),
+    FOREIGN KEY (build_method) REFERENCES build_methods (build_method_name),
+    FOREIGN KEY (ware) REFERENCES economy_wares_base (ware_id)
+);
+
+-- One row per production_wares row, reshaped to (ware_id, stat_id, value)
+-- -- the actual per-component values for the stat group just above. value
+-- is amount/produced_amount, rounded to a whole number at generation time
+-- (see build_production_stat_rows()'s own comment on why) -- read directly
+-- as a generated stat's own value by src/static/app.js, the exact same way
+-- a real column value already is (resolveStatValue() needs no changes).
+CREATE TABLE production_stats (
+    ware_id TEXT NOT NULL,
+    stat_id TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (ware_id, stat_id)
+);
+
 -- group_name is NOT unique per ship on its own -- a dedicated medium shield
 -- shares its raw XML "group" attribute value with the engine/turret/weapon
 -- group it protects (see parse_component_slots' docstring), so the primary
@@ -5802,6 +5861,131 @@ def build_countermeasure_production_rows(countermeasure_wares: list[dict]) -> li
 
 def write_production_wares_csv(rows: list[dict], out_path: Path) -> int:
     fieldnames = ["production_ware_id", "production_method", "ware", "amount", "produced_amount"]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
+
+
+def slugify_build_method(build_method: str) -> str:
+    """'Closed Loop' -> 'closed_loop' -- every real build_method_name is a
+    plain ASCII word or short phrase (see build_methods.csv/BUILD_METHOD_FIELDNAMES),
+    so lowercasing and swapping spaces for underscores is the whole
+    transform; nothing else ever needs stripping. Used only to build a
+    production stat's own stat_id (see build_production_stat_rows()) --
+    build_method itself (the real, unslugified name) is kept as its own
+    column too, so nothing ever needs to reverse this.
+    """
+    return build_method.lower().replace(" ", "_")
+
+
+def build_production_stat_rows(
+    ships: list[dict],
+    economy_wares: list[dict],
+    equipment_wares: list[dict],
+    missile_wares: list[dict],
+    deployable_wares: list[dict],
+    drone_wares: list[dict],
+    countermeasure_wares: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """The Component Analyzer's new "Production" stat group (user call,
+    2026-11-01): for every component, one stat per (build method, raw ware)
+    pair its own production recipe actually uses, named like a real database
+    column (`<build_method>__<ware>`, e.g. "closed_loop__hullparts") so it
+    slots into the exact same catalog/row-lookup machinery every other
+    fundamental stat already uses (src/static/app.js's resolveStatValue()
+    needs no changes at all -- see that function's own comment). A deliberate
+    precise parallel of build_ship_production_rows()/
+    build_economy_production_rows()/build_equipment_production_rows()/etc.
+    just above, reading the exact same already-resolved `productions` data
+    those do (hence taking the same 7 lists, not the production_wares rows
+    those already built) -- NOT built by reusing/modifying those, so each
+    stays its own independent, readable function per this module's existing
+    convention of small per-ware-kind functions over one shared parameterized
+    one. The only wrinkle those don't have: equipment_wares bundles five
+    real component types together (engine/shield/weapon/turret/thruster),
+    told apart here by each ware's own `equipment_type` -- every other list
+    is already exactly one component type.
+
+    Returns (definitions, stats):
+      definitions: one row per distinct (component_type, build_method, ware)
+        triple actually seen -- production_stat_definitions.csv, the stat
+        group's own catalog metadata (which stats exist for which component
+        type at all). `stat_id` is this triple's own stable key; `build_method`
+        is kept unslugified too, so the frontend can resolve its own real
+        display name (GET /api/build_method_names) without reversing
+        slugify_build_method().
+      stats: one row per production_wares row, as (ware_id, stat_id, value)
+        -- production_stats.csv, the actual per-component values.
+        `value` is amount/produced_amount ROUNDED to a whole number (user
+        call, 2026-11-01: "there should only be whole numbers for these
+        stats, no partial costs") -- can round down to 0 for a raw ware
+        that's only a sliver of a full production batch; left at 0 rather
+        than forced up to 1, so a genuinely negligible input doesn't
+        misreport as costing as much as a real, substantial one.
+    """
+
+    def rows_for(ware_id: str, productions: list[dict]) -> list[tuple[str, str, int, int]]:
+        return [
+            (ware_id, prod["method_name"], ware, amount, prod["produced_amount"])
+            for prod in productions
+            for ware, amount in sorted(prod["wares"].items())
+        ]
+
+    per_component_type: list[tuple[str, list[tuple[str, str, int, int]]]] = []
+    for s in ships:
+        # Ships only ever have one real production block in practice -- see
+        # build_ship_production_rows()'s own comment.
+        primary = s["productions"][:1]
+        per_component_type.append(("chassis", rows_for(s["ware_id"], primary)))
+    for w in economy_wares:
+        per_component_type.append(("economy_ware", rows_for(w["ware_id"], w["productions"])))
+    for w in equipment_wares:
+        per_component_type.append((w["equipment_type"], rows_for(w["ware_id"], w["productions"])))
+    for w in missile_wares:
+        per_component_type.append(("missile", rows_for(w["ware_id"], w["productions"])))
+    for w in deployable_wares:
+        per_component_type.append(("deployable", rows_for(w["ware_id"], w["productions"])))
+    for w in drone_wares:
+        per_component_type.append(("drone", rows_for(w["ware_id"], w["productions"])))
+    for w in countermeasure_wares:
+        per_component_type.append(("countermeasure", rows_for(w["ware_id"], w["productions"])))
+
+    seen_definitions: set[tuple[str, str]] = set()
+    definitions: list[dict] = []
+    stats: list[dict] = []
+    for component_type, rows in per_component_type:
+        for ware_id, build_method, ware, amount, produced_amount in rows:
+            stat_id = f"{slugify_build_method(build_method)}__{ware}"
+            definition_key = (component_type, stat_id)
+            if definition_key not in seen_definitions:
+                seen_definitions.add(definition_key)
+                definitions.append(
+                    {
+                        "component_type": component_type,
+                        "stat_id": stat_id,
+                        "build_method": build_method,
+                        "ware": ware,
+                    }
+                )
+            stats.append({"ware_id": ware_id, "stat_id": stat_id, "value": round(amount / produced_amount)})
+    return definitions, stats
+
+
+def write_production_stat_definitions_csv(rows: list[dict], out_path: Path) -> int:
+    fieldnames = ["component_type", "stat_id", "build_method", "ware"]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
+
+
+def write_production_stats_csv(rows: list[dict], out_path: Path) -> int:
+    fieldnames = ["ware_id", "stat_id", "value"]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -6765,6 +6949,13 @@ def main(primary_locale: str = "en") -> None:
         + build_countermeasure_production_rows(countermeasure_wares)
     )
     ware_row_count = write_production_wares_csv(production_rows, PRODUCTION_WARES_CSV_OUT)
+    production_stat_definitions, production_stats = build_production_stat_rows(
+        ships, economy_wares, equipment_wares, missile_wares, deployable_wares, drone_wares, countermeasure_wares
+    )
+    production_stat_definitions_row_count = write_production_stat_definitions_csv(
+        production_stat_definitions, PRODUCTION_STAT_DEFINITIONS_CSV_OUT
+    )
+    production_stats_row_count = write_production_stats_csv(production_stats, PRODUCTION_STATS_CSV_OUT)
     group_row_count = write_component_groups_csv(ships, COMPONENT_GROUPS_CSV_OUT)
     flight_model_row_count = write_flight_model_csv(ships, jerk_columns_sorted, physics_columns_sorted, FLIGHT_MODEL_CSV_OUT)
     economy_row_count = write_economy_wares_csv(economy_wares, ECONOMY_WARES_CSV_OUT)
@@ -6978,7 +7169,10 @@ def main(primary_locale: str = "en") -> None:
     print(
         f"Wrote {len(ships)} ships, {len(turret_sizes_sorted)} turret-size columns, "
         f"{len(bonus_weapon_sizes_sorted)} bonus-weapon-size columns, "
-        f"{ware_row_count} production_wares rows, {group_row_count} component_groups rows, "
+        f"{ware_row_count} production_wares rows, "
+        f"{production_stat_definitions_row_count} production_stat_definitions rows, "
+        f"{production_stats_row_count} production_stats rows, "
+        f"{group_row_count} component_groups rows, "
         f"{flight_model_row_count} flight_model rows, {economy_row_count} economy_wares_base rows, "
         f"{equipment_row_count} equipment_wares_base rows, "
         f"{equipment_ware_aliases_row_count} equipment_ware_aliases rows, "

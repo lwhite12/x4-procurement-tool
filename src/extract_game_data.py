@@ -932,6 +932,11 @@ def nav_icon_jobs() -> list[ExtractionJob]:
     generate_nav_icons.py's own construction_site.png, no _highlight
     variant since it's never a nav button).
 
+    mapob_shiptech.gz (user call, 2026-10-31) is the new User Guide tab's
+    own icon -- a circuit/gear glyph used on the map for Ship Technology
+    stations, picked from the same full station-symbol contact sheet
+    piratestation was picked from.
+
     Also pulls widget/bordersquare.gz, the game's own generic "this map
     item is selected" white square-bracket frame (see libraries/colors.xml's
     holomap_selection_bracket/holomap_selected mappings, both plain white)
@@ -943,7 +948,7 @@ def nav_icon_jobs() -> list[ExtractionJob]:
         ExtractionJob(
             name="nav_icons",
             group="nav_icons",
-            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock|hightech|piratestation|constructionsite)\.gz$",
+            include_pattern=r"assets/textures/ui/map_objects/mapob_(shipyard|tradestation|equipmentdock|hightech|piratestation|constructionsite|shiptech)\.gz$",
             out_dir=DATA_DIR / "images" / "nav_icons_raw",
         ),
         ExtractionJob(

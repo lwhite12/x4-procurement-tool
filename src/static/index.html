@@ -51,6 +51,14 @@
         </span>
         <span data-i18n="nav.proving_grounds">Proving Grounds</span>
       </button>
+      <button type="button" class="main-nav-btn" data-page="user-guide">
+        <span class="main-nav-icon-wrap">
+          <img src="/images/nav_icons/user_guide.png" alt="" class="main-nav-icon main-nav-icon-normal" />
+          <img src="/images/nav_icons/user_guide_highlight.png" alt="" class="main-nav-icon main-nav-icon-highlight" />
+          <img src="/images/nav_icons/player_location/ship_s_fighter_01.png" alt="" class="main-nav-player-marker" />
+        </span>
+        <span data-i18n="nav.user_guide">User Guide</span>
+      </button>
       <button type="button" class="main-nav-btn" data-page="about">
         <span class="main-nav-icon-wrap">
           <img src="/images/nav_icons/about.png" alt="" class="main-nav-icon main-nav-icon-normal" />
@@ -387,6 +395,562 @@
     </fieldset>
   </div>
 
+  <!-- User Guide -- terminology/how-to-use page, one section per other top-nav
+       tab (Fleet Planner/Cost Analyzer/Component Analyzer/Proving Grounds).
+       Content format (markdown-authored-then-baked-to-HTML vs. hand-written
+       HTML, both ultimately landing as data-i18n-html string values like
+       every other page here) not yet decided -- these sections are a
+       placeholder shell only, see TODO.md. -->
+  <div id="page-user-guide" class="page hidden">
+    <fieldset id="user-guide-section" class="section-box">
+      <legend class="section-box-legend" data-i18n="user_guide.section_title">User Guide</legend>
+      <p data-i18n="user_guide.intro">
+        What everything on this site means and how to actually use it.
+      </p>
+
+      <div class="user-guide-layout">
+        <div class="user-guide-content">
+          <section id="ug-fleet-planner">
+            <h2 class="user-guide-section-heading">
+              <img src="/images/nav_icons/fleet_planner_highlight.png" alt="" class="user-guide-nav-icon" />
+              <span data-i18n="user_guide.fleet_planner_title">Fleet Planner</span>
+            </h2>
+            <p data-i18n="user_guide.fleet_planner_intro">
+              Build out individual ship loadouts and organize them into fleet lists.
+            </p>
+
+            <h3 id="ug-fleet-planner-features" data-i18n="user_guide.high_level_features_title">High Level Features</h3>
+            <div data-i18n-html="user_guide.fleet_planner_features_html">
+              <ul>
+                <li>Pick a ship chassis from a filterable list (Size, Purpose, Type, Race, Vendor, Build Method).</li>
+                <li>Equip every slot: engines, thrusters, shields, weapons, turrets, software,
+                  missiles/ammunition, drones, deployables, countermeasures, and crew.</li>
+                <li><strong>High Preset</strong> / <strong>Minimum Preset</strong> buttons auto-fill a loadout with
+                  the most/least expensive option in each slot.</li>
+                <li>Apply equipment and Mods through the
+                  <img src="/images/mod_lab_icons/mod_lab_button.png" alt="" class="user-guide-inline-icon" />Modifications
+                  Lab, including copy/paste between slots, a real material cost breakdown, and a Roll button.</li>
+                <li>Import your own saved game loadouts (<code>loadouts.xml</code>) or paste raw loadout XML
+                  directly.</li>
+                <li>Save a finished loadout, then filter/search your saved loadouts to load one back in later.</li>
+                <li>Organize ships into any number of named, independently editable Fleet Lists.</li>
+                <li>Download or upload a Fleet List as a file, or generate a share link.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-fleet-planner-ship-builder" data-i18n="user_guide.fleet_planner_ship_builder_title">Ship Builder</h3>
+            <p data-i18n="user_guide.fleet_planner_ship_builder_intro">
+              Pick a ship from the list on the left, then equip it slot by slot.
+            </p>
+            <div data-i18n-html="user_guide.fleet_planner_ship_builder_html">
+              <ul>
+                <li>The ship list is filtered by the checkboxes above it (Size, Purpose, Type, Race, Vendor, Build
+                  Method).</li>
+                <li>Once a ship is loaded, every real equipment slot it has shows up as its own section: engines,
+                  thrusters, shields, weapons, turrets, software, missiles/ammunition, drones, deployables,
+                  countermeasures, and crew. Only the sections a ship actually has appear.</li>
+                <li>Each slot is a dropdown of every compatible option for that exact mount -- size and
+                  compatibility tier are already filtered for you, so everything shown will fit.</li>
+                <li><strong>High Preset</strong> fills every slot with its most expensive option;
+                  <strong>Minimum Preset</strong> fills only the required slots with the cheapest. Both work
+                  ship-wide (next to "Select Loadout") or one section at a time.</li>
+                <li>Chassis Mods and equipment mods are applied through the
+                  <img src="/images/mod_lab_icons/mod_lab_button.png" alt="" class="user-guide-inline-icon" />Modifications
+                  Lab button next to the chassis name or each equipped item -- see the Component Analyzer's own
+                  Modifications Lab section below for the full rundown; it works the same way here.</li>
+                <li><strong>Add To Fleet List</strong> saves the current loadout into whichever fleet list is
+                  active. <strong>Add To Saved Loadouts</strong> saves it to your own loadout library instead (see
+                  Loadout Manager below) without adding it to a fleet.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-fleet-planner-loadout-manager" data-i18n="user_guide.fleet_planner_loadout_manager_title">Loadout Manager</h3>
+            <p data-i18n="user_guide.fleet_planner_loadout_manager_intro">
+              Your own library of saved ship loadouts, separate from any one fleet list.
+            </p>
+            <div data-i18n-html="user_guide.fleet_planner_loadout_manager_html">
+              <ul>
+                <li><strong>Import Game Loadouts</strong> reads your real <code>loadouts.xml</code> (either by
+                  local file path, if you're running this app locally, or by uploading the file) and pulls in every
+                  ship loadout it contains.</li>
+                <li><strong>Import Raw XML Loadout</strong> lets you paste a single <code>&lt;loadout&gt;</code>
+                  element (or a <code>&lt;loadouts&gt;</code> block with several) directly, for a loadout you don't
+                  have the full file for.</li>
+                <li>Once you have loadouts imported, <strong>Select Filter Loadout</strong> opens a picker with the
+                  same chassis filters as the ship list above, plus free-text search by ship name or loadout name,
+                  so you can find one saved loadout out of a large library quickly.</li>
+                <li><strong>Export Loadouts</strong> downloads everything you've imported/saved as one real
+                  <code>loadouts.xml</code>, in the exact format the game itself uses. You can drop it straight
+                  into <code>Documents\Egosoft\X4\&lt;id&gt;\loadouts.xml</code> and the game will load it. Station
+                  module loadouts and any loadout this app couldn't parse are carried through untouched too, so
+                  nothing from the original file is lost. <strong>Back up your real file first</strong>: this app
+                  can't guarantee the result won't break something, and overwriting it can't be undone.
+                  <strong>Clear Loadouts</strong> empties the library.</li>
+                <li>A loadout you load back in from here populates the Ship Builder exactly as it was saved. Edit
+                  it and re-save under a new name if you want a variant.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-fleet-planner-fleet-lists" data-i18n="user_guide.fleet_planner_fleet_lists_title">Fleet Lists</h3>
+            <p data-i18n="user_guide.fleet_planner_fleet_lists_intro">
+              A fleet list is a named group of ships, built from the Ship Builder on the left.
+            </p>
+            <div data-i18n-html="user_guide.fleet_planner_fleet_lists_html">
+              <ul>
+                <li>Create any number of fleet lists via the tabs at the top of this section; each one is
+                  independently named, edited, and deleted.</li>
+                <li>These fleet lists are used in the Cost Analyzer (and in the future, in the Fleet Trials of the
+                  Proving Grounds) as the baseline to compare against. You can compare individual ship costs by
+                  using fleet lists with only one ship in them.</li>
+                <li>Every ship added to the active fleet list shows up as a row with an editable quantity
+                  (ctrl-click a +/- to step by 10, shift-click to jump to max/0) and an optional note.</li>
+                <li>Click a loadout's own expand/collapse arrow to show or hide its full equipment breakdown
+                  inline, without leaving the list.</li>
+                <li>Each fleet list has its own Build Method Priority -- an ordered list of which production
+                  method to use first for every ware it needs, with each one below it as a fallback. This also
+                  drives the Cost Analyzer's own cost figures for that fleet.</li>
+                <li>Download a fleet list as a file, upload one back in, or use the Share button in the header to
+                  generate a link someone else can open to load a copy of it (along with any other sections you
+                  choose to include in that same link).</li>
+              </ul>
+            </div>
+          </section>
+
+          <section id="ug-cost-analyzer">
+            <h2 class="user-guide-section-heading">
+              <img src="/images/nav_icons/cost_analysis_highlight.png" alt="" class="user-guide-nav-icon" />
+              <span data-i18n="user_guide.cost_analyzer_title">Cost Analyzer</span>
+            </h2>
+            <p data-i18n="user_guide.cost_analyzer_intro">
+              Breaks down exactly what a Fleet List costs to build, down to the raw materials.
+            </p>
+
+            <h3 id="ug-cost-analyzer-features" data-i18n="user_guide.high_level_features_title">High Level Features</h3>
+            <div data-i18n-html="user_guide.cost_analyzer_features_html">
+              <ul>
+                <li>Compare the cost of every Fleet List side by side, in one table.</li>
+                <li>Switch between a Total Cost Breakdown and a Component Type Cost Breakdown.</li>
+                <li>See Market Purchase Price, Production Wares Price, and Raw Materials Price, each as
+                  Min/Average/Max.</li>
+                <li>Drill into exactly which wares a build needs and how much of each.</li>
+                <li>Override any ware's price to see how that changes every cost figure that depends on it.</li>
+                <li>Select any Fleet List to focus the comparison on it, with colored value/percent diffs against
+                  every other one.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-cost-analyzer-breakdowns" data-i18n="user_guide.cost_analyzer_breakdowns_title">Component Type VS Total Cost Breakdowns</h3>
+            <p data-i18n="user_guide.cost_analyzer_breakdowns_intro">
+              Both tabs show the exact same underlying cost data for every fleet list, just organized differently.
+            </p>
+            <div data-i18n-html="user_guide.cost_analyzer_breakdowns_html">
+              <ul>
+                <li><strong>Total Cost Breakdown</strong> rolls every ship in a fleet together into one set of
+                  numbers.</li>
+                <li><strong>Component Type Cost Breakdown</strong> splits that same total out by component type
+                  (Engines, Shields, Weapons, and so on), so you can see which category of equipment is actually
+                  driving the cost.</li>
+                <li>Switching tabs doesn't recalculate anything -- both are ready as soon as a fleet list's cost
+                  has been computed once.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-cost-analyzer-tiers" data-i18n="user_guide.cost_analyzer_tiers_title">Credits, Production Wares, Raw Materials Breakdowns</h3>
+            <p data-i18n="user_guide.cost_analyzer_tiers_intro">
+              Three different "how deep do you want to dig" views into the same build, each collapsible.
+            </p>
+            <div data-i18n-html="user_guide.cost_analyzer_tiers_html">
+              <ul>
+                <li><strong>Credit Cost</strong> is the cost in credits. Market Purchase Price (buy from a
+                  shipyard), Production Wares Price (buy the wares the shipyard consumes), and Raw Materials Price
+                  (buy the raw resources), each shown as Min/Average/Max.</li>
+                <li><strong>Production Wares</strong> lists exactly which intermediate wares (hull parts, energy
+                  cells, and so on) a build needs and how much of each, one level down from the finished ship.</li>
+                <li><strong>Raw Materials</strong> goes all the way down to the base resources (ore, silicon, ice,
+                  and so on) needed to produce everything above, recursively expanded through every recipe in
+                  between.</li>
+                <li>Expand or collapse any section's header to show or hide its own rows -- useful once a
+                  breakdown gets long.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-cost-analyzer-focus" data-i18n="user_guide.cost_analyzer_focus_title">Fleet Comparison and Focus</h3>
+            <p data-i18n="user_guide.cost_analyzer_focus_intro">
+              Every fleet list you've built shows up as its own column, side by side, in every breakdown above.
+            </p>
+            <div data-i18n-html="user_guide.cost_analyzer_focus_html">
+              <ul>
+                <li>Select a fleet list to focus it as the baseline to compare other fleets' costs against -- the
+                  whole column highlights, and every other column then shows both its own value and a colored
+                  (green for more, red for less) raw and percent difference against that baseline.</li>
+                <li>Select it again to remove the comparison focus, back to plain values with no comparison.
+                  Select a different fleet list to switch the baseline to it instead.</li>
+                <li>This selection is its own thing, separate from which fleet list is "active" in the Fleet
+                  Planner (the one the Ship Builder is currently adding to) -- selecting a fleet list here never
+                  changes that.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-cost-analyzer-overrides" data-i18n="user_guide.cost_analyzer_overrides_title">Ware Price Overrides</h3>
+            <p data-i18n="user_guide.cost_analyzer_overrides_intro">
+              Override what this app assumes a ware costs, for every cost calculation that uses it.
+            </p>
+            <div data-i18n-html="user_guide.cost_analyzer_overrides_html">
+              <ul>
+                <li>Click <strong>Set Ware Price Overrides</strong> to open a list of every ware in the database,
+                  with its real Min/Average/Max price and an editable box to type your own.</li>
+                <li>Any override you set applies everywhere that ware's price is used. Every fleet list's cost
+                  breakdown recalculates to match.</li>
+                <li>Once you close the popup, a compact list of every currently active override stays visible so
+                  you can see (and clear) them without reopening it.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section id="ug-component-analyzer">
+            <h2 class="user-guide-section-heading">
+              <img src="/images/nav_icons/component_analyzer_highlight.png" alt="" class="user-guide-nav-icon" />
+              <span data-i18n="user_guide.component_analyzer_title">Component Analyzer</span>
+            </h2>
+            <p data-i18n="user_guide.component_analyzer_intro">
+              Build side-by-side comparison tables for any equipment category or ware in the game.
+            </p>
+
+            <h3 id="ug-component-analyzer-features" data-i18n="user_guide.high_level_features_title">High Level Features</h3>
+            <div data-i18n-html="user_guide.component_analyzer_features_html">
+              <ul>
+                <li>Compare any of the 12 component types: ship chassis, engines, shields, weapons, turrets,
+                  thrusters, missiles, software, drones, deployables, countermeasures, and economy wares.</li>
+                <li>Build any number of independent tables at once, each with its own component picker and
+                  filters.</li>
+                <li>Pick exactly which stats show as columns, grouped and searchable.</li>
+                <li>Load ready-made comparison tables for common categories with one click (Load Prebuilt
+                  Tables).</li>
+                <li>Use the Statistics Lab to inspect stats by their source -- fundamental data points, or
+                  derived from fundamental data.</li>
+                <li>Author your own custom stats in the Statistics Lab -- formulas built from existing stats, with
+                  mocked inputs for data a table wouldn't otherwise have access to.</li>
+                <li>Inspect the formula behind any
+                  <span class="stat-tag-banner stat-tag-banner-pre-derived" data-i18n="stat_tags.pre_derived">Pre-Derived</span>
+                  or <span class="stat-tag-banner stat-tag-banner-derived" data-i18n="stat_tags.derived">Derived</span>
+                  stat.</li>
+                <li>Export tables to JSON, CSV, or XLSX, or import one back in.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-prebuilt" data-i18n="user_guide.component_analyzer_prebuilt_title">Load Prebuilt Tables</h3>
+            <p data-i18n="user_guide.component_analyzer_prebuilt_intro">
+              The fastest way to get a useful table on screen without building one yourself.
+            </p>
+            <div data-i18n-html="user_guide.component_analyzer_prebuilt_html">
+              <ul>
+                <li>Click <strong>Load Prebuilt Tables</strong> and pick a category to load a ready-made, fully
+                  configured comparison table for it -- every relevant component already added, with a sensible
+                  set of stats already selected.</li>
+                <li>This adds a new table alongside whatever you already have open; it never replaces or removes
+                  an existing one.</li>
+                <li>Loading the same prebuilt table more than once is fine -- each load is its own independent
+                  table, so you end up with duplicates you can then edit differently or remove when you're done
+                  with them.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-tables" data-i18n="user_guide.component_analyzer_tables_title">Component Tables</h3>
+            <p data-i18n="user_guide.component_analyzer_tables_intro">
+              A table is one side-by-side comparison -- you can have as many open at once as you want.
+            </p>
+            <div data-i18n-html="user_guide.component_analyzer_tables_html">
+              <ul>
+                <li>Every table has an editable title and tab titles. The tabs are for switching between
+                  different saved sets of columns on the same components selected for this table (more on that
+                  under Statistics Lab/stat sets below).</li>
+                <li>Each table picks one component type to compare (Ship Chassis, Engines, Shields, Weapons,
+                  Turrets, Thrusters, Missiles, Software, Drones, Deployables, Countermeasures, or Economy Wares),
+                  set once through a drop down.</li>
+                <li>Add components to a table through its own picker, which has the same filters as everywhere
+                  else in the app, narrowed to that component type.</li>
+                <li>Which stats show as columns is chosen separately per tab (see "Select Stats" on each tab), but
+                  the components themselves are shared across every tab of the same table, so switching tabs just
+                  changes which numbers you're looking at for the same row set, not the rows themselves.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-stats-lab" data-i18n="user_guide.component_analyzer_stats_lab_title">Statistics Lab</h3>
+            <div data-i18n-html="user_guide.component_analyzer_stats_lab_html">
+              <p>The Statistics Lab is a manager for the statistics shown on the website, in the Component
+                Analyzer and the Proving Grounds. Every stat shown anywhere in this app can be found in the
+                Statistics Lab. It allows you to view available stats within and shared between component types,
+                when those stats depend on multiple component types. It allows you to view the source of the stat
+                and an associated formula referencing other stats, if there is one. It also allows you to create
+                your own custom stats. Below are the tags associated with different stats and what they mean.</p>
+              <ul>
+                <li><span class="stat-tag-banner stat-tag-banner-fundamental" data-i18n="stat_tags.fundamental">Fundamental</span>
+                  -- read straight from the game's own data files defining components, nothing computed.</li>
+                <li><span class="stat-tag-banner stat-tag-banner-pre-derived" data-i18n="stat_tags.pre_derived">Pre-Derived</span>
+                  -- a formula this app ships with, determined by research, investigation, and modeling. Examples
+                  include weapon DPS, shield totals, and so on.</li>
+                <li><span class="stat-tag-banner stat-tag-banner-derived" data-i18n="stat_tags.derived">Derived</span>
+                  -- a formula you build yourself, defined using the stat builder with a JavaScript math
+                  expression.</li>
+                <li><span class="stat-tag-banner stat-tag-banner-mod" data-i18n="stat_tags.mod">Mod</span> --
+                  dynamic stats whose values change based on inputs from the Modifications Lab. These stats are
+                  used to determine Post Mod pre-derived stats, which apply the modifier to the fundamental
+                  stats.</li>
+                <li><span class="stat-tag-banner stat-tag-banner-production" data-i18n="stat_tags.production">Production</span>
+                  -- production cost stats. These are separated from the fundamental stats because of how they're
+                  generated by the data backend: dynamically, from the game's own production costs, whenever a new
+                  ware build method is parsed -- so a game mod adding new ships, production methods, or wares
+                  gets new Production stats automatically.</li>
+                <li>Click <strong>Details</strong> next to any stat (fundamental excluded, since there's nothing
+                  to show) to see exactly what it's made of -- its formula and where every variable in it comes
+                  from -- without any risk of changing it.</li>
+                <li>Click <strong>Clone</strong> to start a new stat from an existing one's formula, or
+                  <strong>+ New Stat</strong> to build one from scratch: write a formula using math (sums,
+                  averages, comparisons) over any other stat, on this component type or pulled in from a different
+                  one.</li>
+                <li>The <strong>Constants</strong> page holds reusable numbers (like the ones this app's own
+                  built-in combat-math stats are curve-fit against) that a formula can reference the same way it
+                  references a stat.</li>
+                <li>A stat you create is immediately usable from every table of the same component type, not just
+                  the one you built it from.</li>
+                <li>The same stat is displayed on multiple components, based on which component sources are
+                  present in the formula for that stat. You can choose which group it appears under for each
+                  component.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-mocks" data-i18n="user_guide.component_analyzer_mocks_title">Mocked Components and Stats</h3>
+            <p data-i18n="user_guide.component_analyzer_mocks_intro">
+              Some formulas need an input from other component types besides the main component type for that
+              table. These stats can be resolved through the Mocked Stats and Components manager.
+            </p>
+            <div data-i18n-html="user_guide.component_analyzer_mocks_html">
+              <ul>
+                <li>A mock can be a plain number you type in, or a real component (e.g. "assume this engine is
+                  installed on a Rattlesnake") whose own real stats get pulled in automatically.</li>
+                <li>Stats which require some mocks but have no source for them will display a warning symbol
+                  (<span class="component-analyzer-missing-mock-icon">⚠</span>) in their stat value, which
+                  explains the missing stats on mouse over.</li>
+                <li>Mocks are configured at one of several scopes, and applied in order from most specific to
+                  least specific: one row on one tab &gt; one row across every tab &gt; every row on one tab &gt;
+                  all rows and tabs of a table &gt; or a global mock. The most specific scope with something
+                  configured always wins.</li>
+                <li>Multiple mocks can be configured on a single scope. They're applied in order until all
+                  required stats are filled from compatible equipment. Incompatible components are skipped by the
+                  mock. All used mocks and skipped mocks are listed by an info pop-up next to each stat value in
+                  the table.</li>
+                <li>Click <strong>Mocked Stats</strong> on a table to see every mock currently affecting it, and
+                  which rows (if any) are still missing one they need -- a cell missing a mock it needs shows a
+                  small <span class="component-analyzer-missing-mock-icon">⚠</span> warning icon you can hover for
+                  details.</li>
+                <li>"Group mode" lets a mock spread itself across a chassis's own real hardpoint groups instead of
+                  being treated as one flat count. This is used by stats that need to know about per-group
+                  totals, like average shield MJ per bonus-shield group.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-mod-lab" data-i18n="user_guide.component_analyzer_mod_lab_title">Modifications Lab</h3>
+            <p data-i18n="user_guide.component_analyzer_mod_lab_intro">
+              Apply the game's own equipment mods to a component in this table, to see their effect on every stat
+              that depends on them.
+            </p>
+            <div data-i18n-html="user_guide.component_analyzer_mod_lab_html">
+              <ul>
+                <li>Click the
+                  <img src="/images/mod_lab_icons/mod_lab_button.png" alt="" class="user-guide-inline-icon" />Mod
+                  Lab button on a component's own row (or the table-wide one, to set a default for every row at
+                  once) to open the picker.</li>
+                <li>Pick a mod, then roll its value within its real in-game range -- the <strong>Roll</strong>
+                  button does this for you and keeps a running total of the material cost spent rolling so
+                  far.</li>
+                <li>Every mod's own real material cost (wares plus credits) is shown before you commit to it.</li>
+                <li>Copy a mod from one slot and paste it into another instead of configuring the same roll
+                  twice.</li>
+                <li>A cell affected by an applied mod is colored by that mod's own quality tier (
+                  <img src="/images/mod_lab_icons/mods_grade_circle_01.png" alt="" class="user-guide-inline-icon" />Basic,
+                  <img src="/images/mod_lab_icons/mods_grade_circle_02.png" alt="" class="user-guide-inline-icon" />Enhanced,
+                  <img src="/images/mod_lab_icons/mods_grade_circle_03.png" alt="" class="user-guide-inline-icon" />Exceptional
+                  ), so you can see at a glance which numbers in a table reflect a modded value.</li>
+                <li>Mods can also be applied to mocks, and their changed values will also show on the stats
+                  table.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-component-analyzer-import-export" data-i18n="user_guide.component_analyzer_import_export_title">Import and Export</h3>
+            <div data-i18n-html="user_guide.component_analyzer_import_export_html">
+              <ul>
+                <li>Export one or more tables to JSON (to re-import later), CSV (one file per tab, zipped), or
+                  XLSX (one workbook per table, one sheet per tab) -- pick which tables to include when you
+                  export.</li>
+                <li>Import a previously exported file to bring those tables back, exactly as they were.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section id="ug-proving-grounds">
+            <h2 class="user-guide-section-heading">
+              <img src="/images/nav_icons/proving_grounds_highlight.png" alt="" class="user-guide-nav-icon" />
+              <span data-i18n="user_guide.proving_grounds_title">Proving Grounds</span>
+            </h2>
+            <p data-i18n="user_guide.proving_grounds_intro">
+              Compare real ships and fleets head-to-head on performance, not just cost.
+            </p>
+
+            <h3 id="ug-proving-grounds-features" data-i18n="user_guide.high_level_features_title">High Level Features</h3>
+            <div data-i18n-html="user_guide.proving_grounds_features_html">
+              <ul>
+                <li>Add ships straight from your saved loadouts, from a Fleet List, or build one fresh.</li>
+                <li>Edit a ship already in a comparison without removing and re-adding it.</li>
+                <li>Pick any ship as a comparison baseline for colored value/percent diffs against every other
+                  one.</li>
+                <li>Switch between stat sets to compare different groups of stats without rebuilding the table.</li>
+                <li>Build custom stat sets using the same stats built in the Component Analyzer.</li>
+                <li>Fleet-level (whole-fleet) comparisons are planned but not built yet.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-proving-grounds-trials-types" data-i18n="user_guide.proving_grounds_trials_types_title">Ship Trials vs Fleet Trials</h3>
+            <div data-i18n-html="user_guide.proving_grounds_trials_types_html">
+              <ul>
+                <li><strong>Ship Trials</strong> compares individual ships against each other, stat by stat --
+                  this is the finished half of Proving Grounds, covered by everything below.</li>
+                <li><strong>Fleet Trials</strong> (whole-fleet aggregate comparisons) is still under construction
+                  and not usable yet -- its tab exists but just shows a placeholder for now. This should show
+                  fleet-wide stats like burst and sustained DPS, as well as stat breakdowns along other groups,
+                  like ship size or ship type. It should use aggregators across existing stats.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-proving-grounds-adding-trials" data-i18n="user_guide.proving_grounds_adding_trials_title">Adding Trials</h3>
+            <p data-i18n="user_guide.proving_grounds_adding_trials_intro">
+              A Trial is one side-by-side ship comparison, the Proving Grounds equivalent of a Component Analyzer
+              table.
+            </p>
+            <div data-i18n-html="user_guide.proving_grounds_adding_trials_html">
+              <ul>
+                <li>Click <strong>+ Add Trial</strong> to create a new one; give it its own title by clicking the
+                  title field.</li>
+                <li>Add any number of Trials, each completely independent of the others.</li>
+                <li>Minimize a Trial to collapse it out of the way without losing it, or remove it entirely with
+                  the "x" button.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-proving-grounds-stats-tabs" data-i18n="user_guide.proving_grounds_stats_tabs_title">Define Stats in Stats Tabs</h3>
+            <p data-i18n="user_guide.proving_grounds_stats_tabs_intro">
+              Which stats show as rows is controlled the same way a Component Analyzer table's columns are --
+              through stat-set tabs, stacked down the left side of a Trial instead of across the top.
+            </p>
+            <div data-i18n-html="user_guide.proving_grounds_stats_tabs_html">
+              <ul>
+                <li>A brand-new Trial starts with 7 stat sets already filled in -- Core Stats, Basic Flight,
+                  Advanced Flight, Shields, Weapons, Turrets, and Storage and Support -- the same layout as the
+                  "Load Prebuilt Tables" band's own Large Ship Chassis table, so there's something useful to look
+                  at immediately, with nothing to configure first.</li>
+                <li>Click <strong>Select Stats</strong> on any stat set to change what it shows, or
+                  <strong>+</strong> to add another stat set tab entirely (e.g. one for combat stats, another for
+                  economy stats) and switch between them.</li>
+                <li>Every stat available in the Component Analyzer's own Ship Chassis catalog --
+                  <span class="stat-tag-banner stat-tag-banner-fundamental" data-i18n="stat_tags.fundamental">Fundamental</span>,
+                  <span class="stat-tag-banner stat-tag-banner-pre-derived" data-i18n="stat_tags.pre_derived">Pre-Derived</span>,
+                  and anything you've built yourself in the Statistics Lab -- can be added to a Trial's own stat
+                  sets the same way.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-proving-grounds-add-ships" data-i18n="user_guide.proving_grounds_add_ships_title">Add Ships to Trials</h3>
+            <p data-i18n="user_guide.proving_grounds_add_ships_intro">
+              Three ways to add a ship to a Trial, each from its own button.
+            </p>
+            <div data-i18n-html="user_guide.proving_grounds_add_ships_html">
+              <ul>
+                <li><strong>Add Loadout Ship</strong> picks from your saved loadout library (Loadout Manager),
+                  with the same filters and search as everywhere else that list shows up.</li>
+                <li><strong>Add Fleet List Ship</strong> picks one of your fleet lists, then one specific ship
+                  from it -- read-only, it never changes the fleet list itself.</li>
+                <li><strong>Add Builder Ship</strong> opens a blank Ship Builder right inside the Trial, for
+                  building a ship from scratch without needing to add it to a fleet list first.</li>
+                <li>Once a ship is in a Trial, click <strong>Edit</strong> on its column to open the same Ship
+                  Builder and change its loadout in place -- a <span class="ship-trial-edited-badge">Edited</span>
+                  badge appears once it's been changed from how it was originally added, so you can tell at a
+                  glance which columns have drifted.</li>
+              </ul>
+            </div>
+
+            <h3 id="ug-proving-grounds-baseline" data-i18n="user_guide.proving_grounds_baseline_title">Comparison Baseline</h3>
+            <p data-i18n="user_guide.proving_grounds_baseline_intro">
+              Click a ship's own column header to set it as the baseline every other column is compared against.
+            </p>
+            <div data-i18n-html="user_guide.proving_grounds_baseline_html">
+              <ul>
+                <li>Every other column then shows a colored (green for more, red for less) raw and percent
+                  difference against the baseline column, for every numeric stat in the Trial.</li>
+                <li>Click the same column's header again to clear the baseline back to plain values; click a
+                  different column's header to switch the baseline to it instead.</li>
+                <li>The baseline column keeps its own place in the table -- setting or clearing one never
+                  reorders the columns.</li>
+              </ul>
+            </div>
+          </section>
+        </div>
+
+        <nav class="user-guide-toc" aria-label="Table of contents">
+          <div class="user-guide-toc-title" data-i18n="user_guide.toc_title">On This Page</div>
+
+          <div class="user-guide-toc-section">
+            <a class="user-guide-toc-section-link" href="#ug-fleet-planner">
+              <img src="/images/nav_icons/fleet_planner_highlight.png" alt="" class="user-guide-inline-icon" />
+              <span data-i18n="user_guide.fleet_planner_title">Fleet Planner</span>
+            </a>
+            <a class="user-guide-toc-subsection-link" href="#ug-fleet-planner-features" data-i18n="user_guide.high_level_features_title">High Level Features</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-fleet-planner-ship-builder" data-i18n="user_guide.fleet_planner_ship_builder_title">Ship Builder</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-fleet-planner-loadout-manager" data-i18n="user_guide.fleet_planner_loadout_manager_title">Loadout Manager</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-fleet-planner-fleet-lists" data-i18n="user_guide.fleet_planner_fleet_lists_title">Fleet Lists</a>
+          </div>
+
+          <div class="user-guide-toc-section">
+            <a class="user-guide-toc-section-link" href="#ug-cost-analyzer">
+              <img src="/images/nav_icons/cost_analysis_highlight.png" alt="" class="user-guide-inline-icon" />
+              <span data-i18n="user_guide.cost_analyzer_title">Cost Analyzer</span>
+            </a>
+            <a class="user-guide-toc-subsection-link" href="#ug-cost-analyzer-features" data-i18n="user_guide.high_level_features_title">High Level Features</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-cost-analyzer-breakdowns" data-i18n="user_guide.cost_analyzer_breakdowns_title">Component Type VS Total Cost Breakdowns</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-cost-analyzer-tiers" data-i18n="user_guide.cost_analyzer_tiers_title">Credits, Production Wares, Raw Materials Breakdowns</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-cost-analyzer-focus" data-i18n="user_guide.cost_analyzer_focus_title">Fleet Comparison and Focus</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-cost-analyzer-overrides" data-i18n="user_guide.cost_analyzer_overrides_title">Ware Price Overrides</a>
+          </div>
+
+          <div class="user-guide-toc-section">
+            <a class="user-guide-toc-section-link" href="#ug-component-analyzer">
+              <img src="/images/nav_icons/component_analyzer_highlight.png" alt="" class="user-guide-inline-icon" />
+              <span data-i18n="user_guide.component_analyzer_title">Component Analyzer</span>
+            </a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-features" data-i18n="user_guide.high_level_features_title">High Level Features</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-prebuilt" data-i18n="user_guide.component_analyzer_prebuilt_title">Load Prebuilt Tables</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-tables" data-i18n="user_guide.component_analyzer_tables_title">Component Tables</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-stats-lab" data-i18n="user_guide.component_analyzer_stats_lab_title">Statistics Lab</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-mocks" data-i18n="user_guide.component_analyzer_mocks_title">Mocked Components and Stats</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-mod-lab" data-i18n="user_guide.component_analyzer_mod_lab_title">Modifications Lab</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-component-analyzer-import-export" data-i18n="user_guide.component_analyzer_import_export_title">Import and Export</a>
+          </div>
+
+          <div class="user-guide-toc-section">
+            <a class="user-guide-toc-section-link" href="#ug-proving-grounds">
+              <img src="/images/nav_icons/proving_grounds_highlight.png" alt="" class="user-guide-inline-icon" />
+              <span data-i18n="user_guide.proving_grounds_title">Proving Grounds</span>
+            </a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-features" data-i18n="user_guide.high_level_features_title">High Level Features</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-trials-types" data-i18n="user_guide.proving_grounds_trials_types_title">Ship Trials vs Fleet Trials</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-adding-trials" data-i18n="user_guide.proving_grounds_adding_trials_title">Adding Trials</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-stats-tabs" data-i18n="user_guide.proving_grounds_stats_tabs_title">Define Stats in Stats Tabs</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-add-ships" data-i18n="user_guide.proving_grounds_add_ships_title">Add Ships to Trials</a>
+            <a class="user-guide-toc-subsection-link" href="#ug-proving-grounds-baseline" data-i18n="user_guide.proving_grounds_baseline_title">Comparison Baseline</a>
+          </div>
+        </nav>
+      </div>
+    </fieldset>
+  </div>
+
   <div id="page-about" class="page hidden">
     <fieldset id="about-section" class="section-box">
       <legend class="section-box-legend" data-i18n="about.section_title">About</legend>
@@ -420,18 +984,9 @@
       </table>
 
       <h3 data-i18n="about.future_plans_title">Future Plans</h3>
-      <p class="modal-hint" data-i18n="about.future_plans_hint">A few bigger features on the roadmap, not built yet:</p>
-      <h4 data-i18n="about.user_accounts_title">User Accounts &amp; Saved States</h4>
-      <p class="modal-hint" data-i18n="about.user_accounts_body">
-        Right now, sharing a fleet list, ship loadout, or price override preset means generating a one-off link
-        (see the Share button above). The plan is to eventually add real user accounts, so you can save and
-        recall your own fleet lists, ship loadouts, and price override presets directly -- without needing to
-        keep track of links.
-      </p>
-      <h4 data-i18n="about.language_support_title">Language Support</h4>
-      <p class="modal-hint" data-i18n="about.language_support_body">
-        Ship and ware names/descriptions are currently only pulled from the game's English-language files.
-        Support for reading other languages X4 itself supports is planned.
+      <p class="modal-hint" data-i18n-html="about.future_plans_hint_html">
+        There are a lot of future features planned, see the
+        <a href="https://github.com/lwhite12/x4-procurement-tool/issues" target="_blank" rel="noopener">GitHub issues page</a>.
       </p>
 
       <h3 data-i18n="about.local_install_title">Running this locally against your own game install</h3>

@@ -19,6 +19,8 @@ DROP TABLE IF EXISTS source_versions;
 DROP TABLE IF EXISTS flight_model;
 DROP TABLE IF EXISTS ship_component_groups;
 DROP TABLE IF EXISTS production_wares;
+DROP TABLE IF EXISTS production_stat_definitions;
+DROP TABLE IF EXISTS production_stats;
 DROP TABLE IF EXISTS turrets_base;
 DROP TABLE IF EXISTS engines_base;
 DROP TABLE IF EXISTS shields_base;
@@ -692,6 +694,44 @@ CREATE TABLE production_wares (
     produced_amount INTEGER,
     PRIMARY KEY (production_ware_id, production_method, ware),
     FOREIGN KEY (ware) REFERENCES economy_wares_base (ware_id)
+);
+
+-- The Component Analyzer's own "Production" stat group (user call,
+-- 2026-11-01) -- see build_production_stat_rows()'s own docstring. One row
+-- per distinct (component_type, build_method, raw ware) triple actually
+-- seen in production_wares above, component_type being whichever of this
+-- app's own component types that triple's production_ware_id belongs to
+-- (ships -> "chassis", economy wares -> "economy_ware", missiles ->
+-- "missile", etc. -- an equipment ware's own engine/shield/weapon/turret/
+-- thruster split comes from its own equipment_type). stat_id is this
+-- triple's own stable key everywhere else in the app treats a stat by
+-- (the frontend's own STAT_CATALOG_BY_TYPE definitions, selectedStats,
+-- sort state, ...) -- see slugify_build_method()'s own comment for its
+-- shape. build_method is kept unslugified too, so the frontend can resolve
+-- its own real display name (GET /api/build_method_names) directly, same
+-- as any other build method anywhere else in this app, with no need to
+-- reverse the slug.
+CREATE TABLE production_stat_definitions (
+    component_type TEXT NOT NULL,
+    stat_id TEXT NOT NULL,
+    build_method TEXT NOT NULL,
+    ware TEXT NOT NULL,
+    PRIMARY KEY (component_type, stat_id),
+    FOREIGN KEY (build_method) REFERENCES build_methods (build_method_name),
+    FOREIGN KEY (ware) REFERENCES economy_wares_base (ware_id)
+);
+
+-- One row per production_wares row, reshaped to (ware_id, stat_id, value)
+-- -- the actual per-component values for the stat group just above. value
+-- is amount/produced_amount, rounded to a whole number at generation time
+-- (see build_production_stat_rows()'s own comment on why) -- read directly
+-- as a generated stat's own value by src/static/app.js, the exact same way
+-- a real column value already is (resolveStatValue() needs no changes).
+CREATE TABLE production_stats (
+    ware_id TEXT NOT NULL,
+    stat_id TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (ware_id, stat_id)
 );
 
 -- group_name is NOT unique per ship on its own -- a dedicated medium shield
