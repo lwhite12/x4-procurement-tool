@@ -15,6 +15,10 @@ recommendations:** after the staging deploy (step 4), before writing the
 version number anywhere (step 5), and before running `git commit` (step
 8). Don't guess past any of these or treat silence as approval -- stop and
 wait for an actual answer each time, every deploy, even a small one.
+**Exception:** a small PATCH release the user explicitly fast-tracks (see
+"Fast-track for small, pre-authorized bug-fix releases" below) skips all
+three -- that section defines exactly what still has to be true before
+skipping them, and what still stops the whole thing cold regardless.
 
 ## 1. Decide what's shipping
 
@@ -149,6 +153,45 @@ If this deploy closes tracked issues that weren't already closed by a
 comment (same pattern as issue #18's own closing writeup).
 
 ---
+
+## Fast-track for small, pre-authorized bug-fix releases
+
+For a small PATCH release, the user can explicitly ask to skip all three
+mandatory pauses and go straight through to production in one shot (e.g.
+"ship this as a bug fix release to 0.7.1, no manual confirmation"). This
+is an *exception*, not a new default -- only use it when every one of the
+following is true:
+
+- The user's request, in the same message, both (a) explicitly says to
+  skip confirmation / go straight to prod, and (b) gives the exact
+  version number. Inferring either one is not enough -- if they say "ship
+  it" without a number, or give a number without saying to skip
+  confirmation, that's an ordinary release: ask or pause as normal.
+- The change is PATCH-only under the normal rule in step 5 (bug fixes /
+  small UX fixes, no new feature). If it's actually MINOR-sized, say so
+  and confirm the version before proceeding -- don't silently relabel a
+  feature as a "bug fix" just because the user called it one.
+- Nothing in the diff touches the game-data pipeline in a way that needs
+  a fresh `data/x4.db` the user hasn't already seen verified this
+  session (step 2 still applies in full).
+
+What fast-tracking actually skips: waiting for a human to look at
+staging and say it's fine, waiting for sign-off on the exact version
+number, and waiting for sign-off on the exact commit message wording.
+**It does not skip the underlying checks those pauses exist to gate** --
+every other step still runs in full, in order, including an automated
+smoke test against the live staging URL (not just local dev) before
+production is touched. Write the commit message following the same
+conventions as any other release (see step 8) rather than skipping
+straight to a generic one; the only difference is not stopping to ask
+about it.
+
+**Still stops the whole thing cold, fast-track or not:** any console
+error, failed request, wrong version string, or other smoke-test
+failure at any stage; a `git push` rejection; anything under "Decide
+what's shipping" (step 1) that looks unfinished or unrelated to the
+stated bug fix. Report what failed and where it stopped -- never guess
+past a failed check just because the user asked for speed.
 
 ## Scripting this later
 

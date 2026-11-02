@@ -3680,10 +3680,20 @@ input[type="checkbox"] {
   overflow-y: auto;
 }
 
+.stat-lab-missing-mocks-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.stat-lab-missing-mocks-minimize-btn {
+  flex-shrink: 0;
+}
+
 .stat-lab-missing-mocks-heading {
   font-weight: 700;
   color: #ffb300;
-  margin-bottom: 0.3rem;
 }
 
 .stat-lab-missing-mocks-table {

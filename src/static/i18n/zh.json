@@ -931,6 +931,8 @@
     "constants_btn": "常量",
     "mocked_stats_btn": "模拟统计",
     "missing_mocks_heading": "缺少模拟值",
+    "collapse_missing_mocks_tooltip": "最小化此警告",
+    "expand_missing_mocks_tooltip": "最大化此警告",
     "no_groups": "此组件类型尚无统计分组。",
     "no_stats_in_group": "此分组中尚无统计项。",
     "expand_group_tooltip": "展开此分组",

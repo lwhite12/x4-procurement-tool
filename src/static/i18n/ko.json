@@ -931,6 +931,8 @@
     "constants_btn": "상수",
     "mocked_stats_btn": "모의 통계",
     "missing_mocks_heading": "누락된 모의 값",
+    "collapse_missing_mocks_tooltip": "이 경고 최소화",
+    "expand_missing_mocks_tooltip": "이 경고 최대화",
     "no_groups": "이 컴포넌트 유형에 대한 통계 그룹이 아직 없습니다.",
     "no_stats_in_group": "이 그룹에는 아직 통계가 없습니다.",
     "expand_group_tooltip": "이 그룹 펼치기",

@@ -931,6 +931,8 @@
     "constants_btn": "Sabitler",
     "mocked_stats_btn": "Simüle Edilmiş İstatistikler",
     "missing_mocks_heading": "Eksik Simüle Değerler",
+    "collapse_missing_mocks_tooltip": "Bu uyarıyı küçült",
+    "expand_missing_mocks_tooltip": "Bu uyarıyı büyüt",
     "no_groups": "Bu bileşen türü için henüz istatistik grubu yok.",
     "no_stats_in_group": "Bu grupta henüz istatistik yok.",
     "expand_group_tooltip": "Bu grubu genişlet",

@@ -931,6 +931,8 @@
     "constants_btn": "Konstanty",
     "mocked_stats_btn": "Simulované Statistiky",
     "missing_mocks_heading": "Chybějící Nahrazené Hodnoty",
+    "collapse_missing_mocks_tooltip": "Minimalizovat toto upozornění",
+    "expand_missing_mocks_tooltip": "Maximalizovat toto upozornění",
     "no_groups": "Pro tento typ komponenty zatím nejsou žádné skupiny statistik.",
     "no_stats_in_group": "V této skupině zatím nejsou žádné statistiky.",
     "expand_group_tooltip": "Rozbalit tuto skupinu",

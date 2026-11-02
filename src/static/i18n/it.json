@@ -931,6 +931,8 @@
     "constants_btn": "Costanti",
     "mocked_stats_btn": "Statistiche Simulate",
     "missing_mocks_heading": "Valori Simulati Mancanti",
+    "collapse_missing_mocks_tooltip": "Riduci a icona questo avviso",
+    "expand_missing_mocks_tooltip": "Espandi questo avviso",
     "no_groups": "Nessun gruppo di statistiche per questo tipo di componente.",
     "no_stats_in_group": "Nessuna statistica in questo gruppo.",
     "expand_group_tooltip": "Espandi questo gruppo",

@@ -696,6 +696,8 @@
     "constants_btn": "Constants",
     "mocked_stats_btn": "Mocked Stats",
     "missing_mocks_heading": "Missing Mocks",
+    "collapse_missing_mocks_tooltip": "Minimize this warning",
+    "expand_missing_mocks_tooltip": "Maximize this warning",
     "no_groups": "No stat groups for this component type yet.",
     "no_stats_in_group": "No stats in this group yet.",
     "expand_group_tooltip": "Expand this group",

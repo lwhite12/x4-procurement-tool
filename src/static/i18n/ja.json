@@ -931,6 +931,8 @@
     "constants_btn": "定数",
     "mocked_stats_btn": "モック統計",
     "missing_mocks_heading": "不足しているモック値",
+    "collapse_missing_mocks_tooltip": "この警告を最小化",
+    "expand_missing_mocks_tooltip": "この警告を最大化",
     "no_groups": "このコンポーネントタイプの統計グループはまだありません。",
     "no_stats_in_group": "このグループには統計がまだありません。",
     "expand_group_tooltip": "このグループを展開",

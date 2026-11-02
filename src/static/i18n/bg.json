@@ -931,6 +931,8 @@
     "constants_btn": "Константи",
     "mocked_stats_btn": "Симулирани Статистики",
     "missing_mocks_heading": "Липсващи Симулирани Стойности",
+    "collapse_missing_mocks_tooltip": "Минимизирай това предупреждение",
+    "expand_missing_mocks_tooltip": "Максимизирай това предупреждение",
     "no_groups": "Все още няма групи статистики за този тип компонент.",
     "no_stats_in_group": "Все още няма статистики в тази група.",
     "expand_group_tooltip": "Разгъване на тази група",

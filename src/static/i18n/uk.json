@@ -931,6 +931,8 @@
     "constants_btn": "Константи",
     "mocked_stats_btn": "Симульовані Статистики",
     "missing_mocks_heading": "Відсутні Симульовані Значення",
+    "collapse_missing_mocks_tooltip": "Згорнути це попередження",
+    "expand_missing_mocks_tooltip": "Розгорнути це попередження",
     "no_groups": "Для цього типу компонента ще немає груп статистики.",
     "no_stats_in_group": "У цій групі ще немає статистик.",
     "expand_group_tooltip": "Розгорнути цю групу",

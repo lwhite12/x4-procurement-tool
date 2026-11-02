@@ -15,7 +15,15 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.7.0] - 2026-11-02 - Production
+## [0.7.1] - 2026-11-02 - Production
+
+### Fixed
+
+- Statistics Lab: the "Missing Mocks" warning could grow tall enough to push the actual mock-editing
+  content below the fold when many tables/stats were missing mocks at once. It now has its own
+  minimize button to collapse it down to just the heading.
+
+## [0.7.0] - 2026-11-02
 
 ### Added
 

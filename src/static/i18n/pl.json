@@ -931,6 +931,8 @@
     "constants_btn": "Stałe",
     "mocked_stats_btn": "Symulowane Statystyki",
     "missing_mocks_heading": "Brakujące Wartości Zastępcze",
+    "collapse_missing_mocks_tooltip": "Zminimalizuj to ostrzeżenie",
+    "expand_missing_mocks_tooltip": "Zmaksymalizuj to ostrzeżenie",
     "no_groups": "Brak jeszcze grup statystyk dla tego typu komponentu.",
     "no_stats_in_group": "Brak jeszcze statystyk w tej grupie.",
     "expand_group_tooltip": "Rozwiń tę grupę",

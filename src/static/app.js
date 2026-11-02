@@ -18230,6 +18230,12 @@ function collectMissingMocksByTable() {
   return results;
 }
 
+// Session-local only (not persisted via saveState()) -- a convenience
+// toggle to reclaim vertical space when many tables have missing mocks,
+// not meaningful state worth remembering across visits. Resets to
+// expanded (visible) every time the modal is freshly opened.
+let statLabMissingMocksCollapsed = false;
+
 // The Statistics Lab's own standing warning -- see
 // .stat-lab-missing-mocks-summary's own comment in style.css for why this
 // lives outside all three views instead of inside just one of them.
@@ -18242,10 +18248,36 @@ function renderStatLabMissingMocksSummary() {
   statLabMissingMocksSummaryEl.innerHTML = "";
   if (results.length === 0) return;
 
+  const headingRow = document.createElement("div");
+  headingRow.className = "stat-lab-missing-mocks-heading-row";
+
+  // Same "+"/"−" toggle-button convention as the Component Analyzer
+  // table's own minimize button (reuses that exact class) -- here it
+  // collapses the per-table detail lines down to just this heading row,
+  // since with enough tables/mocks this warning can grow tall enough to
+  // push the modal's actual mock-editing content below the fold.
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "cart-loadout-toggle-btn stat-lab-missing-mocks-minimize-btn";
+  minimizeBtn.textContent = statLabMissingMocksCollapsed ? "+" : "−";
+  minimizeBtn.title = t(
+    statLabMissingMocksCollapsed
+      ? "stat_lab_modal.expand_missing_mocks_tooltip"
+      : "stat_lab_modal.collapse_missing_mocks_tooltip",
+  );
+  minimizeBtn.addEventListener("click", () => {
+    statLabMissingMocksCollapsed = !statLabMissingMocksCollapsed;
+    renderStatLabMissingMocksSummary();
+  });
+  headingRow.appendChild(minimizeBtn);
+
   const heading = document.createElement("div");
   heading.className = "stat-lab-missing-mocks-heading";
   heading.textContent = t("stat_lab_modal.missing_mocks_heading");
-  statLabMissingMocksSummaryEl.appendChild(heading);
+  headingRow.appendChild(heading);
+
+  statLabMissingMocksSummaryEl.appendChild(headingRow);
+  if (statLabMissingMocksCollapsed) return;
 
   for (const { tableName, groups } of results) {
     const tableBlock = document.createElement("div");

@@ -931,6 +931,8 @@
     "constants_btn": "Konstanten",
     "mocked_stats_btn": "Simulierte Statistiken",
     "missing_mocks_heading": "Fehlende Mock-Werte",
+    "collapse_missing_mocks_tooltip": "Diese Warnung minimieren",
+    "expand_missing_mocks_tooltip": "Diese Warnung maximieren",
     "no_groups": "Noch keine Statistikgruppen für diesen Komponententyp.",
     "no_stats_in_group": "Noch keine Statistiken in dieser Gruppe.",
     "expand_group_tooltip": "Diese Gruppe erweitern",
