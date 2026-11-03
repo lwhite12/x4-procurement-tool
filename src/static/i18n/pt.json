@@ -322,7 +322,8 @@
     "generate": "Gerar Link de Compartilhamento",
     "could_not_share": "Não foi possível compartilhar {{label}}: {{error}}",
     "could_not_load_shared": "Não foi possível carregar {{label}} compartilhado(s): {{error}}",
-    "option_component_analyzer_tables": "Tabelas do Analisador de Componentes"
+    "option_component_analyzer_tables": "Tabelas do Analisador de Componentes",
+    "option_ship_trials": "Testes de Naves"
   },
   "component_type": {
     "engine": "Motores",

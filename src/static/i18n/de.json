@@ -322,7 +322,8 @@
     "generate": "Freigabelink erzeugen",
     "could_not_share": "{{label}} konnte nicht geteilt werden: {{error}}",
     "could_not_load_shared": "Geteilte(s) {{label}} konnte(n) nicht geladen werden: {{error}}",
-    "option_component_analyzer_tables": "Komponentenanalyse-Tabellen"
+    "option_component_analyzer_tables": "Komponentenanalyse-Tabellen",
+    "option_ship_trials": "Schiffsversuche"
   },
   "component_type": {
     "engine": "Triebwerke",

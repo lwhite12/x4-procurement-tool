@@ -553,7 +553,7 @@ class ImportLoadoutsRequest(BaseModel):
 # anything else automatically, rather than this module needing to validate
 # it before ever reaching share_storage.py (which has no opinion on what
 # sections exist).
-ShareSection = Literal["fleets", "price_overrides", "loadouts", "component_analyzer_tables"]
+ShareSection = Literal["fleets", "price_overrides", "loadouts", "component_analyzer_tables", "ship_trials"]
 
 
 class ShareCreateRequest(BaseModel):

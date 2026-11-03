@@ -322,7 +322,8 @@
     "generate": "공유 링크 생성",
     "could_not_share": "{{label}}을(를) 공유할 수 없습니다: {{error}}",
     "could_not_load_shared": "공유된 {{label}}을(를) 불러올 수 없습니다: {{error}}",
-    "option_component_analyzer_tables": "부품 분석기 표"
+    "option_component_analyzer_tables": "부품 분석기 표",
+    "option_ship_trials": "함선 시험"
   },
   "component_type": {
     "engine": "엔진",

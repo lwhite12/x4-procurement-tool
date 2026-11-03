@@ -322,7 +322,8 @@
     "generate": "Vygenerovat Odkaz ke Sdílení",
     "could_not_share": "Nepodařilo se sdílet {{label}}: {{error}}",
     "could_not_load_shared": "Nepodařilo se načíst sdílené {{label}}: {{error}}",
-    "option_component_analyzer_tables": "Tabulky Analyzátoru Komponent"
+    "option_component_analyzer_tables": "Tabulky Analyzátoru Komponent",
+    "option_ship_trials": "Zkoušky Lodí"
   },
   "component_type": {
     "engine": "Motory",

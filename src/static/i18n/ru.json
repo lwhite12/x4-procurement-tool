@@ -322,7 +322,8 @@
     "generate": "Создать Ссылку для Отправки",
     "could_not_share": "Не удалось поделиться {{label}}: {{error}}",
     "could_not_load_shared": "Не удалось загрузить общий(е) {{label}}: {{error}}",
-    "option_component_analyzer_tables": "Таблицы Анализатора Компонентов"
+    "option_component_analyzer_tables": "Таблицы Анализатора Компонентов",
+    "option_ship_trials": "Испытания Кораблей"
   },
   "component_type": {
     "engine": "Двигатели",

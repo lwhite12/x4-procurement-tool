@@ -322,7 +322,8 @@
     "generate": "Generar Enlace para Compartir",
     "could_not_share": "No se pudo compartir {{label}}: {{error}}",
     "could_not_load_shared": "No se pudo(ieron) cargar {{label}} compartido(s): {{error}}",
-    "option_component_analyzer_tables": "Tablas del Analizador de Componentes"
+    "option_component_analyzer_tables": "Tablas del Analizador de Componentes",
+    "option_ship_trials": "Pruebas de Naves"
   },
   "component_type": {
     "engine": "Motores",

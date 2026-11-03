@@ -322,7 +322,8 @@
     "generate": "生成分享链接",
     "could_not_share": "无法分享{{label}}：{{error}}",
     "could_not_load_shared": "无法加载共享的{{label}}：{{error}}",
-    "option_component_analyzer_tables": "组件分析器表格"
+    "option_component_analyzer_tables": "组件分析器表格",
+    "option_ship_trials": "舰船试验"
   },
   "component_type": {
     "engine": "引擎",

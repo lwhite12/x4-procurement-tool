@@ -322,7 +322,8 @@
     "generate": "Генериране на Връзка за Споделяне",
     "could_not_share": "{{label}} не можа да бъде споделено: {{error}}",
     "could_not_load_shared": "Споделеното {{label}} не можа да бъде заредено: {{error}}",
-    "option_component_analyzer_tables": "Таблици на Анализатора на Компоненти"
+    "option_component_analyzer_tables": "Таблици на Анализатора на Компоненти",
+    "option_ship_trials": "Изпитания на Кораби"
   },
   "component_type": {
     "engine": "Двигатели",

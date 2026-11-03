@@ -322,7 +322,8 @@
     "generate": "Paylaşım Bağlantısı Oluştur",
     "could_not_share": "{{label}} paylaşılamadı: {{error}}",
     "could_not_load_shared": "Paylaşılan {{label}} yüklenemedi: {{error}}",
-    "option_component_analyzer_tables": "Bileşen Analizörü Tabloları"
+    "option_component_analyzer_tables": "Bileşen Analizörü Tabloları",
+    "option_ship_trials": "Gemi Denemeleri"
   },
   "component_type": {
     "engine": "Motorlar",

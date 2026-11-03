@@ -322,7 +322,8 @@
     "generate": "共有リンクを生成",
     "could_not_share": "{{label}} を共有できませんでした：{{error}}",
     "could_not_load_shared": "共有された{{label}}を読み込めませんでした：{{error}}",
-    "option_component_analyzer_tables": "コンポーネント分析テーブル"
+    "option_component_analyzer_tables": "コンポーネント分析テーブル",
+    "option_ship_trials": "艦船試験"
   },
   "component_type": {
     "engine": "エンジン",

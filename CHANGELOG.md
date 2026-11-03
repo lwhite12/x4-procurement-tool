@@ -15,7 +15,14 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.7.2] - 2026-11-03 - Production
+## [0.7.3] - 2026-11-03 - Production
+
+### Added
+
+- Proving Grounds: Ship Trials can now be shared via the same Share link system as Component
+  Analyzer Tables -- a new "Ship Trials" checkbox in the Share modal.
+
+## [0.7.2] - 2026-11-03
 
 ### Fixed
 

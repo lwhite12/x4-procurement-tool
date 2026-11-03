@@ -322,7 +322,8 @@
     "generate": "Wygeneruj Link do Udostępniania",
     "could_not_share": "Nie udało się udostępnić {{label}}: {{error}}",
     "could_not_load_shared": "Nie udało się wczytać udostępnionych danych {{label}}: {{error}}",
-    "option_component_analyzer_tables": "Tabele Analizatora Komponentów"
+    "option_component_analyzer_tables": "Tabele Analizatora Komponentów",
+    "option_ship_trials": "Próby Statków"
   },
   "component_type": {
     "engine": "Silniki",

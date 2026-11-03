@@ -322,7 +322,8 @@
     "generate": "Створити Посилання для Надсилання",
     "could_not_share": "Не вдалося поділитися {{label}}: {{error}}",
     "could_not_load_shared": "Не вдалося завантажити спільні дані {{label}}: {{error}}",
-    "option_component_analyzer_tables": "Таблиці Аналізатора Компонентів"
+    "option_component_analyzer_tables": "Таблиці Аналізатора Компонентів",
+    "option_ship_trials": "Випробування Кораблів"
   },
   "component_type": {
     "engine": "Двигуни",

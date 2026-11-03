@@ -6471,6 +6471,21 @@ const SHARE_SECTIONS = [
       return true;
     },
   },
+  {
+    section: "ship_trials",
+    checkbox: document.getElementById("share-option-ship_trials"),
+    hasContent: () => shipTrials.length > 0,
+    buildPayload: buildShipTrialsPayload,
+    // importShipTrials() is async (it warms componentListCache the same
+    // way importComponentAnalyzerTables() does) but, same as that entry,
+    // applyShareLinksFromUrl() doesn't await the result -- fine here for
+    // the same reason.
+    applyPayload: (data) => {
+      if (!Array.isArray(data) || data.length === 0) return false;
+      importShipTrials(data);
+      return true;
+    },
+  },
 ];
 
 // See SHARE_SECTIONS' own comment on why `label` isn't a field there.
@@ -13478,6 +13493,106 @@ shipTrialFleetShipBackBtn.addEventListener("click", () => {
   shipTrialFleetShipFleetStep.classList.remove("hidden");
 });
 shipTrialFleetShipCancelBtn.addEventListener("click", closeShipTrialAddFleetShipModal);
+
+// ---- Ship Trials Export/Import (share link) ----
+// Plain-data snapshot of the whole shipTrials array -- exactly its own
+// shape, no reshaping -- same "json representation we use for the s3
+// save" spirit as buildComponentAnalyzerTablesPayload() (SHARE_SECTIONS
+// below shares ALL current trials, same as that section shares ALL
+// current tables, no per-trial selection). A deep clone (JSON
+// round-trip), not a live reference -- the caller uploads this
+// immediately and it must not change out from under it if a trial is
+// edited afterward.
+function buildShipTrialsPayload() {
+  return JSON.parse(JSON.stringify(shipTrials));
+}
+
+// Deep-clones + backfills one imported/shared Ship Trial, reassigning a
+// fresh trial id (nextShipTrialId) AND a fresh instanceId for every one
+// of its own ship columns (nextShipTrialInstanceId) -- unlike
+// restorePersistedState()'s own backfill (always this same session's own
+// counters, so existing instanceIds can never collide), an imported file
+// could come from a different session/device entirely, so every
+// instanceId-keyed map on the trial (shipMocks, shipChassisAppliedMods,
+// baselineInstanceId) is rewritten through the SAME old-id -> new-id
+// lookup built while reassigning trial.components' own instanceIds, so
+// everything stays correctly cross-referenced after the swap. Same
+// missing-field backfill shape as restorePersistedState()'s own Ship
+// Trials block, since an imported file could just as easily predate a
+// field that's since been added.
+function reviveImportedShipTrial(rawTrial) {
+  const trial = JSON.parse(JSON.stringify(rawTrial ?? {}));
+  trial.id = nextShipTrialId++;
+  trial.title = typeof trial.title === "string" ? trial.title : "";
+  trial.componentType = "chassis";
+  trial.minimized = false;
+
+  const instanceIdMap = new Map();
+  trial.components = Array.isArray(trial.components) ? trial.components : [];
+  for (const component of trial.components) {
+    const oldInstanceId = component.instanceId;
+    const newInstanceId = nextShipTrialInstanceId++;
+    instanceIdMap.set(oldInstanceId, newInstanceId);
+    component.instanceId = newInstanceId;
+  }
+
+  const remapInstanceKeys = (obj) => {
+    if (!obj || typeof obj !== "object") return {};
+    const remapped = {};
+    for (const [oldInstanceId, value] of Object.entries(obj)) {
+      const newInstanceId = instanceIdMap.get(Number(oldInstanceId)) ?? instanceIdMap.get(oldInstanceId);
+      if (newInstanceId !== undefined) remapped[newInstanceId] = value;
+    }
+    return remapped;
+  };
+  trial.shipMocks = remapInstanceKeys(trial.shipMocks);
+  trial.shipChassisAppliedMods = remapInstanceKeys(trial.shipChassisAppliedMods);
+  trial.baselineInstanceId = instanceIdMap.get(trial.baselineInstanceId) ?? null;
+
+  if (!Array.isArray(trial.statSets) || trial.statSets.length === 0) {
+    trial.statSets = [makeStatSet()];
+    trial.activeStatSetIndex = 0;
+  } else {
+    trial.statSets = trial.statSets.map((statSet) => ({
+      id: nextStatSetId++,
+      name: typeof statSet?.name === "string" ? statSet.name : "",
+      selectedStats: Array.isArray(statSet?.selectedStats) ? statSet.selectedStats : [],
+    }));
+    if (!(trial.activeStatSetIndex >= 0 && trial.activeStatSetIndex < trial.statSets.length)) {
+      trial.activeStatSetIndex = 0;
+    }
+  }
+  return trial;
+}
+
+// Imports a Ship Trials export/share payload (an array of trial objects,
+// same shape buildShipTrialsPayload() produces) -- additive (unshift),
+// same "never wipes what's already there" spirit as "+ Add Trial"/every
+// other Proving Grounds "Add Ship" path, not a destructive replace.
+// Warms componentListCache for "chassis" (every trial column's own type)
+// plus every type any registered formula's mock_ref/aggregate_ref could
+// ever need (collectMockRelevantComponentTypes() -- a static scan over
+// every stat definition, not this import's own data, so it's already
+// almost always warm by the time a user reaches Proving Grounds at all --
+// see restorePersistedState()'s own matching warm-cache fix) before
+// rendering, same reasoning importComponentAnalyzerTables() already
+// documents for why this has to happen before the first paint rather than
+// lazily on demand.
+async function importShipTrials(data) {
+  if (!Array.isArray(data) || data.length === 0) return false;
+  const trials = data.map(reviveImportedShipTrial);
+
+  shipTrials.unshift(...trials);
+
+  // "chassis" deliberately excluded -- already loaded via allShips at
+  // bootstrap, same reasoning importComponentAnalyzerTables() documents.
+  const typesToWarm = new Set(collectMockRelevantComponentTypes().filter((type) => type !== "chassis"));
+  await Promise.all([...typesToWarm].map((type) => fetchComponentList(type)));
+
+  saveState();
+  renderShipTrials();
+  return true;
+}
 
 const shipTrialsListContainer = document.getElementById("ship-trials-list");
 const shipTrialsAddTrialBtn = document.getElementById("ship-trials-add-trial-btn");

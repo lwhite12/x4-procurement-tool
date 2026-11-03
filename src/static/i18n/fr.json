@@ -322,7 +322,8 @@
     "generate": "Générer un Lien de Partage",
     "could_not_share": "Impossible de partager {{label}} : {{error}}",
     "could_not_load_shared": "Impossible de charger {{label}} partagé(s) : {{error}}",
-    "option_component_analyzer_tables": "Tableaux de l'Analyseur de Composants"
+    "option_component_analyzer_tables": "Tableaux de l'Analyseur de Composants",
+    "option_ship_trials": "Essais de Vaisseaux"
   },
   "component_type": {
     "engine": "Moteurs",
