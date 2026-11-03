@@ -15,7 +15,17 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.7.1] - 2026-11-02 - Production
+## [0.7.2] - 2026-11-03 - Production
+
+### Fixed
+
+- A weapon's "Damage" mod never showed up in Burst/Sustained DPS, in either the Component Analyzer or
+  Proving Grounds -- Hull/Shield Damage per Shot (and the area-damage equivalents) read every damage
+  component (base, hull bonus, shield bonus, unshielded-hull bonus, area damage, area shield bonus) as
+  its raw, unmodded value. All five now correctly scale with an applied Damage mod, the same as the
+  mod's own in-game effect.
+
+## [0.7.1] - 2026-11-02
 
 ### Fixed
 

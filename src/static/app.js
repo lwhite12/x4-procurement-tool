@@ -8410,6 +8410,72 @@ const WEAPON_STAT_DEFINITIONS = [
     ["damage_value_modifier_mod"],
     "multiply",
   ),
+  // The real in-game "Damage" mod (equipment_mod_target_mappings.json's own
+  // "damage" entry, confirmed confidence) only ever names ONE real target
+  // column, bullets_base.damage_value -- damage_hull/damage_noshield/
+  // damage_shield/areadamage_value/areadamage_shield are separate sibling
+  // attributes under the same <damage>/<areadamage> XML element, with no
+  // real mod target of their own. A weapon's "Damage" mod is understood
+  // (user call, 2026-11-03) to scale the weapon's overall output
+  // uniformly, so each of these 5 gets its own Post Mod sibling the same
+  // shape as damage_value_post_mod, reusing that SAME damage_value_modifier_mod
+  // (not five redundant new modifier stats -- there's only one real mod
+  // field here). Previously hull_damage_per_shot/shield_damage_per_shot/
+  // area_hull_damage_per_shot/area_shield_damage_per_shot/
+  // hull_damage_shielded_per_shot read every one of these as its raw,
+  // never-modded value, so an applied Damage mod silently never showed up
+  // in Burst/Sustained DPS anywhere (Component Analyzer or Proving
+  // Grounds) -- only in the raw per-column stats themselves.
+  postModStatDef(
+    "damage_hull_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_hull_post_mod",
+    "weapon",
+    "damage_hull",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "damage_noshield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_noshield_post_mod",
+    "weapon",
+    "damage_noshield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "damage_shield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_shield_post_mod",
+    "weapon",
+    "damage_shield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "areadamage_value_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.areadamage_value_post_mod",
+    "weapon",
+    "areadamage_value",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "areadamage_shield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.areadamage_shield_post_mod",
+    "weapon",
+    "areadamage_shield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
   modifierModStatDef(
     "bullet_lifetime_modifier_mod",
     "bullets_base",
@@ -9294,8 +9360,17 @@ const COMBAT_DERIVED_STATS = [
     // Now gated on BOTH damage_value AND areadamage_value being null (see
     // evaluateStatFormula()'s own multi-gate whenNull support) -- the
     // missile fallback only fires for a genuinely missile-fed turret now.
+    // Reads each term's own _post_mod sibling when one resolves (a real
+    // weapon, possibly with a Damage mod applied), falling back to the raw
+    // fundamental stat otherwise (every turret, which has no _post_mod
+    // sibling at all -- see damage_hull_post_mod's own comment -- so the
+    // stat_ref resolves to null and the ternary falls through cleanly).
+    // This is the SAME pattern used everywhere else a Post Mod stat exists
+    // (e.g. recharge_max_post_mod downstream of shield_total_mj) -- the
+    // fundamental columns themselves are never read directly below once a
+    // Post Mod sibling exists for them.
     expression:
-      "damage_value ? (damage_value + (damage_hull ? damage_hull : 0) + (damage_noshield ? damage_noshield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? areadamage_value * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
+      "damage_value ? ((damage_value_post_mod ? damage_value_post_mod : damage_value) + (damage_hull ? (damage_hull_post_mod ? damage_hull_post_mod : damage_hull) : 0) + (damage_noshield ? (damage_noshield_post_mod ? damage_noshield_post_mod : damage_noshield) : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? (areadamage_value_post_mod ? areadamage_value_post_mod : areadamage_value) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
     variables: {
       missile_damage: {
         componentType: "missile",
@@ -9309,9 +9384,13 @@ const COMBAT_DERIVED_STATS = [
         whenNull: ["damage_value", "areadamage_value"],
       },
       damage_value: { componentType: "self", statId: "damage_value" },
+      damage_value_post_mod: { componentType: "self", statId: "damage_value_post_mod" },
       damage_hull: { componentType: "self", statId: "damage_hull" },
+      damage_hull_post_mod: { componentType: "self", statId: "damage_hull_post_mod" },
       damage_noshield: { componentType: "self", statId: "damage_noshield" },
+      damage_noshield_post_mod: { componentType: "self", statId: "damage_noshield_post_mod" },
       areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_value_post_mod: { componentType: "self", statId: "areadamage_value_post_mod" },
       bullet_amount: { componentType: "self", statId: "bullet_amount" },
       bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
     },
@@ -9331,10 +9410,13 @@ const COMBAT_DERIVED_STATS = [
     // hull_damage_per_shot's own comment for why beam lifetime is NOT a
     // factor here). Scales by pellets/barrels like the other per-shot
     // stats.
+    // See hull_damage_per_shot's own comment on the _post_mod-with-fallback
+    // pattern.
     expression:
-      "(damage_hull ? damage_hull : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+      "(damage_hull ? (damage_hull_post_mod ? damage_hull_post_mod : damage_hull) : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
     variables: {
       damage_hull: { componentType: "self", statId: "damage_hull" },
+      damage_hull_post_mod: { componentType: "self", statId: "damage_hull_post_mod" },
       bullet_amount: { componentType: "self", statId: "bullet_amount" },
       bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
     },
@@ -9354,10 +9436,13 @@ const COMBAT_DERIVED_STATS = [
     // hull_damage_per_shot's own comment. CONFIRMED against S Blast Mortar
     // Mk1/Mk2 (376/434 MJ, exact). 0 (not blank) for every bullet with no
     // area damage at all, same convention as hull_damage_shielded_per_shot.
+    // See hull_damage_per_shot's own comment on the _post_mod-with-fallback
+    // pattern.
     expression:
-      "(areadamage_value ? areadamage_value : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+      "(areadamage_value ? (areadamage_value_post_mod ? areadamage_value_post_mod : areadamage_value) : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
     variables: {
       areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_value_post_mod: { componentType: "self", statId: "areadamage_value_post_mod" },
       bullet_amount: { componentType: "self", statId: "bullet_amount" },
       bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
     },
@@ -9373,11 +9458,15 @@ const COMBAT_DERIVED_STATS = [
     // added on top of areadamage_value, the same relationship
     // damage_shield has to damage_value (UNCONFIRMED for this bonus
     // specifically -- see shield_damage_per_shot's own comment).
+    // See hull_damage_per_shot's own comment on the _post_mod-with-fallback
+    // pattern.
     expression:
-      "(areadamage_value ? areadamage_value + (areadamage_shield ? areadamage_shield : 0) : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
+      "(areadamage_value ? (areadamage_value_post_mod ? areadamage_value_post_mod : areadamage_value) + (areadamage_shield ? (areadamage_shield_post_mod ? areadamage_shield_post_mod : areadamage_shield) : 0) : 0) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1)",
     variables: {
       areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_value_post_mod: { componentType: "self", statId: "areadamage_value_post_mod" },
       areadamage_shield: { componentType: "self", statId: "areadamage_shield" },
+      areadamage_shield_post_mod: { componentType: "self", statId: "areadamage_shield_post_mod" },
       bullet_amount: { componentType: "self", statId: "bullet_amount" },
       bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
     },
@@ -9447,8 +9536,10 @@ const COMBAT_DERIVED_STATS = [
     // it null -- S Blast Mortar -- or hasn't been screenshotted yet -- BOR M
     // Ion Atomiser), but structurally identical to the already-confirmed
     // damage_shield bonus.
+    // See hull_damage_per_shot's own comment on the _post_mod-with-fallback
+    // pattern.
     expression:
-      "damage_value ? (damage_value + (damage_shield ? damage_shield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? (areadamage_value + (areadamage_shield ? areadamage_shield : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
+      "damage_value ? ((damage_value_post_mod ? damage_value_post_mod : damage_value) + (damage_shield ? (damage_shield_post_mod ? damage_shield_post_mod : damage_shield) : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : (areadamage_value ? ((areadamage_value_post_mod ? areadamage_value_post_mod : areadamage_value) + (areadamage_shield ? (areadamage_shield_post_mod ? areadamage_shield_post_mod : areadamage_shield) : 0)) * (bullet_amount ? bullet_amount : 1) * (bullet_barrelamount ? bullet_barrelamount : 1) : missile_damage * (missile_amount ? missile_amount : 1) * (missile_barrelamount ? missile_barrelamount : 1))",
     variables: {
       missile_damage: {
         componentType: "missile",
@@ -9462,9 +9553,13 @@ const COMBAT_DERIVED_STATS = [
         whenNull: ["damage_value", "areadamage_value"],
       },
       damage_value: { componentType: "self", statId: "damage_value" },
+      damage_value_post_mod: { componentType: "self", statId: "damage_value_post_mod" },
       damage_shield: { componentType: "self", statId: "damage_shield" },
+      damage_shield_post_mod: { componentType: "self", statId: "damage_shield_post_mod" },
       areadamage_value: { componentType: "self", statId: "areadamage_value" },
+      areadamage_value_post_mod: { componentType: "self", statId: "areadamage_value_post_mod" },
       areadamage_shield: { componentType: "self", statId: "areadamage_shield" },
+      areadamage_shield_post_mod: { componentType: "self", statId: "areadamage_shield_post_mod" },
       bullet_amount: { componentType: "self", statId: "bullet_amount" },
       bullet_barrelamount: { componentType: "self", statId: "bullet_barrelamount" },
     },
