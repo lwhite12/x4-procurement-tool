@@ -15,6 +15,19 @@ it.
 
 ## [Unreleased] - Development
 
+## [0.8.0] - 2026-11-04 - Production
+
+### Added
+
+- Statistics Lab mock scopes now have an "Import from Loadouts" button next to "Copy to New Scope" that
+  pulls every component out of one of your saved/imported loadouts into that scope's mocks in one click --
+  skipping whatever component type the enclosing table itself analyzes, so you don't shadow the row you're
+  actually studying.
+- The Ware Price Override picker now color-codes each typed override using the same green-to-amber
+  gradient X4's own trade UI uses for buy prices (green at the ware's min price, white at its average,
+  amber at its max). A small slider button next to each override box lets you pick a price visually
+  instead of typing one.
+
 ## [0.7.4] - 2026-11-03 - Production
 
 ### Added

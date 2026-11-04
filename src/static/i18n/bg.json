@@ -269,7 +269,9 @@
     "loading_wares": "Зареждане на стоки…",
     "failed_to_load_wares": "Стоките не можаха да бъдат заредени -- моля, опитайте отново.",
     "remove_override_tooltip": "Премахване на заместването за {{name}}",
-    "replace_overrides_confirm": "Зареждането ще замени текущите ви замествания на цените на стоките. Да се продължи ли?"
+    "replace_overrides_confirm": "Зареждането ще замени текущите ви замествания на цените на стоките. Да се продължи ли?",
+    "slider_btn_tooltip": "Изберете цена с плъзгач",
+    "slider_ok_btn": "Добре"
   },
   "import_loadouts_modal": {
     "title": "Импортиране на Екипировки от Играта",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Копирай",
     "copy_scope_source_hint": "Копиране на всяка симулация от: {{scope}}",
     "copy_scope_same_scope": "Изберете друг целеви обхват.",
+    "import_loadouts_btn": "Импортиране от екипировки",
+    "import_loadouts_tooltip": "Импортиране на всеки компонент от една от запазените ви екипировки в този обхват",
+    "import_loadout_hint": "Импортиране в: {{scope}}",
     "mock_wizard_scope_label": "Обхват",
     "mock_wizard_type_label": "Тип Симулация",
     "mock_type_stat": "Отделна Статистика",

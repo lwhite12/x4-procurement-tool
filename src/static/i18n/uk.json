@@ -269,7 +269,9 @@
     "loading_wares": "Завантаження товарів…",
     "failed_to_load_wares": "Не вдалося завантажити товари -- спробуйте ще раз.",
     "remove_override_tooltip": "Видалити перевизначення для {{name}}",
-    "replace_overrides_confirm": "Завантаження замінить ваші поточні перевизначення цін на товари. Продовжити?"
+    "replace_overrides_confirm": "Завантаження замінить ваші поточні перевизначення цін на товари. Продовжити?",
+    "slider_btn_tooltip": "Вибрати ціну за допомогою повзунка",
+    "slider_ok_btn": "Гаразд"
   },
   "import_loadouts_modal": {
     "title": "Імпортувати Спорядження з Гри",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Копіювати",
     "copy_scope_source_hint": "Копіювання кожної підстановки з: {{scope}}",
     "copy_scope_same_scope": "Виберіть іншу область призначення.",
+    "import_loadouts_btn": "Імпорт зі спорядження",
+    "import_loadouts_tooltip": "Імпортувати кожен компонент з одного зі збережених споряджень у цю область",
+    "import_loadout_hint": "Імпорт у: {{scope}}",
     "mock_wizard_scope_label": "Область",
     "mock_wizard_type_label": "Тип Симуляції",
     "mock_type_stat": "Окрема Статистика",

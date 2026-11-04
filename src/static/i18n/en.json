@@ -786,6 +786,9 @@
     "copy_scope_confirm_btn": "Copy",
     "copy_scope_source_hint": "Copying every mock from: {{scope}}",
     "copy_scope_same_scope": "Pick a different scope to copy into.",
+    "import_loadouts_btn": "Import from Loadouts",
+    "import_loadouts_tooltip": "Import every component from one of your saved loadouts into this scope",
+    "import_loadout_hint": "Importing into: {{scope}}",
     "mock_wizard_scope_label": "Scope",
     "mock_wizard_type_label": "Mock Type",
     "mock_type_stat": "Individual Stat",
@@ -995,7 +998,9 @@
     "loading_wares": "Loading wares…",
     "failed_to_load_wares": "Failed to load wares -- try again.",
     "remove_override_tooltip": "Remove override for {{name}}",
-    "replace_overrides_confirm": "Loading will replace your current ware price overrides. Continue?"
+    "replace_overrides_confirm": "Loading will replace your current ware price overrides. Continue?",
+    "slider_btn_tooltip": "Pick a price with a slider",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Import Game Loadouts",

@@ -269,7 +269,9 @@
     "loading_wares": "Cargando mercancías…",
     "failed_to_load_wares": "No se pudieron cargar las mercancías -- inténtelo de nuevo.",
     "remove_override_tooltip": "Eliminar anulación para {{name}}",
-    "replace_overrides_confirm": "Cargar esto reemplazará sus anulaciones de precio de mercancías actuales. ¿Continuar?"
+    "replace_overrides_confirm": "Cargar esto reemplazará sus anulaciones de precio de mercancías actuales. ¿Continuar?",
+    "slider_btn_tooltip": "Elige un precio con un control deslizante",
+    "slider_ok_btn": "Aceptar"
   },
   "import_loadouts_modal": {
     "title": "Importar Equipamientos del Juego",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Copiar",
     "copy_scope_source_hint": "Copiando cada simulación desde: {{scope}}",
     "copy_scope_same_scope": "Elige un ámbito distinto para copiar.",
+    "import_loadouts_btn": "Importar desde equipamientos",
+    "import_loadouts_tooltip": "Importar cada componente de uno de tus equipamientos guardados a este ámbito",
+    "import_loadout_hint": "Importando a: {{scope}}",
     "mock_wizard_scope_label": "Ámbito",
     "mock_wizard_type_label": "Tipo de Simulación",
     "mock_type_stat": "Estadística Individual",

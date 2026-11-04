@@ -269,7 +269,9 @@
     "loading_wares": "Загрузка товаров…",
     "failed_to_load_wares": "Не удалось загрузить товары -- попробуйте снова.",
     "remove_override_tooltip": "Удалить переопределение для {{name}}",
-    "replace_overrides_confirm": "Загрузка заменит ваши текущие переопределения цен на товары. Продолжить?"
+    "replace_overrides_confirm": "Загрузка заменит ваши текущие переопределения цен на товары. Продолжить?",
+    "slider_btn_tooltip": "Выбрать цену с помощью слайдера",
+    "slider_ok_btn": "ОК"
   },
   "import_loadouts_modal": {
     "title": "Импортировать Оснащения из Игры",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Копировать",
     "copy_scope_source_hint": "Копирование каждой подстановки из: {{scope}}",
     "copy_scope_same_scope": "Выберите другую область для копирования.",
+    "import_loadouts_btn": "Импорт из оснащения",
+    "import_loadouts_tooltip": "Импортировать каждый компонент из одного из сохранённых оснащений в эту область",
+    "import_loadout_hint": "Импорт в: {{scope}}",
     "mock_wizard_scope_label": "Область",
     "mock_wizard_type_label": "Тип Симуляции",
     "mock_type_stat": "Отдельная Статистика",

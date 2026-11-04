@@ -269,7 +269,9 @@
     "loading_wares": "Carregando mercadorias…",
     "failed_to_load_wares": "Não foi possível carregar as mercadorias -- tente novamente.",
     "remove_override_tooltip": "Remover substituição para {{name}}",
-    "replace_overrides_confirm": "Carregar isso substituirá suas substituições de preço de mercadorias atuais. Continuar?"
+    "replace_overrides_confirm": "Carregar isso substituirá suas substituições de preço de mercadorias atuais. Continuar?",
+    "slider_btn_tooltip": "Escolher um preço com um controle deslizante",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Importar Equipamentos do Jogo",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Copiar",
     "copy_scope_source_hint": "Copiando cada simulação de: {{scope}}",
     "copy_scope_same_scope": "Escolha um escopo diferente para copiar.",
+    "import_loadouts_btn": "Importar de equipamentos",
+    "import_loadouts_tooltip": "Importar cada componente de um dos seus equipamentos salvos para este escopo",
+    "import_loadout_hint": "Importando para: {{scope}}",
     "mock_wizard_scope_label": "Escopo",
     "mock_wizard_type_label": "Tipo de Simulação",
     "mock_type_stat": "Estatística Individual",

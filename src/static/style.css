@@ -2475,6 +2475,50 @@ input[type="checkbox"] {
   width: 7rem;
 }
 
+.price-override-slider-btn {
+  font-size: 0.75rem;
+}
+
+.price-override-slider-popover {
+  position: fixed;
+  z-index: 200;
+  width: 16rem;
+  padding: 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-blue-soft);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* display: flex lives here rather than on .price-override-slider-popover
+   itself -- same specificity as .hidden's own "display: none", and this
+   class is defined AFTER .hidden in the stylesheet, so an unqualified
+   "display: flex" there would always win the cascade regardless of the
+   hidden class actually being present (confirmed: that's exactly what
+   happened before this fix -- visible on page load, never closed). The
+   :not(.hidden) qualifier outranks .hidden on specificity instead, so it
+   only applies when .hidden is absent. */
+.price-override-slider-popover:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.price-override-slider-popover .modal-actions {
+  margin: 0;
+}
+
+.price-override-slider-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.price-override-slider-value {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
 .price-override-modal-heading-row {
   display: flex;
   align-items: center;

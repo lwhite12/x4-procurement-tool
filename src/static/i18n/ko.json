@@ -269,7 +269,9 @@
     "loading_wares": "물자 불러오는 중…",
     "failed_to_load_wares": "물자를 불러올 수 없습니다 -- 다시 시도하세요.",
     "remove_override_tooltip": "{{name}}의 재정의 제거",
-    "replace_overrides_confirm": "불러오면 현재 물자 가격 재정의가 대체됩니다. 계속하시겠습니까?"
+    "replace_overrides_confirm": "불러오면 현재 물자 가격 재정의가 대체됩니다. 계속하시겠습니까?",
+    "slider_btn_tooltip": "슬라이더로 가격 선택",
+    "slider_ok_btn": "확인"
   },
   "import_loadouts_modal": {
     "title": "게임 장비 구성 가져오기",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "복사",
     "copy_scope_source_hint": "다음에서 모든 모의 값 복사 중: {{scope}}",
     "copy_scope_same_scope": "복사할 다른 범위를 선택하세요.",
+    "import_loadouts_btn": "장비 구성에서 가져오기",
+    "import_loadouts_tooltip": "저장된 장비 구성 중 하나의 모든 구성 요소를 이 범위로 가져옵니다",
+    "import_loadout_hint": "가져오는 중: {{scope}}",
     "mock_wizard_scope_label": "범위",
     "mock_wizard_type_label": "모의 유형",
     "mock_type_stat": "개별 통계",

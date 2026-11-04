@@ -269,7 +269,9 @@
     "loading_wares": "物資を読み込み中…",
     "failed_to_load_wares": "物資を読み込めませんでした -- もう一度お試しください。",
     "remove_override_tooltip": "{{name}} の上書きを削除",
-    "replace_overrides_confirm": "読み込むと現在の物資価格の上書きが置き換えられます。続行しますか？"
+    "replace_overrides_confirm": "読み込むと現在の物資価格の上書きが置き換えられます。続行しますか？",
+    "slider_btn_tooltip": "スライダーで価格を選択",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "ゲームの装備構成をインポート",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "コピー",
     "copy_scope_source_hint": "コピー元のすべてのモック: {{scope}}",
     "copy_scope_same_scope": "コピー先には別のスコープを選んでください。",
+    "import_loadouts_btn": "装備構成からインポート",
+    "import_loadouts_tooltip": "保存済みの装備構成の1つからすべてのコンポーネントをこのスコープにインポートします",
+    "import_loadout_hint": "インポート先: {{scope}}",
     "mock_wizard_scope_label": "スコープ",
     "mock_wizard_type_label": "モックの種類",
     "mock_type_stat": "個別の統計",

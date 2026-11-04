@@ -269,7 +269,9 @@
     "loading_wares": "Načítání zboží…",
     "failed_to_load_wares": "Zboží se nepodařilo načíst -- zkuste to prosím znovu.",
     "remove_override_tooltip": "Odebrat přepsání pro {{name}}",
-    "replace_overrides_confirm": "Načtením nahradíte vaše aktuální přepsání cen zboží. Pokračovat?"
+    "replace_overrides_confirm": "Načtením nahradíte vaše aktuální přepsání cen zboží. Pokračovat?",
+    "slider_btn_tooltip": "Vybrat cenu pomocí posuvníku",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Importovat Herní Výbavy",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Kopírovat",
     "copy_scope_source_hint": "Kopíruji každou simulaci z: {{scope}}",
     "copy_scope_same_scope": "Vyberte jiný cílový rozsah.",
+    "import_loadouts_btn": "Importovat z výbav",
+    "import_loadouts_tooltip": "Importovat každou součást z jedné z uložených výbav do tohoto rozsahu",
+    "import_loadout_hint": "Importuji do: {{scope}}",
     "mock_wizard_scope_label": "Rozsah",
     "mock_wizard_type_label": "Typ Náhrady",
     "mock_type_stat": "Jednotlivá Statistika",

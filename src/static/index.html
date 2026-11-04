@@ -1378,6 +1378,30 @@
           </div>
         </div>
 
+        <div id="stat-lab-import-loadout-wizard" class="stat-lab-mock-wizard hidden">
+          <p id="stat-lab-import-loadout-hint" class="stat-lab-builder-hint"></p>
+          <div class="loadout-picker-search-row">
+            <input
+              type="text"
+              id="stat-lab-import-loadout-chassis-search"
+              class="loadout-picker-search-input"
+              placeholder="Search ship name…"
+              data-i18n-placeholder="select_game_loadout_modal.chassis_search_placeholder"
+            />
+            <input
+              type="text"
+              id="stat-lab-import-loadout-name-search"
+              class="loadout-picker-search-input"
+              placeholder="Search loadout name…"
+              data-i18n-placeholder="select_game_loadout_modal.name_search_placeholder"
+            />
+          </div>
+          <div id="stat-lab-import-loadout-list" class="select-game-loadout-list"></div>
+          <div class="modal-actions">
+            <button type="button" id="stat-lab-import-loadout-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+          </div>
+        </div>
+
         <div id="stat-lab-mocks-sections" class="stat-lab-mocks-sections"></div>
         <div class="modal-actions">
           <button type="button" id="stat-lab-mocks-close-btn" data-i18n="mod_lab_modal.close">Close</button>
@@ -1569,6 +1593,20 @@
       </div>
       <div class="modal-actions">
         <button type="button" id="price-override-close-btn" data-i18n="price_override_modal.close">Close</button>
+      </div>
+    </div>
+
+    <!-- One shared floating popover for every row's own slider button (see
+         openPriceOverrideSliderPopover() in app.js) -- position: fixed and
+         repositioned next to whichever button was last clicked, so it's
+         never clipped by the table's own scroll container. -->
+    <div id="price-override-slider-popover" class="price-override-slider-popover hidden">
+      <div id="price-override-slider-label" class="price-override-slider-label"></div>
+      <input type="range" id="price-override-slider-range" />
+      <div id="price-override-slider-value" class="price-override-slider-value"></div>
+      <div class="modal-actions">
+        <button type="button" id="price-override-slider-cancel-btn" data-i18n="stat_select_modal.cancel">Cancel</button>
+        <button type="button" id="price-override-slider-ok-btn" data-i18n="price_override_modal.slider_ok_btn">OK</button>
       </div>
     </div>
   </div>

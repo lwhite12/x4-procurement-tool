@@ -269,7 +269,9 @@
     "loading_wares": "Chargement des marchandises…",
     "failed_to_load_wares": "Échec du chargement des marchandises -- veuillez réessayer.",
     "remove_override_tooltip": "Supprimer la substitution pour {{name}}",
-    "replace_overrides_confirm": "Le chargement remplacera vos substitutions de prix des marchandises actuelles. Continuer ?"
+    "replace_overrides_confirm": "Le chargement remplacera vos substitutions de prix des marchandises actuelles. Continuer ?",
+    "slider_btn_tooltip": "Choisir un prix avec un curseur",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Importer les Équipements du Jeu",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Copier",
     "copy_scope_source_hint": "Copie de chaque simulation depuis : {{scope}}",
     "copy_scope_same_scope": "Choisissez une autre portée de destination.",
+    "import_loadouts_btn": "Importer depuis des équipements",
+    "import_loadouts_tooltip": "Importer chaque composant d'un de vos équipements enregistrés vers cette portée",
+    "import_loadout_hint": "Importation vers : {{scope}}",
     "mock_wizard_scope_label": "Portée",
     "mock_wizard_type_label": "Type de Simulation",
     "mock_type_stat": "Statistique Individuelle",

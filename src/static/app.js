@@ -2587,6 +2587,38 @@ function filterPriceOverrideWares(wares) {
   });
 }
 
+// Same green -> white -> amber gradient X4's own trade UI uses for a
+// ware's buy/sell price text (data/libraries/colors.xml: text_price_good =
+// green_moderate_glow #00ff00, text_price_average = white_weak_glow
+// #ffffff, text_price_bad = amber_moderate_glow #ffbf00) -- green at/below
+// price_min, white at price_avg, amber at/above price_max, linearly
+// interpolated between each pair. Falls back to null (caller leaves the
+// input's color at its CSS default) when the ware is missing the range
+// data needed to place the value at all.
+function priceGradientColor(value, min, avg, max) {
+  if (value == null || min == null || max == null || max <= min) return null;
+  const midpoint = avg != null && avg > min && avg < max ? avg : (min + max) / 2;
+  const clamped = Math.min(max, Math.max(min, value));
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+  const mix = (from, to, t) => `rgb(${lerp(from[0], to[0], t)}, ${lerp(from[1], to[1], t)}, ${lerp(from[2], to[2], t)})`;
+  const green = [0, 255, 0];
+  const white = [255, 255, 255];
+  const amber = [255, 191, 0];
+  if (clamped <= midpoint) return mix(green, white, midpoint === min ? 1 : (clamped - min) / (midpoint - min));
+  return mix(white, amber, midpoint === max ? 1 : (clamped - midpoint) / (max - midpoint));
+}
+
+// Applies priceGradientColor() to an override input's own text color for
+// the ware it belongs to -- shared by the initial render and the input's
+// own "input" listener below, and by the slider popover's live readout
+// (see openPriceOverrideSliderPopover()), so all three stay in sync with
+// exactly the same gradient. An empty/unparsed input just clears back to
+// the CSS default rather than coloring a NaN.
+function applyPriceOverrideInputColor(inputEl, ware) {
+  const value = inputEl.value === "" ? null : Number(inputEl.value);
+  inputEl.style.color = priceGradientColor(value, ware.price_min, ware.price_avg, ware.price_max) ?? "";
+}
+
 function renderPriceOverrideTable(wares) {
   priceOverrideTbody.innerHTML = "";
   priceOverrideHighlightedRow = null;
@@ -2611,6 +2643,20 @@ function renderPriceOverrideTable(wares) {
     }
 
     const overrideTd = document.createElement("td");
+    const overrideRow = document.createElement("div");
+    overrideRow.className = "component-picker-row-content";
+
+    const sliderBtn = document.createElement("button");
+    sliderBtn.type = "button";
+    sliderBtn.className = "share-badge-reset-btn price-override-slider-btn";
+    sliderBtn.textContent = "⇆";
+    sliderBtn.title = t("price_override_modal.slider_btn_tooltip");
+    // Only meaningful when the ware actually has a min/max range to slide
+    // across -- some wares (no real trade data) only ever show "—" for all
+    // three price columns, same gate as priceGradientColor()'s own.
+    sliderBtn.disabled = ware.price_min == null || ware.price_max == null || ware.price_max <= ware.price_min;
+    overrideRow.appendChild(sliderBtn);
+
     const overrideInput = document.createElement("input");
     overrideInput.type = "number";
     overrideInput.min = "0";
@@ -2618,20 +2664,93 @@ function renderPriceOverrideTable(wares) {
     overrideInput.placeholder = "no override";
     overrideInput.className = "price-override-input";
     if (priceOverrides[ware.ware_id] !== undefined) overrideInput.value = priceOverrides[ware.ware_id];
+    applyPriceOverrideInputColor(overrideInput, ware);
     overrideInput.addEventListener("input", () => {
       if (overrideInput.value === "") {
         delete priceOverrides[ware.ware_id];
       } else {
         priceOverrides[ware.ware_id] = Number(overrideInput.value);
       }
+      applyPriceOverrideInputColor(overrideInput, ware);
       renderPriceOverrideSummary();
     });
-    overrideTd.appendChild(overrideInput);
+    overrideRow.appendChild(overrideInput);
+
+    sliderBtn.addEventListener("click", () => openPriceOverrideSliderPopover(ware, overrideInput, sliderBtn));
+
+    overrideTd.appendChild(overrideRow);
     tr.appendChild(overrideTd);
 
     priceOverrideTbody.appendChild(tr);
   }
 }
+
+// ---- Price override slider popover ----
+// One shared floating popover (position: fixed, see its CSS) reused for
+// whichever row's own slider button (see renderPriceOverrideTable() above)
+// was last clicked, rather than one per row -- the table can hold hundreds
+// of wares, and every row's popover would be identical apart from which
+// ware/input it's currently wired to.
+let priceOverrideSliderWare = null;
+let priceOverrideSliderTargetInput = null;
+
+const priceOverrideSliderPopover = document.getElementById("price-override-slider-popover");
+const priceOverrideSliderLabel = document.getElementById("price-override-slider-label");
+const priceOverrideSliderRange = document.getElementById("price-override-slider-range");
+const priceOverrideSliderValue = document.getElementById("price-override-slider-value");
+
+function updatePriceOverrideSliderValueDisplay() {
+  const value = Number(priceOverrideSliderRange.value);
+  priceOverrideSliderValue.textContent = formatPriceValue(value);
+  priceOverrideSliderValue.style.color =
+    priceGradientColor(value, priceOverrideSliderWare.price_min, priceOverrideSliderWare.price_avg, priceOverrideSliderWare.price_max) ??
+    "";
+}
+priceOverrideSliderRange.addEventListener("input", updatePriceOverrideSliderValueDisplay);
+
+function openPriceOverrideSliderPopover(ware, overrideInput, anchorBtn) {
+  priceOverrideSliderWare = ware;
+  priceOverrideSliderTargetInput = overrideInput;
+
+  priceOverrideSliderLabel.textContent = ware.name ?? ware.ware_id;
+  priceOverrideSliderRange.min = String(ware.price_min);
+  priceOverrideSliderRange.max = String(ware.price_max);
+  // A step finer than "1 credit" would make a mouse drag feel laggy for
+  // wares with a huge min-max span (raw ore vs. a capital ship module can
+  // differ by 6 orders of magnitude) without ever being reachable by eye
+  // anyway, so this caps it at 1000 steps across the full range.
+  priceOverrideSliderRange.step = String(Math.max(1, Math.round((ware.price_max - ware.price_min) / 1000)));
+  const startValue =
+    overrideInput.value !== "" ? Number(overrideInput.value) : (ware.price_avg ?? (ware.price_min + ware.price_max) / 2);
+  priceOverrideSliderRange.value = String(Math.min(ware.price_max, Math.max(ware.price_min, startValue)));
+  updatePriceOverrideSliderValueDisplay();
+
+  priceOverrideSliderPopover.classList.remove("hidden");
+  const rect = anchorBtn.getBoundingClientRect();
+  const popoverRect = priceOverrideSliderPopover.getBoundingClientRect();
+  // Flips above the button instead of below when there isn't enough room
+  // underneath (e.g. a row near the bottom of the modal's own scrollable
+  // table) -- same "stays on screen" concern as any other floating panel,
+  // just without a dropdown library to handle it for us.
+  const top =
+    rect.bottom + 4 + popoverRect.height > window.innerHeight ? rect.top - popoverRect.height - 4 : rect.bottom + 4;
+  priceOverrideSliderPopover.style.top = `${Math.max(4, top)}px`;
+  priceOverrideSliderPopover.style.left = `${Math.min(rect.left, window.innerWidth - popoverRect.width - 4)}px`;
+}
+
+function closePriceOverrideSliderPopover() {
+  priceOverrideSliderPopover.classList.add("hidden");
+  priceOverrideSliderWare = null;
+  priceOverrideSliderTargetInput = null;
+}
+
+document.getElementById("price-override-slider-cancel-btn").addEventListener("click", closePriceOverrideSliderPopover);
+document.getElementById("price-override-slider-ok-btn").addEventListener("click", () => {
+  if (!priceOverrideSliderTargetInput) return;
+  priceOverrideSliderTargetInput.value = priceOverrideSliderRange.value;
+  priceOverrideSliderTargetInput.dispatchEvent(new Event("input", { bubbles: true }));
+  closePriceOverrideSliderPopover();
+});
 
 // Ware name for display, falling back to the raw ware_id when
 // allWaresCache hasn't been loaded yet (e.g. the summary box renders once
@@ -2709,6 +2828,7 @@ function markAllFleetsDirtyAndRecompute() {
 
 function closePriceOverrideModal() {
   priceOverrideModalOverlay.classList.add("hidden");
+  closePriceOverrideSliderPopover();
   renderPriceOverrideSummary();
   markAllFleetsDirtyAndRecompute();
 }
@@ -19887,6 +20007,13 @@ function buildMockSection(scope, entries) {
     copyBtn.addEventListener("click", () => openCopyScopeWizard(scope));
     header.appendChild(copyBtn);
   }
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "stat-lab-mock-section-copy-btn";
+  importBtn.textContent = t("stat_lab_modal.import_loadouts_btn");
+  importBtn.title = t("stat_lab_modal.import_loadouts_tooltip");
+  importBtn.addEventListener("click", () => openStatLabImportLoadoutWizard(scope));
+  header.appendChild(importBtn);
   section.appendChild(header);
 
   if (collapsed) return section;
@@ -20328,6 +20455,101 @@ document.getElementById("stat-lab-copy-scope-confirm-btn").addEventListener("cli
   closeCopyScopeWizard();
   renderStatLabMocksView();
 });
+
+// ---- "Import from Loadouts" wizard ----
+// Converts one of the user's own saved/imported loadouts (same working set
+// as the Ship Trials "Add Ship" picker) into full-component mocks and
+// writes them into a given mock scope in one shot -- buildShipMocksFromLoadout()
+// already returns exactly the {componentType: [{type: "component_ref", ...}]}
+// shape a full-component mock entry list uses, so this only needs to merge
+// it into the target scope's own map (same append, never overwrite,
+// behavior as openCopyScopeWizard's own confirm handler above) and skip
+// whichever componentType the target scope's own table is itself analyzing
+// -- importing a ship's own shield into a Shield table's mocks would just
+// shadow the real row being studied.
+let importLoadoutScope = null;
+
+const statLabImportLoadoutWizardEl = document.getElementById("stat-lab-import-loadout-wizard");
+const statLabImportLoadoutHint = document.getElementById("stat-lab-import-loadout-hint");
+const statLabImportLoadoutChassisSearch = document.getElementById("stat-lab-import-loadout-chassis-search");
+const statLabImportLoadoutNameSearch = document.getElementById("stat-lab-import-loadout-name-search");
+const statLabImportLoadoutList = document.getElementById("stat-lab-import-loadout-list");
+
+function renderStatLabImportLoadoutList() {
+  if (!importLoadoutScope) return;
+  statLabImportLoadoutList.innerHTML = "";
+  const shipByWareId = new Map(allShips.map((ship) => [ship.ware_id, ship]));
+  const allEntries = importedLoadoutsResult?.ships ?? [];
+  const chassisQuery = statLabImportLoadoutChassisSearch.value.trim().toLowerCase();
+  const nameQuery = statLabImportLoadoutNameSearch.value.trim().toLowerCase();
+  const entries = allEntries.filter((entry) => {
+    if (chassisQuery && !(entry.shipName ?? "").toLowerCase().includes(chassisQuery)) return false;
+    if (nameQuery && !(entry.name ?? "").toLowerCase().includes(nameQuery)) return false;
+    return true;
+  });
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent =
+      allEntries.length === 0 ? t("proving_grounds.no_saved_loadouts") : t("proving_grounds.no_loadouts_match_filters");
+    statLabImportLoadoutList.appendChild(empty);
+  }
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "select-game-loadout-row";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "select-game-loadout-row-name";
+    nameSpan.textContent = entry.name || t("proving_grounds.unnamed_loadout");
+    row.appendChild(nameSpan);
+
+    const shipSpan = document.createElement("span");
+    shipSpan.className = "select-game-loadout-row-ship";
+    shipSpan.textContent = entry.shipName;
+    row.appendChild(shipSpan);
+
+    const ship = shipByWareId.get(entry.shipWareId);
+    if (ship?.icon) row.appendChild(buildIconImg(ship.icon, "ship-icon"));
+
+    row.addEventListener("click", () => {
+      importLoadoutIntoMockScope(importLoadoutScope, entry);
+      closeStatLabImportLoadoutWizard();
+    });
+    statLabImportLoadoutList.appendChild(row);
+  }
+}
+
+function openStatLabImportLoadoutWizard(scope) {
+  importLoadoutScope = scope;
+  statLabImportLoadoutHint.textContent = t("stat_lab_modal.import_loadout_hint", { scope: scopeLabel(scope) });
+  statLabImportLoadoutChassisSearch.value = "";
+  statLabImportLoadoutNameSearch.value = "";
+  statLabImportLoadoutChassisSearch.oninput = renderStatLabImportLoadoutList;
+  statLabImportLoadoutNameSearch.oninput = renderStatLabImportLoadoutList;
+  renderStatLabImportLoadoutList();
+  statLabImportLoadoutWizardEl.classList.remove("hidden");
+}
+
+function closeStatLabImportLoadoutWizard() {
+  statLabImportLoadoutWizardEl.classList.add("hidden");
+  importLoadoutScope = null;
+}
+document.getElementById("stat-lab-import-loadout-cancel-btn").addEventListener("click", closeStatLabImportLoadoutWizard);
+
+function importLoadoutIntoMockScope(scope, loadout) {
+  const mocks = buildShipMocksFromLoadout(loadout);
+  const excludeType = scope.table?.componentType ?? null;
+  const targetMap = mockConfigMapFor(scope);
+  for (const [componentType, entries] of Object.entries(mocks)) {
+    if (componentType === excludeType) continue;
+    const targetList = asConfigList(targetMap[componentType]);
+    for (const entry of entries) targetList.push(JSON.parse(JSON.stringify(entry)));
+    targetMap[componentType] = targetList;
+  }
+  saveState();
+  renderComponentAnalyzerTables();
+  renderStatLabMissingMocksSummary();
+  renderStatLabMocksView();
+}
 
 // ---- Constants view ----
 // A flat list (no groups -- see CONSTANT_DEFINITIONS' own comment) of every

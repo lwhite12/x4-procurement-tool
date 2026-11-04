@@ -269,7 +269,9 @@
     "loading_wares": "正在加载货物…",
     "failed_to_load_wares": "无法加载货物 -- 请重试。",
     "remove_override_tooltip": "移除 {{name}} 的覆盖值",
-    "replace_overrides_confirm": "载入将替换您当前的货物价格覆盖设置。是否继续？"
+    "replace_overrides_confirm": "载入将替换您当前的货物价格覆盖设置。是否继续？",
+    "slider_btn_tooltip": "使用滑块选择价格",
+    "slider_ok_btn": "确定"
   },
   "import_loadouts_modal": {
     "title": "导入游戏装备配置",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "复制",
     "copy_scope_source_hint": "正在从以下位置复制每个模拟值：{{scope}}",
     "copy_scope_same_scope": "请选择一个不同的目标范围。",
+    "import_loadouts_btn": "从装备配置导入",
+    "import_loadouts_tooltip": "将已保存装备配置中的所有组件导入此范围",
+    "import_loadout_hint": "正在导入到：{{scope}}",
     "mock_wizard_scope_label": "范围",
     "mock_wizard_type_label": "模拟类型",
     "mock_type_stat": "单项统计",

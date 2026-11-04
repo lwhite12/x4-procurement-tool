@@ -269,7 +269,9 @@
     "loading_wares": "Wczytywanie towarów…",
     "failed_to_load_wares": "Nie udało się wczytać towarów -- spróbuj ponownie.",
     "remove_override_tooltip": "Usuń nadpisanie dla {{name}}",
-    "replace_overrides_confirm": "Wczytanie zastąpi bieżące nadpisania cen towarów. Kontynuować?"
+    "replace_overrides_confirm": "Wczytanie zastąpi bieżące nadpisania cen towarów. Kontynuować?",
+    "slider_btn_tooltip": "Wybierz cenę za pomocą suwaka",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Importuj Wyposażenia z Gry",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Kopiuj",
     "copy_scope_source_hint": "Kopiowanie każdej symulacji z: {{scope}}",
     "copy_scope_same_scope": "Wybierz inny zakres docelowy.",
+    "import_loadouts_btn": "Importuj z wyposażenia",
+    "import_loadouts_tooltip": "Zaimportuj każdy komponent z jednego z zapisanych wyposażeń do tego zakresu",
+    "import_loadout_hint": "Importowanie do: {{scope}}",
     "mock_wizard_scope_label": "Zakres",
     "mock_wizard_type_label": "Typ Wartości Zastępczej",
     "mock_type_stat": "Pojedyncza Statystyka",

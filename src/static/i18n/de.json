@@ -269,7 +269,9 @@
     "loading_wares": "Waren werden geladen…",
     "failed_to_load_wares": "Waren konnten nicht geladen werden -- bitte erneut versuchen.",
     "remove_override_tooltip": "Überschreibung für {{name}} entfernen",
-    "replace_overrides_confirm": "Das Laden ersetzt Ihre aktuellen Warenpreis-Überschreibungen. Fortfahren?"
+    "replace_overrides_confirm": "Das Laden ersetzt Ihre aktuellen Warenpreis-Überschreibungen. Fortfahren?",
+    "slider_btn_tooltip": "Preis mit einem Schieberegler wählen",
+    "slider_ok_btn": "OK"
   },
   "import_loadouts_modal": {
     "title": "Spiel-Ausrüstungen importieren",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Kopieren",
     "copy_scope_source_hint": "Kopiere jeden Mock aus: {{scope}}",
     "copy_scope_same_scope": "Wähle einen anderen Geltungsbereich zum Kopieren.",
+    "import_loadouts_btn": "Aus Ausrüstungen importieren",
+    "import_loadouts_tooltip": "Jede Komponente aus einer deiner gespeicherten Ausrüstungen in diesen Geltungsbereich importieren",
+    "import_loadout_hint": "Importiere in: {{scope}}",
     "mock_wizard_scope_label": "Geltungsbereich",
     "mock_wizard_type_label": "Mock-Typ",
     "mock_type_stat": "Einzelne Statistik",

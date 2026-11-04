@@ -269,7 +269,9 @@
     "loading_wares": "Mallar yükleniyor…",
     "failed_to_load_wares": "Mallar yüklenemedi -- lütfen tekrar deneyin.",
     "remove_override_tooltip": "{{name}} için geçersiz kılmayı kaldır",
-    "replace_overrides_confirm": "Yükleme, mevcut mal fiyatı geçersiz kılmalarınızın yerini alacak. Devam edilsin mi?"
+    "replace_overrides_confirm": "Yükleme, mevcut mal fiyatı geçersiz kılmalarınızın yerini alacak. Devam edilsin mi?",
+    "slider_btn_tooltip": "Kaydırıcı ile bir fiyat seçin",
+    "slider_ok_btn": "Tamam"
   },
   "import_loadouts_modal": {
     "title": "Oyun Ekipmanlarını İçe Aktar",
@@ -1024,6 +1026,9 @@
     "copy_scope_confirm_btn": "Kopyala",
     "copy_scope_source_hint": "Şuradan her sahte değer kopyalanıyor: {{scope}}",
     "copy_scope_same_scope": "Kopyalanacak farklı bir kapsam seçin.",
+    "import_loadouts_btn": "Ekipmanlardan İçe Aktar",
+    "import_loadouts_tooltip": "Kayıtlı ekipmanlarınızdan birindeki her bileşeni bu kapsama içe aktarın",
+    "import_loadout_hint": "Şuraya içe aktarılıyor: {{scope}}",
     "mock_wizard_scope_label": "Kapsam",
     "mock_wizard_type_label": "Simülasyon Türü",
     "mock_type_stat": "Tekil İstatistik",
