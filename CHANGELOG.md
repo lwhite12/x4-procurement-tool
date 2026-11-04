@@ -15,7 +15,35 @@ it.
 
 ## [Unreleased] - Development
 
-## [0.7.3] - 2026-11-03 - Production
+## [0.7.4] - 2026-11-03 - Production
+
+### Added
+
+- Fleet Lists, Component Analyzer Tables, and Ship Trials loaded from a share link now track where they
+  came from: a small "Loaded from share id" note with a reset button appears above the item, letting you
+  revert back to exactly what was shared if you've since changed it. Re-opening the same share link while
+  an unedited copy is already present no longer creates a duplicate -- it tells you it's already loaded.
+  Fleet Lists sharing is now additive (loads as a new fleet alongside what you already have) instead of
+  replacing your entire fleet roster.
+- Turrets now respond to weapon mods (Damage, Reload Time, Rotation Speed, Beam Length/Speed/Lifetime,
+  Charge/Stick Time, Mining/Surface Element Damage) the same way direct weapons do -- previously applying
+  one of these to a turret via the Mod Lab had no visible effect on any of its own stats. Turrets still
+  don't get heat mods, matching how the game itself works.
+
+### Fixed
+
+- Opening a "Load Prebuilt Tables" link (or any share link) while already on the site triggered a full
+  page reload every time -- now applied in-page instantly, with no reload, as long as the app is already
+  loaded. A share link opened directly (a fresh tab, a bookmark, a pasted URL) still works exactly as
+  before.
+- The "Loaded from share id" note and its reset button no longer make the table/trial's own box taller --
+  they now sit above it instead of inside it.
+- Share links generated from the production site's own default Fly hostname (x4.fly.dev) now correctly
+  use the canonical x4-cost-compare.com domain instead.
+- A weapon's Reload Time mod never affected its own displayed Rate of Fire (only the raw stat itself) --
+  fixed alongside the turret mod work above, since both share the same formula.
+
+## [0.7.3] - 2026-11-03
 
 ### Added
 

@@ -106,13 +106,16 @@
     "nothing_to_download": "ダウンロードするものがありません -- すべての艦隊リストが空です。",
     "empty_nothing_to_download": "艦隊リストは空です -- ダウンロードするものがありません。",
     "could_not_parse_file": "ファイルを解析できませんでした：{{error}}",
+    "share_already_loaded": "この艦隊は既に読み込まれています。",
     "invalid_file": "有効な艦隊リストファイルではないようです（\"wares\" 配列がありません）。",
     "statistics_title": "艦船総統計",
     "total_s_capacity": "S 艦船総収容能力：{{value}}",
     "total_m_capacity": "M 艦船総収容能力：{{value}}",
     "type_count": "{{type}}数：{{value}}",
     "type_s_capacity": "{{type}} S 艦船総収容能力：{{value}}",
-    "type_m_capacity": "{{type}} M 艦船総収容能力：{{value}}"
+    "type_m_capacity": "{{type}} M 艦船総収容能力：{{value}}",
+    "loaded_from_share": "共有ID「{{id}}」から読み込み済み",
+    "share_reset_failed": "この艦隊を元の共有内容にリセットできませんでした。"
   },
   "cost_analysis": {
     "section_title": "生産を計算",
@@ -323,7 +326,9 @@
     "could_not_share": "{{label}} を共有できませんでした：{{error}}",
     "could_not_load_shared": "共有された{{label}}を読み込めませんでした：{{error}}",
     "option_component_analyzer_tables": "コンポーネント分析テーブル",
-    "option_ship_trials": "艦船試験"
+    "option_ship_trials": "艦船試験",
+    "reset_tooltip": "元の共有内容にリセット",
+    "reset_tooltip_disabled": "リセットする変更はありません"
   },
   "component_type": {
     "engine": "エンジン",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} をスキップ: 弾薬がこの武器に合いません",
     "mock_trace_skipped_ship": "スキップ: {{name}} はこの{{componentType}}に装着できません",
     "mock_trace_skipped_no_value": "{{name}} をスキップ: この統計の値がありません",
-    "remove_table_confirm": "テーブル「{{table}}」を削除してもよろしいですか?"
+    "remove_table_confirm": "テーブル「{{table}}」を削除してもよろしいですか?",
+    "share_already_loaded": "このテーブルは既に読み込まれています。",
+    "loaded_from_share": "共有ID「{{id}}」から読み込み済み",
+    "share_reset_failed": "このテーブルを元の共有内容にリセットできませんでした。"
   },
   "proving_grounds": {
     "section_title": "試験場",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "例:コルベット船体の比較",
     "remove_trial": "試験を削除",
     "remove_trial_confirm": "試験「{{trial}}」を削除してもよろしいですか?",
+    "share_already_loaded": "この試験は既に読み込まれています。",
     "collapse_trial_tooltip": "この試験を最小化",
     "expand_trial_tooltip": "この試験を最大化",
     "no_ships_placeholder": "まだ艦船が追加されていません。",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "新しい艦船を追加",
     "add_to_trial_btn": "試験に追加",
     "update_trial_btn": "試験を更新",
-    "close": "閉じる"
+    "close": "閉じる",
+    "loaded_from_share": "共有ID「{{id}}」から読み込み済み",
+    "share_reset_failed": "この試験を元の共有内容にリセットできませんでした。"
   },
   "component_set_picker_modal": {
     "title": "コンポーネントを選択",

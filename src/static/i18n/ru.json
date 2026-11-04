@@ -106,13 +106,16 @@
     "nothing_to_download": "Нечего скачивать -- все списки флота пусты.",
     "empty_nothing_to_download": "Список флота пуст -- нечего скачивать.",
     "could_not_parse_file": "Не удалось обработать файл: {{error}}",
+    "share_already_loaded": "Флот уже загружен.",
     "invalid_file": "Похоже, это не действительный файл списка флота (отсутствует массив \"wares\").",
     "statistics_title": "Общая Статистика Кораблей",
     "total_s_capacity": "Общая Вместимость Кораблей S: {{value}}",
     "total_m_capacity": "Общая Вместимость Кораблей M: {{value}}",
     "type_count": "Количество ({{type}}): {{value}}",
     "type_s_capacity": "Общая Вместимость Кораблей S ({{type}}): {{value}}",
-    "type_m_capacity": "Общая Вместимость Кораблей M ({{type}}): {{value}}"
+    "type_m_capacity": "Общая Вместимость Кораблей M ({{type}}): {{value}}",
+    "loaded_from_share": "Загружено из общего доступа id: {{id}}",
+    "share_reset_failed": "Не удалось сбросить этот флот к исходному общему доступу."
   },
   "cost_analysis": {
     "section_title": "Рассчитать Производство",
@@ -323,7 +326,9 @@
     "could_not_share": "Не удалось поделиться {{label}}: {{error}}",
     "could_not_load_shared": "Не удалось загрузить общий(е) {{label}}: {{error}}",
     "option_component_analyzer_tables": "Таблицы Анализатора Компонентов",
-    "option_ship_trials": "Испытания Кораблей"
+    "option_ship_trials": "Испытания Кораблей",
+    "reset_tooltip": "Сбросить к исходному общему доступу",
+    "reset_tooltip_disabled": "Нечего сбрасывать -- это не было изменено"
   },
   "component_type": {
     "engine": "Двигатели",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} пропущен: боеприпас не подходит к этому оружию",
     "mock_trace_skipped_ship": "Пропущено {{name}}: не подходит для этого {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} пропущен: нет значения для этой характеристики",
-    "remove_table_confirm": "Вы уверены, что хотите удалить таблицу «{{table}}»?"
+    "remove_table_confirm": "Вы уверены, что хотите удалить таблицу «{{table}}»?",
+    "share_already_loaded": "Таблица уже загружена.",
+    "loaded_from_share": "Загружено из общего доступа id: {{id}}",
+    "share_reset_failed": "Не удалось сбросить эту таблицу к исходному общему доступу."
   },
   "proving_grounds": {
     "section_title": "Испытательный Полигон",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "напр. Сравнение Корветов",
     "remove_trial": "Удалить испытание",
     "remove_trial_confirm": "Вы уверены, что хотите удалить испытание «{{trial}}»?",
+    "share_already_loaded": "Испытание уже загружено.",
     "collapse_trial_tooltip": "Свернуть это испытание",
     "expand_trial_tooltip": "Развернуть это испытание",
     "no_ships_placeholder": "Корабли ещё не добавлены.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Добавить Новый Корабль",
     "add_to_trial_btn": "Добавить в Испытание",
     "update_trial_btn": "Обновить Испытание",
-    "close": "Закрыть"
+    "close": "Закрыть",
+    "loaded_from_share": "Загружено из общего доступа id: {{id}}",
+    "share_reset_failed": "Не удалось сбросить это испытание к исходному общему доступу."
   },
   "component_set_picker_modal": {
     "title": "Выбрать Компоненты",

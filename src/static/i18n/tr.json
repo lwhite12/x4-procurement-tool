@@ -106,13 +106,16 @@
     "nothing_to_download": "İndirilecek bir şey yok -- tüm filo listeleri boş.",
     "empty_nothing_to_download": "Filo listesi boş -- indirilecek bir şey yok.",
     "could_not_parse_file": "Dosya işlenemedi: {{error}}",
+    "share_already_loaded": "Filo zaten yüklendi.",
     "invalid_file": "Bu geçerli bir filo listesi dosyası gibi görünmüyor (\"wares\" dizisi eksik).",
     "statistics_title": "Gemi Genel İstatistikleri",
     "total_s_capacity": "Toplam S Gemi Kapasitesi: {{value}}",
     "total_m_capacity": "Toplam M Gemi Kapasitesi: {{value}}",
     "type_count": "{{type}} sayısı: {{value}}",
     "type_s_capacity": "Toplam {{type}} S Gemi Kapasitesi: {{value}}",
-    "type_m_capacity": "Toplam {{type}} M Gemi Kapasitesi: {{value}}"
+    "type_m_capacity": "Toplam {{type}} M Gemi Kapasitesi: {{value}}",
+    "loaded_from_share": "Paylaşım kimliğinden yüklendi: {{id}}",
+    "share_reset_failed": "Bu filo orijinal paylaşıma sıfırlanamadı."
   },
   "cost_analysis": {
     "section_title": "Üretimi Hesapla",
@@ -323,7 +326,9 @@
     "could_not_share": "{{label}} paylaşılamadı: {{error}}",
     "could_not_load_shared": "Paylaşılan {{label}} yüklenemedi: {{error}}",
     "option_component_analyzer_tables": "Bileşen Analizörü Tabloları",
-    "option_ship_trials": "Gemi Denemeleri"
+    "option_ship_trials": "Gemi Denemeleri",
+    "reset_tooltip": "Orijinal paylaşıma sıfırla",
+    "reset_tooltip_disabled": "Sıfırlanacak bir şey yok -- bu değiştirilmedi"
   },
   "component_type": {
     "engine": "Motorlar",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} atlandı: mühimmatı bu silaha uymuyor",
     "mock_trace_skipped_ship": "Atlandı {{name}}: bu {{componentType}} üzerine takılamaz",
     "mock_trace_skipped_no_value": "{{name}} atlandı: bu istatistik için değer yok",
-    "remove_table_confirm": "\"{{table}}\" tablosunu silmek istediğinizden emin misiniz?"
+    "remove_table_confirm": "\"{{table}}\" tablosunu silmek istediğinizden emin misiniz?",
+    "share_already_loaded": "Tablo zaten yüklendi.",
+    "loaded_from_share": "Paylaşım kimliğinden yüklendi: {{id}}",
+    "share_reset_failed": "Bu tablo orijinal paylaşıma sıfırlanamadı."
   },
   "proving_grounds": {
     "section_title": "Deneme Alanı",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "örn. Korvet Karşılaştırması",
     "remove_trial": "Denemeyi Kaldır",
     "remove_trial_confirm": "\"{{trial}}\" denemesini silmek istediğinizden emin misiniz?",
+    "share_already_loaded": "Deneme zaten yüklendi.",
     "collapse_trial_tooltip": "Bu denemeyi küçült",
     "expand_trial_tooltip": "Bu denemeyi büyüt",
     "no_ships_placeholder": "Henüz gemi eklenmedi.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Yeni Gemi Ekle",
     "add_to_trial_btn": "Denemeye Ekle",
     "update_trial_btn": "Denemeyi Güncelle",
-    "close": "Kapat"
+    "close": "Kapat",
+    "loaded_from_share": "Paylaşım kimliğinden yüklendi: {{id}}",
+    "share_reset_failed": "Bu deneme orijinal paylaşıma sıfırlanamadı."
   },
   "component_set_picker_modal": {
     "title": "Bileşen Seç",

@@ -106,13 +106,16 @@
     "nothing_to_download": "Nie ma czego pobrać -- wszystkie listy floty są puste.",
     "empty_nothing_to_download": "Lista floty jest pusta -- nie ma czego pobrać.",
     "could_not_parse_file": "Nie udało się przetworzyć pliku: {{error}}",
+    "share_already_loaded": "Flota już wczytana.",
     "invalid_file": "To nie wygląda na prawidłowy plik listy floty (brak tablicy \"wares\").",
     "statistics_title": "Łączne Statystyki Statków",
     "total_s_capacity": "Łączna Pojemność Statków S: {{value}}",
     "total_m_capacity": "Łączna Pojemność Statków M: {{value}}",
     "type_count": "Liczba ({{type}}): {{value}}",
     "type_s_capacity": "Łączna Pojemność Statków S ({{type}}): {{value}}",
-    "type_m_capacity": "Łączna Pojemność Statków M ({{type}}): {{value}}"
+    "type_m_capacity": "Łączna Pojemność Statków M ({{type}}): {{value}}",
+    "loaded_from_share": "Wczytano z id udostępnienia: {{id}}",
+    "share_reset_failed": "Nie udało się przywrócić tej floty do oryginalnego udostępnienia."
   },
   "cost_analysis": {
     "section_title": "Oblicz Produkcję",
@@ -323,7 +326,9 @@
     "could_not_share": "Nie udało się udostępnić {{label}}: {{error}}",
     "could_not_load_shared": "Nie udało się wczytać udostępnionych danych {{label}}: {{error}}",
     "option_component_analyzer_tables": "Tabele Analizatora Komponentów",
-    "option_ship_trials": "Próby Statków"
+    "option_ship_trials": "Próby Statków",
+    "reset_tooltip": "Przywróć do oryginalnego udostępnienia",
+    "reset_tooltip_disabled": "Nie ma nic do przywrócenia -- to nie zostało zmienione"
   },
   "component_type": {
     "engine": "Silniki",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "Pominięto {{name}}: amunicja nie pasuje do tej broni",
     "mock_trace_skipped_ship": "Pominięto {{name}}: nie pasuje do tego/tej {{componentType}}",
     "mock_trace_skipped_no_value": "Pominięto {{name}}: brak wartości tej statystyki",
-    "remove_table_confirm": "Czy na pewno chcesz usunąć tabelę \"{{table}}\"?"
+    "remove_table_confirm": "Czy na pewno chcesz usunąć tabelę \"{{table}}\"?",
+    "share_already_loaded": "Tabela już wczytana.",
+    "loaded_from_share": "Wczytano z id udostępnienia: {{id}}",
+    "share_reset_failed": "Nie udało się przywrócić tej tabeli do oryginalnego udostępnienia."
   },
   "proving_grounds": {
     "section_title": "Poligon Doświadczalny",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "np. Porównanie Korwet",
     "remove_trial": "Usuń próbę",
     "remove_trial_confirm": "Czy na pewno chcesz usunąć próbę \"{{trial}}\"?",
+    "share_already_loaded": "Próba już wczytana.",
     "collapse_trial_tooltip": "Zminimalizuj tę próbę",
     "expand_trial_tooltip": "Zmaksymalizuj tę próbę",
     "no_ships_placeholder": "Nie dodano jeszcze żadnych statków.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Dodaj Nowy Statek",
     "add_to_trial_btn": "Dodaj do Próby",
     "update_trial_btn": "Aktualizuj Próbę",
-    "close": "Zamknij"
+    "close": "Zamknij",
+    "loaded_from_share": "Wczytano z id udostępnienia: {{id}}",
+    "share_reset_failed": "Nie udało się przywrócić tej próby do oryginalnego udostępnienia."
   },
   "component_set_picker_modal": {
     "title": "Wybierz Komponenty",

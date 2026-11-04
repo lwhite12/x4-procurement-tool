@@ -106,13 +106,16 @@
     "nothing_to_download": "다운로드할 항목이 없습니다 -- 모든 함대 목록이 비어 있습니다.",
     "empty_nothing_to_download": "함대 목록이 비어 있습니다 -- 다운로드할 항목이 없습니다.",
     "could_not_parse_file": "파일을 처리할 수 없습니다: {{error}}",
+    "share_already_loaded": "이미 불러온 함대입니다.",
     "invalid_file": "유효한 함대 목록 파일이 아닌 것 같습니다 (\"wares\" 배열 누락).",
     "statistics_title": "함선 총 통계",
     "total_s_capacity": "총 S 함선 수용력: {{value}}",
     "total_m_capacity": "총 M 함선 수용력: {{value}}",
     "type_count": "{{type}} 수: {{value}}",
     "type_s_capacity": "총 {{type}} S 함선 수용력: {{value}}",
-    "type_m_capacity": "총 {{type}} M 함선 수용력: {{value}}"
+    "type_m_capacity": "총 {{type}} M 함선 수용력: {{value}}",
+    "loaded_from_share": "공유 ID에서 불러옴: {{id}}",
+    "share_reset_failed": "이 함대를 원본 공유로 재설정할 수 없습니다."
   },
   "cost_analysis": {
     "section_title": "생산 계산",
@@ -323,7 +326,9 @@
     "could_not_share": "{{label}}을(를) 공유할 수 없습니다: {{error}}",
     "could_not_load_shared": "공유된 {{label}}을(를) 불러올 수 없습니다: {{error}}",
     "option_component_analyzer_tables": "부품 분석기 표",
-    "option_ship_trials": "함선 시험"
+    "option_ship_trials": "함선 시험",
+    "reset_tooltip": "원본 공유로 재설정",
+    "reset_tooltip_disabled": "재설정할 변경 사항이 없습니다"
   },
   "component_type": {
     "engine": "엔진",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} 건너뜀: 탄약이 이 무기와 맞지 않음",
     "mock_trace_skipped_ship": "건너뜀 {{name}}: 이 {{componentType}}에 장착할 수 없습니다",
     "mock_trace_skipped_no_value": "{{name}} 건너뜀: 이 통계의 값이 없음",
-    "remove_table_confirm": "\"{{table}}\" 테이블을 삭제하시겠습니까?"
+    "remove_table_confirm": "\"{{table}}\" 테이블을 삭제하시겠습니까?",
+    "share_already_loaded": "이미 불러온 표입니다.",
+    "loaded_from_share": "공유 ID에서 불러옴: {{id}}",
+    "share_reset_failed": "이 표를 원본 공유로 재설정할 수 없습니다."
   },
   "proving_grounds": {
     "section_title": "시험장",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "예: 코르벳 선체 비교",
     "remove_trial": "시험 제거",
     "remove_trial_confirm": "\"{{trial}}\" 시험을 삭제하시겠습니까?",
+    "share_already_loaded": "이미 불러온 시험입니다.",
     "collapse_trial_tooltip": "이 시험 최소화",
     "expand_trial_tooltip": "이 시험 최대화",
     "no_ships_placeholder": "아직 추가된 함선이 없습니다.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "새 함선 추가",
     "add_to_trial_btn": "시험에 추가",
     "update_trial_btn": "시험 업데이트",
-    "close": "닫기"
+    "close": "닫기",
+    "loaded_from_share": "공유 ID에서 불러옴: {{id}}",
+    "share_reset_failed": "이 시험을 원본 공유로 재설정할 수 없습니다."
   },
   "component_set_picker_modal": {
     "title": "부품 선택",

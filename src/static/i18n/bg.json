@@ -106,13 +106,16 @@
     "nothing_to_download": "Няма какво да се изтегли -- всички списъци с флоти са празни.",
     "empty_nothing_to_download": "Списъкът с флота е празен -- няма какво да се изтегли.",
     "could_not_parse_file": "Файлът не можа да бъде обработен: {{error}}",
+    "share_already_loaded": "Флотата вече е заредена.",
     "invalid_file": "Това не изглежда като валиден файл със списък с флота (липсва масив \"wares\").",
     "statistics_title": "Обща Статистика на Корабите",
     "total_s_capacity": "Общ Капацитет на Корабите S: {{value}}",
     "total_m_capacity": "Общ Капацитет на Корабите M: {{value}}",
     "type_count": "Брой ({{type}}): {{value}}",
     "type_s_capacity": "Общ Капацитет на Корабите S ({{type}}): {{value}}",
-    "type_m_capacity": "Общ Капацитет на Корабите M ({{type}}): {{value}}"
+    "type_m_capacity": "Общ Капацитет на Корабите M ({{type}}): {{value}}",
+    "loaded_from_share": "Заредено от споделяне с ID: {{id}}",
+    "share_reset_failed": "Неуспешно възстановяване на тази флота до оригиналното споделяне."
   },
   "cost_analysis": {
     "section_title": "Изчисляване на Производството",
@@ -323,7 +326,9 @@
     "could_not_share": "{{label}} не можа да бъде споделено: {{error}}",
     "could_not_load_shared": "Споделеното {{label}} не можа да бъде заредено: {{error}}",
     "option_component_analyzer_tables": "Таблици на Анализатора на Компоненти",
-    "option_ship_trials": "Изпитания на Кораби"
+    "option_ship_trials": "Изпитания на Кораби",
+    "reset_tooltip": "Връщане към оригиналното споделяне",
+    "reset_tooltip_disabled": "Няма какво да се възстанови -- това не е променяно"
   },
   "component_type": {
     "engine": "Двигатели",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} пропуснат: боеприпасите му не пасват на това оръжие",
     "mock_trace_skipped_ship": "Пропуснато {{name}}: не може да бъде поставено на този {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} пропуснат: няма стойност за тази статистика",
-    "remove_table_confirm": "Наистина ли искате да изтриете таблицата \"{{table}}\"?"
+    "remove_table_confirm": "Наистина ли искате да изтриете таблицата \"{{table}}\"?",
+    "share_already_loaded": "Таблицата вече е заредена.",
+    "loaded_from_share": "Заредено от споделяне с ID: {{id}}",
+    "share_reset_failed": "Неуспешно възстановяване на тази таблица до оригиналното споделяне."
   },
   "proving_grounds": {
     "section_title": "Полигон",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "напр. Сравнение на Корвети",
     "remove_trial": "Премахване на изпитание",
     "remove_trial_confirm": "Наистина ли искате да изтриете изпитанието \"{{trial}}\"?",
+    "share_already_loaded": "Изпитанието вече е заредено.",
     "collapse_trial_tooltip": "Минимизиране на това изпитание",
     "expand_trial_tooltip": "Максимизиране на това изпитание",
     "no_ships_placeholder": "Все още няма добавени кораби.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Добавяне на Нов Кораб",
     "add_to_trial_btn": "Добави към Изпитанието",
     "update_trial_btn": "Актуализирай Изпитанието",
-    "close": "Затваряне"
+    "close": "Затваряне",
+    "loaded_from_share": "Заредено от споделяне с ID: {{id}}",
+    "share_reset_failed": "Неуспешно възстановяване на това изпитание до оригиналното споделяне."
   },
   "component_set_picker_modal": {
     "title": "Избор на Компоненти",

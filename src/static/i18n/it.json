@@ -106,13 +106,16 @@
     "nothing_to_download": "Niente da scaricare -- tutte le liste flotta sono vuote.",
     "empty_nothing_to_download": "La lista flotta è vuota -- niente da scaricare.",
     "could_not_parse_file": "Impossibile analizzare il file: {{error}}",
+    "share_already_loaded": "Flotta già caricata.",
     "invalid_file": "Questo non sembra essere un file di lista flotta valido (manca l'array \"wares\").",
     "statistics_title": "Statistiche Totali delle Navi",
     "total_s_capacity": "Capacità Totale Navi S: {{value}}",
     "total_m_capacity": "Capacità Totale Navi M: {{value}}",
     "type_count": "Numero di {{type}}: {{value}}",
     "type_s_capacity": "Capacità Totale Navi S ({{type}}): {{value}}",
-    "type_m_capacity": "Capacità Totale Navi M ({{type}}): {{value}}"
+    "type_m_capacity": "Capacità Totale Navi M ({{type}}): {{value}}",
+    "loaded_from_share": "Caricato dall'id di condivisione: {{id}}",
+    "share_reset_failed": "Impossibile ripristinare questa flotta alla condivisione originale."
   },
   "cost_analysis": {
     "section_title": "Calcola Produzione",
@@ -323,7 +326,9 @@
     "could_not_share": "Impossibile condividere {{label}}: {{error}}",
     "could_not_load_shared": "Impossibile caricare {{label}} condiviso/i: {{error}}",
     "option_component_analyzer_tables": "Tabelle dell'Analizzatore Componenti",
-    "option_ship_trials": "Prove delle Navi"
+    "option_ship_trials": "Prove delle Navi",
+    "reset_tooltip": "Ripristina alla condivisione originale",
+    "reset_tooltip_disabled": "Niente da ripristinare -- non è stato modificato"
   },
   "component_type": {
     "engine": "Motori",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} saltato: le sue munizioni non si adattano a quest'arma",
     "mock_trace_skipped_ship": "Saltato {{name}}: non può essere installato su questo/a {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} saltato: nessun valore per questa statistica",
-    "remove_table_confirm": "Vuoi davvero eliminare la tabella \"{{table}}\"?"
+    "remove_table_confirm": "Vuoi davvero eliminare la tabella \"{{table}}\"?",
+    "share_already_loaded": "Tabella già caricata.",
+    "loaded_from_share": "Caricato dall'id di condivisione: {{id}}",
+    "share_reset_failed": "Impossibile ripristinare questa tabella alla condivisione originale."
   },
   "proving_grounds": {
     "section_title": "Terreno di Prova",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "es. Confronto Corvette",
     "remove_trial": "Rimuovi prova",
     "remove_trial_confirm": "Vuoi davvero eliminare la prova \"{{trial}}\"?",
+    "share_already_loaded": "Prova già caricata.",
     "collapse_trial_tooltip": "Riduci a icona questa prova",
     "expand_trial_tooltip": "Espandi questa prova",
     "no_ships_placeholder": "Nessuna nave aggiunta finora.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Aggiungi una Nuova Nave",
     "add_to_trial_btn": "Aggiungi alla Prova",
     "update_trial_btn": "Aggiorna Prova",
-    "close": "Chiudi"
+    "close": "Chiudi",
+    "loaded_from_share": "Caricato dall'id di condivisione: {{id}}",
+    "share_reset_failed": "Impossibile ripristinare questa prova alla condivisione originale."
   },
   "component_set_picker_modal": {
     "title": "Seleziona Componenti",

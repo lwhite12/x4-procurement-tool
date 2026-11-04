@@ -106,13 +106,16 @@
     "nothing_to_download": "Rien à télécharger -- toutes les listes de flotte sont vides.",
     "empty_nothing_to_download": "La liste de flotte est vide -- rien à télécharger.",
     "could_not_parse_file": "Impossible d'analyser le fichier : {{error}}",
+    "share_already_loaded": "Flotte déjà chargée.",
     "invalid_file": "Ceci ne semble pas être un fichier de liste de flotte valide (tableau \"wares\" manquant).",
     "statistics_title": "Statistiques Totales des Vaisseaux",
     "total_s_capacity": "Capacité Totale des Vaisseaux S : {{value}}",
     "total_m_capacity": "Capacité Totale des Vaisseaux M : {{value}}",
     "type_count": "Nombre de {{type}} : {{value}}",
     "type_s_capacity": "Capacité Totale des Vaisseaux S ({{type}}) : {{value}}",
-    "type_m_capacity": "Capacité Totale des Vaisseaux M ({{type}}) : {{value}}"
+    "type_m_capacity": "Capacité Totale des Vaisseaux M ({{type}}) : {{value}}",
+    "loaded_from_share": "Chargé depuis l'id de partage : {{id}}",
+    "share_reset_failed": "Impossible de réinitialiser cette flotte à son partage d'origine."
   },
   "cost_analysis": {
     "section_title": "Calculer la Production",
@@ -323,7 +326,9 @@
     "could_not_share": "Impossible de partager {{label}} : {{error}}",
     "could_not_load_shared": "Impossible de charger {{label}} partagé(s) : {{error}}",
     "option_component_analyzer_tables": "Tableaux de l'Analyseur de Composants",
-    "option_ship_trials": "Essais de Vaisseaux"
+    "option_ship_trials": "Essais de Vaisseaux",
+    "reset_tooltip": "Réinitialiser au partage d'origine",
+    "reset_tooltip_disabled": "Rien à réinitialiser -- ceci n'a pas été modifié"
   },
   "component_type": {
     "engine": "Moteurs",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} ignoré : ses munitions ne conviennent pas à cette arme",
     "mock_trace_skipped_ship": "Ignoré {{name}} : ne peut pas être installé sur ce/cette {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} ignoré : aucune valeur pour cette statistique",
-    "remove_table_confirm": "Voulez-vous vraiment supprimer le tableau « {{table}} » ?"
+    "remove_table_confirm": "Voulez-vous vraiment supprimer le tableau « {{table}} » ?",
+    "share_already_loaded": "Tableau déjà chargé.",
+    "loaded_from_share": "Chargé depuis l'id de partage : {{id}}",
+    "share_reset_failed": "Impossible de réinitialiser ce tableau à son partage d'origine."
   },
   "proving_grounds": {
     "section_title": "Terrain d'Essai",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "ex. Comparaison de Corvettes",
     "remove_trial": "Supprimer l'essai",
     "remove_trial_confirm": "Voulez-vous vraiment supprimer l'essai « {{trial}} » ?",
+    "share_already_loaded": "Essai déjà chargé.",
     "collapse_trial_tooltip": "Réduire cet essai",
     "expand_trial_tooltip": "Agrandir cet essai",
     "no_ships_placeholder": "Aucun vaisseau ajouté pour le moment.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Ajouter un Nouveau Vaisseau",
     "add_to_trial_btn": "Ajouter à l'Essai",
     "update_trial_btn": "Mettre à Jour l'Essai",
-    "close": "Fermer"
+    "close": "Fermer",
+    "loaded_from_share": "Chargé depuis l'id de partage : {{id}}",
+    "share_reset_failed": "Impossible de réinitialiser cet essai à son partage d'origine."
   },
   "component_set_picker_modal": {
     "title": "Sélectionner des Composants",

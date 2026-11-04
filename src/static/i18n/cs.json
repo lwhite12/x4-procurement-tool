@@ -106,13 +106,16 @@
     "nothing_to_download": "Není co stáhnout -- všechny seznamy flotily jsou prázdné.",
     "empty_nothing_to_download": "Seznam flotily je prázdný -- není co stáhnout.",
     "could_not_parse_file": "Soubor se nepodařilo zpracovat: {{error}}",
+    "share_already_loaded": "Flotila je již načtena.",
     "invalid_file": "Toto nevypadá jako platný soubor seznamu flotily (chybí pole \"wares\").",
     "statistics_title": "Celková Statistika Lodí",
     "total_s_capacity": "Celková Kapacita Lodí S: {{value}}",
     "total_m_capacity": "Celková Kapacita Lodí M: {{value}}",
     "type_count": "Počet ({{type}}): {{value}}",
     "type_s_capacity": "Celková Kapacita Lodí S ({{type}}): {{value}}",
-    "type_m_capacity": "Celková Kapacita Lodí M ({{type}}): {{value}}"
+    "type_m_capacity": "Celková Kapacita Lodí M ({{type}}): {{value}}",
+    "loaded_from_share": "Načteno ze sdílení id: {{id}}",
+    "share_reset_failed": "Tuto flotilu se nepodařilo obnovit na původní sdílení."
   },
   "cost_analysis": {
     "section_title": "Vypočítat Produkci",
@@ -323,7 +326,9 @@
     "could_not_share": "Nepodařilo se sdílet {{label}}: {{error}}",
     "could_not_load_shared": "Nepodařilo se načíst sdílené {{label}}: {{error}}",
     "option_component_analyzer_tables": "Tabulky Analyzátoru Komponent",
-    "option_ship_trials": "Zkoušky Lodí"
+    "option_ship_trials": "Zkoušky Lodí",
+    "reset_tooltip": "Obnovit na původní sdílení",
+    "reset_tooltip_disabled": "Není co obnovovat -- toto nebylo změněno"
   },
   "component_type": {
     "engine": "Motory",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} přeskočen: jeho munice se pro tuto zbraň nehodí",
     "mock_trace_skipped_ship": "Přeskočeno {{name}}: nelze nasadit na tento/tuto {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} přeskočen: pro tuto statistiku nemá hodnotu",
-    "remove_table_confirm": "Opravdu chcete odstranit tabulku \"{{table}}\"?"
+    "remove_table_confirm": "Opravdu chcete odstranit tabulku \"{{table}}\"?",
+    "share_already_loaded": "Tabulka je již načtena.",
+    "loaded_from_share": "Načteno ze sdílení id: {{id}}",
+    "share_reset_failed": "Tuto tabulku se nepodařilo obnovit na původní sdílení."
   },
   "proving_grounds": {
     "section_title": "Zkušební Polygon",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "např. Porovnání Korvet",
     "remove_trial": "Odebrat zkoušku",
     "remove_trial_confirm": "Opravdu chcete odstranit zkoušku \"{{trial}}\"?",
+    "share_already_loaded": "Zkouška je již načtena.",
     "collapse_trial_tooltip": "Minimalizovat tuto zkoušku",
     "expand_trial_tooltip": "Maximalizovat tuto zkoušku",
     "no_ships_placeholder": "Zatím nebyly přidány žádné lodě.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Přidat Novou Loď",
     "add_to_trial_btn": "Přidat do Zkoušky",
     "update_trial_btn": "Aktualizovat Zkoušku",
-    "close": "Zavřít"
+    "close": "Zavřít",
+    "loaded_from_share": "Načteno ze sdílení id: {{id}}",
+    "share_reset_failed": "Tuto zkoušku se nepodařilo obnovit na původní sdílení."
   },
   "component_set_picker_modal": {
     "title": "Vybrat Komponenty",

@@ -106,13 +106,16 @@
     "nothing_to_download": "Nada para baixar -- todas as listas de frota estão vazias.",
     "empty_nothing_to_download": "A lista de frota está vazia -- nada para baixar.",
     "could_not_parse_file": "Não foi possível processar o arquivo: {{error}}",
+    "share_already_loaded": "Frota já carregada.",
     "invalid_file": "Isso não parece ser um arquivo de lista de frota válido (falta um array \"wares\").",
     "statistics_title": "Estatísticas Totais das Naves",
     "total_s_capacity": "Capacidade Total de Naves S: {{value}}",
     "total_m_capacity": "Capacidade Total de Naves M: {{value}}",
     "type_count": "Quantidade de {{type}}: {{value}}",
     "type_s_capacity": "Capacidade Total de Naves S ({{type}}): {{value}}",
-    "type_m_capacity": "Capacidade Total de Naves M ({{type}}): {{value}}"
+    "type_m_capacity": "Capacidade Total de Naves M ({{type}}): {{value}}",
+    "loaded_from_share": "Carregado do id de compartilhamento: {{id}}",
+    "share_reset_failed": "Não foi possível redefinir esta frota para o compartilhamento original."
   },
   "cost_analysis": {
     "section_title": "Calcular Produção",
@@ -323,7 +326,9 @@
     "could_not_share": "Não foi possível compartilhar {{label}}: {{error}}",
     "could_not_load_shared": "Não foi possível carregar {{label}} compartilhado(s): {{error}}",
     "option_component_analyzer_tables": "Tabelas do Analisador de Componentes",
-    "option_ship_trials": "Testes de Naves"
+    "option_ship_trials": "Testes de Naves",
+    "reset_tooltip": "Redefinir para o compartilhamento original",
+    "reset_tooltip_disabled": "Nada para redefinir -- isto não foi alterado"
   },
   "component_type": {
     "engine": "Motores",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} ignorado: a munição não serve nesta arma",
     "mock_trace_skipped_ship": "Ignorado {{name}}: não pode ser instalado nesta/neste {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} ignorado: sem valor para esta estatística",
-    "remove_table_confirm": "Tem certeza de que deseja excluir a tabela \"{{table}}\"?"
+    "remove_table_confirm": "Tem certeza de que deseja excluir a tabela \"{{table}}\"?",
+    "share_already_loaded": "Tabela já carregada.",
+    "loaded_from_share": "Carregado do id de compartilhamento: {{id}}",
+    "share_reset_failed": "Não foi possível redefinir esta tabela para o compartilhamento original."
   },
   "proving_grounds": {
     "section_title": "Campo de Provas",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "ex. Comparação de Corvetas",
     "remove_trial": "Remover teste",
     "remove_trial_confirm": "Tem certeza de que deseja excluir o teste \"{{trial}}\"?",
+    "share_already_loaded": "Teste já carregado.",
     "collapse_trial_tooltip": "Minimizar este teste",
     "expand_trial_tooltip": "Maximizar este teste",
     "no_ships_placeholder": "Nenhuma nave adicionada ainda.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Adicionar uma Nova Nave",
     "add_to_trial_btn": "Adicionar ao Teste",
     "update_trial_btn": "Atualizar Teste",
-    "close": "Fechar"
+    "close": "Fechar",
+    "loaded_from_share": "Carregado do id de compartilhamento: {{id}}",
+    "share_reset_failed": "Não foi possível redefinir este teste para o compartilhamento original."
   },
   "component_set_picker_modal": {
     "title": "Selecionar Componentes",

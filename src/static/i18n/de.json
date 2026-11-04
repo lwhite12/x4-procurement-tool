@@ -106,13 +106,16 @@
     "nothing_to_download": "Nichts zum Herunterladen -- jede Flottenliste ist leer.",
     "empty_nothing_to_download": "Die Flottenliste ist leer -- nichts zum Herunterladen.",
     "could_not_parse_file": "Datei konnte nicht verarbeitet werden: {{error}}",
+    "share_already_loaded": "Flotte bereits geladen.",
     "invalid_file": "Dies scheint keine gültige Flottenlisten-Datei zu sein (fehlendes \"wares\"-Array).",
     "statistics_title": "Schiffsgesamtstatistik",
     "total_s_capacity": "Gesamte S-Schiffskapazität: {{value}}",
     "total_m_capacity": "Gesamte M-Schiffskapazität: {{value}}",
     "type_count": "{{type}}-Anzahl: {{value}}",
     "type_s_capacity": "Gesamte S-Schiffskapazität ({{type}}): {{value}}",
-    "type_m_capacity": "Gesamte M-Schiffskapazität ({{type}}): {{value}}"
+    "type_m_capacity": "Gesamte M-Schiffskapazität ({{type}}): {{value}}",
+    "loaded_from_share": "Geladen aus Freigabe-ID: {{id}}",
+    "share_reset_failed": "Diese Flotte konnte nicht auf die ursprüngliche Freigabe zurückgesetzt werden."
   },
   "cost_analysis": {
     "section_title": "Produktion berechnen",
@@ -323,7 +326,9 @@
     "could_not_share": "{{label}} konnte nicht geteilt werden: {{error}}",
     "could_not_load_shared": "Geteilte(s) {{label}} konnte(n) nicht geladen werden: {{error}}",
     "option_component_analyzer_tables": "Komponentenanalyse-Tabellen",
-    "option_ship_trials": "Schiffsversuche"
+    "option_ship_trials": "Schiffsversuche",
+    "reset_tooltip": "Auf die ursprüngliche Freigabe zurücksetzen",
+    "reset_tooltip_disabled": "Nichts zurückzusetzen -- dies wurde nicht geändert"
   },
   "component_type": {
     "engine": "Triebwerke",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} übersprungen: Die Munition passt nicht zu dieser Waffe",
     "mock_trace_skipped_ship": "Übersprungen {{name}}: passt nicht auf dieses/diesen {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} übersprungen: kein Wert für diesen Wert",
-    "remove_table_confirm": "Möchten Sie die Tabelle \"{{table}}\" wirklich löschen?"
+    "remove_table_confirm": "Möchten Sie die Tabelle \"{{table}}\" wirklich löschen?",
+    "share_already_loaded": "Tabelle bereits geladen.",
+    "loaded_from_share": "Geladen aus Freigabe-ID: {{id}}",
+    "share_reset_failed": "Diese Tabelle konnte nicht auf die ursprüngliche Freigabe zurückgesetzt werden."
   },
   "proving_grounds": {
     "section_title": "Testgelände",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "z. B. Korvetten-Vergleich",
     "remove_trial": "Versuch entfernen",
     "remove_trial_confirm": "Möchten Sie den Versuch \"{{trial}}\" wirklich löschen?",
+    "share_already_loaded": "Testreihe bereits geladen.",
     "collapse_trial_tooltip": "Diesen Versuch minimieren",
     "expand_trial_tooltip": "Diesen Versuch maximieren",
     "no_ships_placeholder": "Noch keine Schiffe hinzugefügt.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Neues Schiff Hinzufügen",
     "add_to_trial_btn": "Zum Versuch Hinzufügen",
     "update_trial_btn": "Versuch Aktualisieren",
-    "close": "Schließen"
+    "close": "Schließen",
+    "loaded_from_share": "Geladen aus Freigabe-ID: {{id}}",
+    "share_reset_failed": "Diese Testreihe konnte nicht auf die ursprüngliche Freigabe zurückgesetzt werden."
   },
   "component_set_picker_modal": {
     "title": "Komponenten auswählen",

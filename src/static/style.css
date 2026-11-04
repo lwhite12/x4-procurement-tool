@@ -2573,12 +2573,21 @@ input[type="checkbox"] {
   margin-bottom: 0.75rem;
 }
 
+/* Plain, unstyled wrapper around one table/trial's own share badge (if
+   any) + its real bordered box -- carries the spacing between table
+   blocks that used to live on .component-analyzer-table itself, so the
+   badge row can sit visually ABOVE the blue box outline instead of
+   being its first child (which used to just make the box itself taller --
+   user call, 2026-11-03). */
+.component-analyzer-table-block {
+  margin-bottom: 1rem;
+}
+
 .component-analyzer-table {
   background: var(--bg-panel);
   border: 1px solid var(--border-blue-soft);
   border-radius: 6px;
   padding: 0.75rem;
-  margin-bottom: 1rem;
 }
 
 .component-analyzer-table-header {
@@ -2587,6 +2596,50 @@ input[type="checkbox"] {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+/* "Loaded from share id: <id>" + reset button -- shown above a table's/
+   trial's/the active fleet's own header, top-right corner, only when it
+   actually came from a share (see buildShareBadgeRow()). */
+.share-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.share-badge-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.share-badge-reset-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.85rem;
+  border-radius: 50%;
+  border: 1px solid var(--accent-blue-bright);
+  background: transparent;
+  color: var(--accent-blue-bright);
+  cursor: pointer;
+}
+
+.share-badge-reset-btn:hover:not(:disabled) {
+  background: var(--accent-blue-bright);
+  color: var(--bg-panel);
+}
+
+.share-badge-reset-btn:disabled {
+  border-color: var(--border-blue-soft);
+  color: var(--text-muted);
+  cursor: default;
 }
 
 .component-analyzer-table-title-field {

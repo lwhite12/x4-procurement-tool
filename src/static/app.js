@@ -26,10 +26,11 @@ let editingIndex = null;
 // dead-zone.
 let shipTrialBuilderContext = null;
 
-// One fleet list: {name, cart, buildMethodPriority, wareCostList, dirty}.
-// buildMethodPriority is an ordered list of build method names (tried in
-// order, first available match wins per ware -- see resolve_method() in
-// summarize_production.py) or null to use the server's own default.
+// One fleet list: {name, cart, buildMethodPriority, wareCostList, dirty,
+// shareId, edited, shareIndex}. buildMethodPriority is an ordered list of
+// build method names (tried in order, first available match wins per ware
+// -- see resolve_method() in summarize_production.py) or null to use the
+// server's own default.
 // cart entries: {shipWareId, shipName, shipIcon, missingRequiredComponents, note,
 // loadoutMinimized, count, selections: {group_name: ware_id},
 // missileAmounts, droneAmounts, deployableAmounts, countermeasureAmounts: {ware_id: amount},
@@ -37,9 +38,21 @@ let shipTrialBuilderContext = null;
 // not a real ware_id, both roles share one),
 // wares_list: [{ware_id, amount}], displayItems: [{label, amount}]}.
 // dirty starts true (nothing computed yet) and is cleared by
-// recomputeDirtyFleets() -- see that function for the lazy-recompute design.
+// recomputeDirtyFleets() -- see that function for the lazy-recompute design
+// (NOT the same concept as `edited` -- see this file's own "Share
+// provenance tracking" comment, a from-scratch fleet never has a shareId
+// at all so `edited` is simply never checked for it).
 function makeFleet(name = "") {
-  return { name, cart: [], buildMethodPriority: null, wareCostList: null, dirty: true };
+  return {
+    name,
+    cart: [],
+    buildMethodPriority: null,
+    wareCostList: null,
+    dirty: true,
+    shareId: null,
+    edited: false,
+    shareIndex: 0,
+  };
 }
 
 // Never empty -- always at least one fleet exists, mirroring the old
@@ -575,6 +588,7 @@ const wareCostListBody = document.getElementById("ware-cost-list-body");
 const saveCartBtn = document.getElementById("save-cart-btn");
 const loadCartInput = document.getElementById("load-cart-input");
 const cartNameInput = document.getElementById("cart-name-input");
+const fleetShareBadgeContainer = document.getElementById("fleet-share-badge-container");
 const fleetListTabsEl = document.getElementById("fleet-list-tabs");
 const buildMethodModalOverlay = document.getElementById("build-method-modal-overlay");
 const buildMethodModalPriorityList = document.getElementById("build-method-modal-priority-list");
@@ -4560,6 +4574,10 @@ function renderCart() {
   cartNameInput.value = activeFleet().name;
   renderFleetListTabs();
 
+  fleetShareBadgeContainer.innerHTML = "";
+  const fleetShareBadge = buildShareBadgeRow(activeFleet(), resetFleetToShareOriginal, "fleet_lists.loaded_from_share");
+  if (fleetShareBadge) fleetShareBadgeContainer.appendChild(fleetShareBadge);
+
   cartBody.innerHTML = "";
   cartEmptyMsg.classList.toggle("hidden", activeFleet().cart.length > 0);
 
@@ -6307,12 +6325,21 @@ function renderFleetListTabs() {
 // deliberately excludes each fleet's cached wareCostList/dirty flag (a
 // cache, not source of truth), so restoring/sharing a set of fleets always
 // recomputes fresh rather than carrying over possibly-stale numbers.
+// share_id/edited (snake_case, matching this function's own existing
+// build_method_priority convention) are the two share-provenance fields
+// -- see this file's own "Share provenance tracking" comment -- included
+// here for the "Fleet Lists" share section's benefit; applyAnalysisPayload()
+// (Upload Analysis' own, deliberately still wholesale-replace, path)
+// simply ignores them. shareSnapshot/shareIndex are local-only bookkeeping,
+// left out on purpose.
 function buildAnalysisPayload() {
   return {
     fleets: fleets.map((fleet) => ({
       name: fleet.name,
       cart: JSON.parse(JSON.stringify(fleet.cart)),
       build_method_priority: fleet.buildMethodPriority,
+      share_id: fleet.shareId ?? null,
+      edited: !!fleet.edited,
     })),
     active_fleet_index: activeFleetIndex,
   };
@@ -6320,10 +6347,16 @@ function buildAnalysisPayload() {
 
 // Validates and applies an analysis payload (see buildAnalysisPayload())
 // onto `fleets`/`activeFleetIndex`, replacing everything currently there --
-// confirms first if there's anything real to lose. Shared by Upload
-// Analysis and the "Fleet Lists" share section, so a shared or uploaded set
-// of fleets restores identically either way. Returns true if applied,
-// false if the payload was invalid or the user declined the confirm.
+// confirms first if there's anything real to lose. Upload Analysis' own
+// path only now -- the "Fleet Lists" share section instead uses
+// importFleets(), additive per-fleet with shareId/edited tracking (user
+// call, 2026-11-03); deliberately NOT changing Upload Analysis' own
+// long-standing "replace everything" behavior, a genuinely different
+// use case (restoring/overwriting your whole roster from a backup file)
+// from loading one more shared fleet alongside what you already have --
+// share_id/edited are simply dropped here, not carried over. Returns true
+// if applied, false if the payload was invalid or the user declined the
+// confirm.
 function applyAnalysisPayload(data) {
   if (!data || !Array.isArray(data.fleets) || data.fleets.some((fleet) => !Array.isArray(fleet.cart))) {
     alert('This doesn\'t look like a valid analysis (missing a "fleets" array of {cart, ...} entries).');
@@ -6343,6 +6376,9 @@ function applyAnalysisPayload(data) {
     buildMethodPriority: fleet.build_method_priority ?? null,
     wareCostList: null,
     dirty: true,
+    shareId: null,
+    edited: false,
+    shareIndex: 0,
   }));
   if (fleets.length === 0) fleets = [makeFleet()];
   activeFleetIndex = Math.min(Math.max(data.active_fleet_index ?? 0, 0), fleets.length - 1);
@@ -6350,6 +6386,97 @@ function applyAnalysisPayload(data) {
   resetShipPicker();
   renderCart();
   return true;
+}
+
+// Deep-clones + backfills one imported/shared fleet, same shape
+// buildAnalysisPayload() produces per fleet -- see reviveImportedComponentAnalyzerTable()'s
+// own comment for the shareContext convention this mirrors exactly.
+// wareCostList/dirty are a cache, never restored from a share -- every
+// revived fleet starts dirty: true and recomputes fresh.
+function reviveImportedFleet(rawFleet, shareContext = null) {
+  const fleet = makeFleet(typeof rawFleet?.name === "string" ? rawFleet.name : "");
+  fleet.cart = Array.isArray(rawFleet?.cart) ? JSON.parse(JSON.stringify(rawFleet.cart)) : [];
+  fleet.buildMethodPriority = Array.isArray(rawFleet?.build_method_priority) ? rawFleet.build_method_priority : null;
+
+  if (shareContext) {
+    fleet.shareId = shareContext.shareId;
+    fleet.edited = false;
+    fleet.shareIndex = shareContext.index;
+  } else {
+    fleet.shareId = typeof rawFleet?.share_id === "string" ? rawFleet.share_id : null;
+    fleet.edited = !!rawFleet?.edited;
+    fleet.shareIndex = Number.isInteger(rawFleet?.share_index) ? rawFleet.share_index : 0;
+  }
+  if (fleet.shareId && !fleet.edited) fleet.shareSnapshot = fleetShareSnapshot(fleet);
+  return fleet;
+}
+
+// Imports a Fleet Lists share payload (data.fleets, same shape
+// buildAnalysisPayload() produces) -- additive (push), same "never wipes
+// what's already there" spirit now shared by every SHARE_SECTIONS entry
+// (user call, 2026-11-03 -- supersedes this SPECIFIC path's old
+// wholesale-replace-with-confirm behavior; Upload Analysis/
+// applyAnalysisPayload() is separate and deliberately untouched, see its
+// own comment). Same per-item shareId dedup as importComponentAnalyzerTables()/
+// importShipTrials() -- see this file's own "Share provenance tracking"
+// comment. Switches to the first newly-added fleet, same "land on what
+// you just added" spirit as the "+" new-fleet-tab button.
+function importFleets(fleetsData, overrideShareId = null) {
+  if (!Array.isArray(fleetsData) || fleetsData.length === 0) return false;
+
+  let skippedCount = 0;
+  const toRevive = [];
+  fleetsData.forEach((raw, index) => {
+    const shareId = overrideShareId ?? (typeof raw?.share_id === "string" ? raw.share_id : null);
+    if (shareId && findUneditedShareCopy(fleets, shareId)) {
+      skippedCount++;
+      return;
+    }
+    toRevive.push({ raw, shareContext: shareId ? { shareId, index } : null });
+  });
+
+  if (toRevive.length === 0) {
+    if (skippedCount > 0) alert(t("fleet_lists.share_already_loaded"));
+    return true;
+  }
+  const newFleets = toRevive.map(({ raw, shareContext }) => reviveImportedFleet(raw, shareContext));
+  fleets.push(...newFleets);
+  activeFleetIndex = fleets.length - newFleets.length;
+
+  resetShipPicker();
+  saveState();
+  renderCart();
+  if (skippedCount > 0) alert(t("fleet_lists.share_already_loaded"));
+  return true;
+}
+
+// Restores `fleet` to exactly what its own share originally contained --
+// same "re-fetch fresh, never trust a local cache, pick out this fleet's
+// own shareIndex among possibly several sharing one shareId" design as
+// resetComponentAnalyzerTableToShareOriginal(), replacing this fleet in
+// place (same position in `fleets`, activeFleetIndex untouched unless it
+// pointed at this exact fleet).
+async function resetFleetToShareOriginal(fleet) {
+  if (!fleet.shareId || !fleet.edited) return;
+  try {
+    const response = await fetch(`/api/share/fleets/${fleet.shareId}?lang=${i18next.language}`);
+    const result = await response.json();
+    const original = Array.isArray(result.data?.fleets) ? result.data.fleets[fleet.shareIndex] : null;
+    if (!original) {
+      alert(t("fleet_lists.share_reset_failed"));
+      return;
+    }
+    const revived = reviveImportedFleet(original, { shareId: fleet.shareId, index: fleet.shareIndex });
+    const index = fleets.indexOf(fleet);
+    if (index === -1) return;
+    fleets[index] = revived;
+
+    resetShipPicker();
+    saveState();
+    renderCart();
+  } catch {
+    alert(t("fleet_lists.share_reset_failed"));
+  }
 }
 
 downloadAnalysisBtn.addEventListener("click", () => {
@@ -6412,7 +6539,11 @@ const SHARE_SECTIONS = [
     checkbox: document.getElementById("share-option-fleets"),
     hasContent: () => fleets.some((fleet) => fleet.cart.length > 0),
     buildPayload: buildAnalysisPayload,
-    applyPayload: applyAnalysisPayload,
+    applyPayload: (data, shareId) => {
+      if (!data || !Array.isArray(data.fleets)) return false;
+      importFleets(data.fleets, shareId);
+      return true;
+    },
   },
   {
     section: "price_overrides",
@@ -6465,9 +6596,9 @@ const SHARE_SECTIONS = [
     // returns is the basic shape check; the import itself (and its own
     // render) finishes shortly after, same as any other async work kicked
     // off from a synchronous event handler.
-    applyPayload: (data) => {
+    applyPayload: (data, shareId) => {
       if (!Array.isArray(data) || data.length === 0) return false;
-      importComponentAnalyzerTables(data);
+      importComponentAnalyzerTables(data, shareId);
       return true;
     },
   },
@@ -6480,9 +6611,9 @@ const SHARE_SECTIONS = [
     // way importComponentAnalyzerTables() does) but, same as that entry,
     // applyShareLinksFromUrl() doesn't await the result -- fine here for
     // the same reason.
-    applyPayload: (data) => {
+    applyPayload: (data, shareId) => {
       if (!Array.isArray(data) || data.length === 0) return false;
-      importShipTrials(data);
+      importShipTrials(data, shareId);
       return true;
     },
   },
@@ -6525,6 +6656,158 @@ function openShareModal() {
   shareModalOverlay.classList.remove("hidden");
 }
 
+// Production's own default Fly hostname ("x4.fly.dev") never belongs in a
+// user-facing share link -- x4-cost-compare.com is the real, canonical
+// public domain (a real, issued cert -- see `flyctl certs list`), and
+// x4.fly.dev is still reachable alongside it (Fly never disables an app's
+// own default hostname just because a custom domain is attached), so
+// anyone who happens to land on it directly (an old bookmark, a search
+// result indexing the raw Fly URL, ...) would otherwise generate and
+// share links pointing at the "wrong" domain forever. Deliberately only
+// rewrites that one exact literal hostname -- staging (x4-staging.fly.dev)
+// is untouched on purpose, since it has its own separate Tigris bucket
+// (see DEPLOY_PROCESS.md) and a share uuid minted there is only ever
+// resolvable AT that same staging hostname; rewriting it to
+// x4-cost-compare.com would produce a share link that looks right but
+// 404s. Local dev (plain location.origin) is likewise untouched.
+const SHARE_LINK_HOSTNAME_OVERRIDE = { "x4.fly.dev": "x4-cost-compare.com" };
+function shareLinkOrigin() {
+  const override = SHARE_LINK_HOSTNAME_OVERRIDE[location.hostname];
+  return override ? `${location.protocol}//${override}` : location.origin;
+}
+
+// ---- Share provenance tracking (shareId/edited) -- user call, 2026-11-03 ----
+// Shared by Fleet Lists, Component Analyzer Tables, and Ship Trials -- an
+// item loaded from a share link (or a "Load Prebuilt Tables" band entry,
+// which is just this same mechanism under a fixed short key like "s_ships"
+// instead of a random uuid -- see applyShareLinksFromUrl()'s own comment)
+// carries its own `shareId` and starts `edited: false`. Re-opening the
+// SAME share while an unedited copy is already present skips re-adding it
+// (findUneditedShareCopy() below) instead of creating a silent duplicate;
+// once edited, re-opening it instead adds a fresh pristine copy alongside
+// the edited one.
+//
+// `shareId`/`edited` are real persisted fields (not computed) -- the user
+// explicitly asked for exactly these two as new optional fields on the
+// shareable JSON itself, since `edited` has to survive and ride along
+// correctly if this exact item is later re-shared by whoever has it. But
+// `edited` is SET lazily, via a snapshot comparison run inside saveState()
+// (refreshShareEditedFlags() below), rather than imperatively hooked at
+// every individual title/component/stat-selection mutation call site
+// across three quite different features -- there are dozens of those
+// scattered across the Fleet Planner/Component Analyzer/Proving Grounds,
+// and missing even one would silently break the Reset button's own
+// promise. saveState() already runs immediately after essentially every
+// mutation in this app, so comparing there is both more reliable AND far
+// less code than per-site instrumentation. Once true, `edited` never
+// auto-reverts back to false except via the explicit Reset button
+// (resetItemToShareOriginal() below) -- a one-way flag, not a live
+// "does it currently match" check, matching the user's own "as soon as...
+// changed" wording.
+//
+// `shareSnapshot`/`shareIndex` (NOT the two fields the user asked for) are
+// local-only bookkeeping -- stripped from every buildXPayload() before
+// upload, so a re-share's own JSON carries exactly {..., shareId, edited}
+// with nothing extra leaking into what another user's browser receives.
+// `shareSnapshot` is this item's own "relevant fields" (title/components/
+// stats -- deliberately NOT mods, per explicit scope) at the moment it was
+// last accepted as pristine, recomputed fresh every time (never carried
+// forward across a re-export) so a file re-upload of an already-pristine
+// item just re-derives the same baseline from its own current content.
+// `shareIndex` is this item's own position within the array the share
+// blob actually contained -- needed because one shareId can cover MULTIPLE
+// items at once (sharing 3 tables under one link), so Reset knows exactly
+// which one of the (possibly several) fetched entries to restore from.
+
+function componentAnalyzerTableShareSnapshot(table) {
+  return JSON.stringify({
+    title: table.title.trim(),
+    components: table.components.map((c) => c.ware_id).sort(),
+    statSets: table.statSets.map((s) => ({ name: s.name.trim(), selectedStats: [...s.selectedStats].sort() })),
+  });
+}
+
+function shipTrialShareSnapshot(trial) {
+  return JSON.stringify({
+    title: trial.title.trim(),
+    // Each column's own per-ship "edited" state (already tracked -- see
+    // addShipToTrial()'s own originalLoadout/loadoutEquipmentSignature()
+    // comment) folds straight in here, so a ship's own loadout drifting
+    // counts as this Trial's own "components changed" too, with no need
+    // to separately re-diff loadout content.
+    components: trial.components.map((c) => `${c.ware_id}:${c.edited ? 1 : 0}`).sort(),
+    statSets: trial.statSets.map((s) => ({ name: s.name.trim(), selectedStats: [...s.selectedStats].sort() })),
+  });
+}
+
+function fleetShareSnapshot(fleet) {
+  return JSON.stringify({
+    name: fleet.name.trim(),
+    cart: fleet.cart.map((entry) => ({
+      shipWareId: entry.shipWareId,
+      count: entry.count,
+      selections: entry.selections,
+      missileAmounts: entry.missileAmounts,
+      droneAmounts: entry.droneAmounts,
+      deployableAmounts: entry.deployableAmounts,
+      countermeasureAmounts: entry.countermeasureAmounts,
+      crewAmounts: entry.crewAmounts,
+    })),
+  });
+}
+
+// Called from the top of saveState() -- see this whole section's own
+// comment for why a lazy diff there, not per-mutation-site instrumentation.
+function refreshShareEditedFlags() {
+  for (const table of componentAnalyzerTables) {
+    if (!table.shareId || table.edited) continue;
+    if (componentAnalyzerTableShareSnapshot(table) !== table.shareSnapshot) table.edited = true;
+  }
+  for (const trial of shipTrials) {
+    if (!trial.shareId || trial.edited) continue;
+    if (shipTrialShareSnapshot(trial) !== trial.shareSnapshot) trial.edited = true;
+  }
+  for (const fleet of fleets) {
+    if (!fleet.shareId || fleet.edited) continue;
+    if (fleetShareSnapshot(fleet) !== fleet.shareSnapshot) fleet.edited = true;
+  }
+}
+
+// An existing local item (table/trial/fleet) that already came from this
+// exact shareId and hasn't been touched since -- re-importing the same
+// share while one of these exists should just tell the user it's already
+// there instead of creating a visually-identical duplicate.
+function findUneditedShareCopy(list, shareId) {
+  return list.find((item) => item.shareId === shareId && !item.edited);
+}
+
+// "Loaded from share id: <id>" text + a small circular reset button, shown
+// above a table/trial/fleet's own header -- ONLY when it actually came
+// from a share (shareId present); a from-scratch item gets neither row nor
+// button at all (user call, 2026-11-03). The reset button is disabled
+// (greyed out) whenever `edited` is false -- nothing to reset back to yet.
+function buildShareBadgeRow(item, resetFn, labelKey) {
+  if (!item.shareId) return null;
+  const row = document.createElement("div");
+  row.className = "share-badge-row";
+
+  const label = document.createElement("span");
+  label.className = "share-badge-label";
+  label.textContent = t(labelKey, { id: item.shareId });
+  row.appendChild(label);
+
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.className = "share-badge-reset-btn";
+  resetBtn.textContent = "↻";
+  resetBtn.title = t(item.edited ? "share_modal.reset_tooltip" : "share_modal.reset_tooltip_disabled");
+  resetBtn.disabled = !item.edited;
+  resetBtn.addEventListener("click", () => resetFn(item));
+  row.appendChild(resetBtn);
+
+  return row;
+}
+
 async function generateShareLink() {
   const checkedSections = SHARE_SECTIONS.filter((entry) => entry.checkbox.checked);
   if (checkedSections.length === 0) {
@@ -6560,7 +6843,7 @@ async function generateShareLink() {
       params.set(`share_${entry.section}`, uuid);
     }
 
-    shareModalResultInput.value = `${location.origin}${location.pathname}?${params.toString()}`;
+    shareModalResultInput.value = `${shareLinkOrigin()}${location.pathname}?${params.toString()}`;
     shareModalResult.classList.remove("hidden");
     showShareModalStatus([], false);
   } catch (err) {
@@ -6587,14 +6870,17 @@ shareModalCopyBtn.addEventListener("click", async () => {
   }
 });
 
-// Reads ?share_<section>=<uuid> query params (see SHARE_SECTIONS/
-// generateShareLink() above) and, for each present, fetches and applies
-// that section -- called once from bootstrap(), after state has already
-// been restored from localStorage, so each section's own applyPayload()
-// (which may confirm() before overwriting) is judging against the user's
-// real current data, not empty defaults. Strips the params from the URL
-// afterward either way (applied, declined, or failed) so reloading the
-// page doesn't re-prompt every time.
+// The actual fetch-and-apply work for every ?share_<section>=<uuid> param
+// present in `params` (see SHARE_SECTIONS/generateShareLink() above) --
+// no URL/history/page-navigation side effects of its own, so it's equally
+// usable from a real page load (applyShareLinksFromUrl() below, reading
+// location.search) and from an in-page link click that was intercepted
+// specifically to AVOID a page load (see the "Load Prebuilt Tables" band's
+// own click listener further down) -- see that split's own reasoning:
+// opening one of these used to always be a full browser navigation (every
+// asset/dataset refetched from zero, ~140 requests, 2+ seconds measured),
+// even though 99% of the time the app was already loaded and warm right
+// there in the same tab. Returns whether anything was actually applied.
 //
 // Always sends ?lang=<current UI language>, the same pattern loadShips()
 // already uses for ship/ware names -- harmless for a real user's own
@@ -6603,10 +6889,9 @@ shareModalCopyBtn.addEventListener("click", async () => {
 // needed so a prebuilt table's title/tab names come back already
 // localized (see prebuilt_table_titles.py) instead of the English text
 // baked into the table when it was originally built.
-async function applyShareLinksFromUrl() {
-  const params = new URLSearchParams(location.search);
+async function applyShareParams(params) {
   const present = SHARE_SECTIONS.filter((entry) => params.has(`share_${entry.section}`));
-  if (present.length === 0) return;
+  if (present.length === 0) return false;
 
   let anyApplied = false;
   for (const entry of present) {
@@ -6618,17 +6903,35 @@ async function applyShareLinksFromUrl() {
         alert(t("share_modal.could_not_load_shared", { label: shareSectionLabel(entry), error: result.error }));
         continue;
       }
-      if (entry.applyPayload(result.data)) anyApplied = true;
+      if (entry.applyPayload(result.data, shareUuid)) anyApplied = true;
     } catch (err) {
       alert(t("share_modal.could_not_load_shared", { label: shareSectionLabel(entry), error: err.message }));
     }
   }
 
+  if (anyApplied) saveState();
+  return anyApplied;
+}
+
+// Reads ?share_<section>=<uuid> query params straight off the real
+// location (so a share link opened directly -- a fresh tab, a pasted URL,
+// a bookmark -- keeps working exactly as before, full page load and all)
+// and applies them -- called once from bootstrap(), after state has
+// already been restored from localStorage, so each section's own
+// applyPayload() (which may confirm() before overwriting) is judging
+// against the user's real current data, not empty defaults. Strips the
+// params from the URL afterward either way (applied, declined, or failed)
+// so reloading the page doesn't re-prompt every time.
+async function applyShareLinksFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const present = SHARE_SECTIONS.filter((entry) => params.has(`share_${entry.section}`));
+  if (present.length === 0) return;
+
+  await applyShareParams(params);
+
   const url = new URL(location.href);
   for (const entry of present) url.searchParams.delete(`share_${entry.section}`);
   history.replaceState(null, "", url);
-
-  if (anyApplied) saveState();
 }
 
 // --- Save / load ------------------------------------------------------------
@@ -8714,7 +9017,13 @@ const WEAPON_STAT_DEFINITIONS = [
 // turrets_base -- core (identity/mount + aim), attack (rotation + both
 // ammunition_* mount-compatibility columns), damage (every real per-shot
 // stat, LEFT JOINed from bullets_base), economy.
-const TURRET_STAT_GROUPS = [statGroup("core"), statGroup("attack"), statGroup("damage"), statGroup("economy")];
+const TURRET_STAT_GROUPS = [
+  statGroup("core"),
+  statGroup("attack"),
+  statGroup("damage"),
+  statGroup("modifiers"),
+  statGroup("economy"),
+];
 const TURRET_STAT_DEFINITIONS = [
   statDef("mk", "turrets_base", "core", "component_analyzer.stat_labels.mk"),
   statDef("bullet_class", "turrets_base", "core", "component_analyzer.stat_labels.bullet_class"),
@@ -8731,6 +9040,263 @@ const TURRET_STAT_DEFINITIONS = [
   ),
   statDef("ammunition_capacity", "turrets_base", "attack", "component_analyzer.stat_labels.ammunition_capacity"),
   ...bulletDamageStatDefs("bullets_base"),
+  // Weapon-category mods apply to a turret exactly like a direct weapon --
+  // MOD_LAB_COMPONENT_TYPE_MAP already maps turret -> "weapon" (the Mod Lab
+  // UI has always offered these same mods to a turret row), but until now
+  // TURRET_STAT_DEFINITIONS had no Modifier Mod/Post Mod stats at all, so
+  // an applied mod silently had NO effect on anything a turret's own table
+  // displayed (user call, 2026-11-03: "Turrets can get weapon mods which
+  // apply to the weapon in the same way, they also need the exact same
+  // damage mods... work on adding the same weapon damage, reload, whatever
+  // modifiers that weapons can have to turrets. The only thing turrets
+  // don't get is heat."). Mirrors WEAPON_STAT_DEFINITIONS' own set exactly
+  // -- same i18n labelKeys reused verbatim (same stat concept, no new
+  // translation needed) -- EXCLUDING heat (heat_coolrate/heat_initial/
+  // heat_value) per that explicit instruction. mod_modifier_ref matches
+  // purely on `realColumn` text (see modifierModStatDef()'s own comment,
+  // and THRUSTER_STAT_DEFINITIONS' own identical cross-table precedent for
+  // thrust_strafe/pitch/yaw/roll) -- each of these correctly reads THIS
+  // turret row's own applied "standard" mod, completely independent of
+  // weapon's own copies of the same stats. Every downstream per-shot stat
+  // (hull_damage_per_shot, shield_damage_per_shot, etc.) already prefers
+  // these _post_mod siblings with a fallback to the raw stat -- see that
+  // pattern's own comment -- so adding these here is enough on its own to
+  // make a Damage mod show up in a turret's own Burst/Sustained DPS too,
+  // no further change needed for those five.
+  modifierModStatDef(
+    "damage_value_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.damage_value_modifier_mod",
+    "damage_value",
+    1,
+  ),
+  postModStatDef(
+    "damage_value_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_value_post_mod",
+    "turret",
+    "damage_value",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "damage_hull_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_hull_post_mod",
+    "turret",
+    "damage_hull",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "damage_noshield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_noshield_post_mod",
+    "turret",
+    "damage_noshield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "damage_shield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.damage_shield_post_mod",
+    "turret",
+    "damage_shield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "areadamage_value_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.areadamage_value_post_mod",
+    "turret",
+    "areadamage_value",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  postModStatDef(
+    "areadamage_shield_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.areadamage_shield_post_mod",
+    "turret",
+    "areadamage_shield",
+    ["damage_value_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_lifetime_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_lifetime_modifier_mod",
+    "bullet_lifetime",
+    1,
+  ),
+  postModStatDef(
+    "bullet_lifetime_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_lifetime_post_mod",
+    "turret",
+    "bullet_lifetime",
+    ["bullet_lifetime_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_speed_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_speed_modifier_mod",
+    "bullet_speed",
+    1,
+  ),
+  postModStatDef(
+    "bullet_speed_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_speed_post_mod",
+    "turret",
+    "bullet_speed",
+    ["bullet_speed_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "bullet_range_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.bullet_range_modifier_mod",
+    "bullet_range",
+    1,
+  ),
+  postModStatDef(
+    "bullet_range_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.bullet_range_post_mod",
+    "turret",
+    "bullet_range",
+    ["bullet_range_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "reload_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.reload_time_modifier_mod",
+    "reload_time",
+    1,
+  ),
+  postModStatDef(
+    "reload_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.reload_time_post_mod",
+    "turret",
+    "reload_time",
+    ["reload_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "charge_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.charge_time_modifier_mod",
+    "charge_time",
+    1,
+  ),
+  postModStatDef(
+    "charge_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.charge_time_post_mod",
+    "turret",
+    "charge_time",
+    ["charge_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "stick_time_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.stick_time_modifier_mod",
+    "stick_time",
+    1,
+  ),
+  postModStatDef(
+    "stick_time_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.stick_time_post_mod",
+    "turret",
+    "stick_time",
+    ["stick_time_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "mining_damage_multiplier_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.mining_damage_multiplier_modifier_mod",
+    "mining_damage_multiplier",
+    1,
+  ),
+  postModStatDef(
+    "mining_damage_multiplier_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.mining_damage_multiplier_post_mod",
+    "turret",
+    "mining_damage_multiplier",
+    ["mining_damage_multiplier_modifier_mod"],
+    "multiply",
+  ),
+  modifierModStatDef(
+    "surfaceelement_damage_multiplier_modifier_mod",
+    "bullets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.surfaceelement_damage_multiplier_modifier_mod",
+    "surfaceelement_damage_multiplier",
+    1,
+  ),
+  postModStatDef(
+    "surfaceelement_damage_multiplier_post_mod",
+    "bullets_base",
+    "damage",
+    "component_analyzer.stat_labels.surfaceelement_damage_multiplier_post_mod",
+    "turret",
+    "surfaceelement_damage_multiplier",
+    ["surfaceelement_damage_multiplier_modifier_mod"],
+    "multiply",
+  ),
+  // rotation_speed lives on turrets_base (its own real column, NOT
+  // weapons_base -- a turret's own physical traverse speed, distinct from
+  // weapon's own same-named column) -- same realColumn text match still
+  // correctly resolves against the real "rotationspeed" mod regardless.
+  modifierModStatDef(
+    "rotation_speed_modifier_mod",
+    "turrets_base",
+    "modifiers",
+    "component_analyzer.stat_labels.rotation_speed_modifier_mod",
+    "rotation_speed",
+    1,
+  ),
+  postModStatDef(
+    "rotation_speed_post_mod",
+    "turrets_base",
+    "attack",
+    "component_analyzer.stat_labels.rotation_speed_post_mod",
+    "turret",
+    "rotation_speed",
+    ["rotation_speed_modifier_mod"],
+    "multiply",
+  ),
   statDef("price_min", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_min"),
   statDef("price_avg", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_avg"),
   statDef("price_max", "equipment_wares_base", "economy", "component_analyzer.stat_labels.price_max"),
@@ -9252,14 +9818,27 @@ const COMBAT_DERIVED_STATS = [
     // matches exactly (1/(3.4+0.5) = 0.2564 -> displays as 0.26). charge_time
     // is null (falls back to 0) for every weapon without an explicit
     // charge-up, so this is a no-op everywhere else.
+    //
+    // reload_time/charge_time each prefer their own _post_mod sibling with
+    // a fallback to the raw stat (user call, 2026-11-03 -- see
+    // hull_damage_per_shot's own comment on this pattern) -- a Reload/
+    // Charge Time mod never showed up in Rate of Fire (and everything
+    // downstream of it: weapon_effective_rate_of_fire, hull_dps/shield_dps,
+    // turret_effective_rate_of_fire, turret_output_mw) until now. reload_rate
+    // is deliberately left raw -- the real "reload" mod only ever targets
+    // reload_time, by explicit documented product decision (see
+    // equipment_mod_target_mappings.json's own "reload" entry), so a
+    // reload_rate-only weapon/turret simply has no mod to apply here.
     expression:
-      "bullet_speed ? (reload_rate ? reload_rate : 1 / (reload_time + (charge_time ? charge_time : 0))) : 1 / missile_reload_time",
+      "bullet_speed ? (reload_rate ? reload_rate : 1 / ((reload_time_post_mod ? reload_time_post_mod : reload_time) + (charge_time ? (charge_time_post_mod ? charge_time_post_mod : charge_time) : 0))) : 1 / missile_reload_time",
     variables: {
       bullet_speed: { componentType: "self", statId: "bullet_speed" },
       missile_reload_time: { componentType: "missile", statId: "reload_time", whenNull: "bullet_speed" },
       reload_rate: { componentType: "self", statId: "reload_rate" },
       reload_time: { componentType: "self", statId: "reload_time" },
+      reload_time_post_mod: { componentType: "self", statId: "reload_time_post_mod" },
       charge_time: { componentType: "self", statId: "charge_time" },
+      charge_time_post_mod: { componentType: "self", statId: "charge_time_post_mod" },
     },
     appliesTo: { weapon: "damage", turret: "damage" },
   },
@@ -9516,13 +10095,23 @@ const COMBAT_DERIVED_STATS = [
     // stat-set selection that already references it -- the user-facing
     // label was always the generic "Effective Range (km)", never
     // turret-specific, so nothing about what's shown actually changes.
+    // bullet_range/bullet_speed/bullet_lifetime each prefer their own
+    // _post_mod sibling with a fallback to the raw stat (user call,
+    // 2026-11-03 -- see hull_damage_per_shot's own comment on this
+    // pattern) -- a Beam Length/Speed/Lifetime mod never showed up in
+    // Effective Range until now. The presence GATE (`bullet_speed ?`)
+    // still reads the raw stat -- a pure null-check, unaffected by
+    // whether a mod happens to be applied.
     expression:
-      "(bullet_speed ? (bullet_range ? bullet_range : bullet_speed * bullet_lifetime) : missile_range) / 1000",
+      "(bullet_speed ? ((bullet_range_post_mod ? bullet_range_post_mod : bullet_range) ? (bullet_range_post_mod ? bullet_range_post_mod : bullet_range) : (bullet_speed_post_mod ? bullet_speed_post_mod : bullet_speed) * (bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime)) : missile_range) / 1000",
     variables: {
       missile_range: { componentType: "missile", statId: "missile_range", whenNull: "bullet_speed" },
       bullet_range: { componentType: "self", statId: "bullet_range" },
+      bullet_range_post_mod: { componentType: "self", statId: "bullet_range_post_mod" },
       bullet_speed: { componentType: "self", statId: "bullet_speed" },
+      bullet_speed_post_mod: { componentType: "self", statId: "bullet_speed_post_mod" },
       bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+      bullet_lifetime_post_mod: { componentType: "self", statId: "bullet_lifetime_post_mod" },
     },
     appliesTo: { weapon: "damage", turret: "damage" },
   },
@@ -9613,12 +10202,19 @@ const COMBAT_DERIVED_STATS = [
     // factor of 1 (hull_damage_per_shot treated as a lump-sum per-shot
     // amount, which is exactly right for a non-beam bullet) instead of
     // multiplying by a null and silently producing no value at all.
-    expression: "weapon_effective_rate_of_fire * hull_damage_per_shot * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+    // bullet_lifetime prefers its own _post_mod sibling with a fallback
+    // to the raw stat (user call, 2026-11-03), same pattern as everywhere
+    // else -- a Lifetime mod never showed up in Burst Weapon Damage for a
+    // beam weapon until now. bullet_range stays raw -- a pure "is this a
+    // beam" gate, unaffected by whether a mod is applied.
+    expression:
+      "weapon_effective_rate_of_fire * hull_damage_per_shot * (bullet_range ? ((bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) ? (bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) : 1) : 1)",
     variables: {
       weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
       hull_damage_per_shot: { componentType: "self", statId: "hull_damage_per_shot" },
       bullet_range: { componentType: "self", statId: "bullet_range" },
       bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+      bullet_lifetime_post_mod: { componentType: "self", statId: "bullet_lifetime_post_mod" },
     },
     appliesTo: { weapon: "damage" },
   },
@@ -9627,13 +10223,15 @@ const COMBAT_DERIVED_STATS = [
     labelKey: "component_analyzer.stat_labels.shield_dps",
     // WEAPON-ONLY -- see hull_dps's own comment, including the clip-aware
     // rate and the beam duty-cycle factor (and its own null-safe
-    // bullet_lifetime fallback, same reason, same fix).
-    expression: "weapon_effective_rate_of_fire * shield_damage_per_shot * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+    // bullet_lifetime_post_mod-with-fallback, same reason, same fix).
+    expression:
+      "weapon_effective_rate_of_fire * shield_damage_per_shot * (bullet_range ? ((bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) ? (bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) : 1) : 1)",
     variables: {
       weapon_effective_rate_of_fire: { componentType: "self", statId: "weapon_effective_rate_of_fire" },
       shield_damage_per_shot: { componentType: "self", statId: "shield_damage_per_shot" },
       bullet_range: { componentType: "self", statId: "bullet_range" },
       bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+      bullet_lifetime_post_mod: { componentType: "self", statId: "bullet_lifetime_post_mod" },
     },
     appliesTo: { weapon: "damage" },
   },
@@ -9712,15 +10310,19 @@ const COMBAT_DERIVED_STATS = [
     // Inner `(bullet_lifetime ? bullet_lifetime : 1)` -- same null-safe
     // fallback as hull_dps/shield_dps's own fix, same reason (a real
     // bullet_range without a real bullet_lifetime, e.g. S Burst Ray, isn't
-    // actually a beam despite having a range value).
+    // actually a beam despite having a range value). Now prefers
+    // bullet_lifetime_post_mod with a fallback to the raw stat (user call,
+    // 2026-11-03), same as hull_dps/shield_dps -- bullet_range itself stays
+    // raw, a pure "is this a beam" gate.
     expression:
-      "max(hull_damage_per_shot, shield_damage_per_shot) * turret_effective_rate_of_fire * (bullet_range ? (bullet_lifetime ? bullet_lifetime : 1) : 1)",
+      "max(hull_damage_per_shot, shield_damage_per_shot) * turret_effective_rate_of_fire * (bullet_range ? ((bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) ? (bullet_lifetime_post_mod ? bullet_lifetime_post_mod : bullet_lifetime) : 1) : 1)",
     variables: {
       hull_damage_per_shot: { componentType: "self", statId: "hull_damage_per_shot" },
       shield_damage_per_shot: { componentType: "self", statId: "shield_damage_per_shot" },
       turret_effective_rate_of_fire: { componentType: "self", statId: "turret_effective_rate_of_fire" },
       bullet_range: { componentType: "self", statId: "bullet_range" },
       bullet_lifetime: { componentType: "self", statId: "bullet_lifetime" },
+      bullet_lifetime_post_mod: { componentType: "self", statId: "bullet_lifetime_post_mod" },
     },
     appliesTo: { turret: "damage" },
   },
@@ -13503,8 +14105,11 @@ shipTrialFleetShipCancelBtn.addEventListener("click", closeShipTrialAddFleetShip
 // round-trip), not a live reference -- the caller uploads this
 // immediately and it must not change out from under it if a trial is
 // edited afterward.
+// Strips the two LOCAL-only share-tracking fields (shareSnapshot/
+// shareIndex -- see this file's own "Share provenance tracking" comment)
+// so the uploaded JSON carries only the real {..., shareId, edited} shape.
 function buildShipTrialsPayload() {
-  return JSON.parse(JSON.stringify(shipTrials));
+  return shipTrials.map(({ shareSnapshot, shareIndex, ...rest }) => JSON.parse(JSON.stringify(rest)));
 }
 
 // Deep-clones + backfills one imported/shared Ship Trial, reassigning a
@@ -13520,7 +14125,11 @@ function buildShipTrialsPayload() {
 // missing-field backfill shape as restorePersistedState()'s own Ship
 // Trials block, since an imported file could just as easily predate a
 // field that's since been added.
-function reviveImportedShipTrial(rawTrial) {
+//
+// `shareContext` ({ shareId, index } | null) -- see
+// reviveImportedComponentAnalyzerTable()'s own comment for exactly what
+// this overrides and why.
+function reviveImportedShipTrial(rawTrial, shareContext = null) {
   const trial = JSON.parse(JSON.stringify(rawTrial ?? {}));
   trial.id = nextShipTrialId++;
   trial.title = typeof trial.title === "string" ? trial.title : "";
@@ -13562,6 +14171,17 @@ function reviveImportedShipTrial(rawTrial) {
       trial.activeStatSetIndex = 0;
     }
   }
+
+  if (shareContext) {
+    trial.shareId = shareContext.shareId;
+    trial.edited = false;
+    trial.shareIndex = shareContext.index;
+  } else {
+    trial.shareId = typeof trial.shareId === "string" ? trial.shareId : null;
+    trial.edited = !!trial.edited;
+    trial.shareIndex = Number.isInteger(trial.shareIndex) ? trial.shareIndex : 0;
+  }
+  if (trial.shareId && !trial.edited) trial.shareSnapshot = shipTrialShareSnapshot(trial);
   return trial;
 }
 
@@ -13569,6 +14189,8 @@ function reviveImportedShipTrial(rawTrial) {
 // same shape buildShipTrialsPayload() produces) -- additive (unshift),
 // same "never wipes what's already there" spirit as "+ Add Trial"/every
 // other Proving Grounds "Add Ship" path, not a destructive replace.
+// `overrideShareId`/the share-dedup-with-one-combined-alert behavior --
+// see importComponentAnalyzerTables()'s own comment, mirrored exactly.
 // Warms componentListCache for "chassis" (every trial column's own type)
 // plus every type any registered formula's mock_ref/aggregate_ref could
 // ever need (collectMockRelevantComponentTypes() -- a static scan over
@@ -13578,9 +14200,25 @@ function reviveImportedShipTrial(rawTrial) {
 // rendering, same reasoning importComponentAnalyzerTables() already
 // documents for why this has to happen before the first paint rather than
 // lazily on demand.
-async function importShipTrials(data) {
+async function importShipTrials(data, overrideShareId = null) {
   if (!Array.isArray(data) || data.length === 0) return false;
-  const trials = data.map(reviveImportedShipTrial);
+
+  let skippedCount = 0;
+  const toRevive = [];
+  data.forEach((raw, index) => {
+    const shareId = overrideShareId ?? (typeof raw?.shareId === "string" ? raw.shareId : null);
+    if (shareId && findUneditedShareCopy(shipTrials, shareId)) {
+      skippedCount++;
+      return;
+    }
+    toRevive.push({ raw, shareContext: shareId ? { shareId, index } : null });
+  });
+
+  if (toRevive.length === 0) {
+    if (skippedCount > 0) alert(t("proving_grounds.share_already_loaded"));
+    return true;
+  }
+  const trials = toRevive.map(({ raw, shareContext }) => reviveImportedShipTrial(raw, shareContext));
 
   shipTrials.unshift(...trials);
 
@@ -13591,7 +14229,39 @@ async function importShipTrials(data) {
 
   saveState();
   renderShipTrials();
+  if (skippedCount > 0) alert(t("proving_grounds.share_already_loaded"));
   return true;
+}
+
+// Restores `trial` to exactly what its own share originally contained --
+// same design as resetComponentAnalyzerTableToShareOriginal(). Replaces
+// this trial in place (same local `id`/position), `minimized` state
+// preserved.
+async function resetShipTrialToShareOriginal(trial) {
+  if (!trial.shareId || !trial.edited) return;
+  try {
+    const response = await fetch(`/api/share/ship_trials/${trial.shareId}?lang=${i18next.language}`);
+    const result = await response.json();
+    const original = Array.isArray(result.data) ? result.data[trial.shareIndex] : null;
+    if (!original) {
+      alert(t("proving_grounds.share_reset_failed"));
+      return;
+    }
+    const revived = reviveImportedShipTrial(original, { shareId: trial.shareId, index: trial.shareIndex });
+    revived.id = trial.id;
+    revived.minimized = trial.minimized;
+    const index = shipTrials.findIndex((t) => t.id === trial.id);
+    if (index === -1) return;
+    shipTrials[index] = revived;
+
+    const typesToWarm = new Set(collectMockRelevantComponentTypes().filter((type) => type !== "chassis"));
+    await Promise.all([...typesToWarm].map((type) => fetchComponentList(type)));
+
+    saveState();
+    renderShipTrials();
+  } catch {
+    alert(t("proving_grounds.share_reset_failed"));
+  }
 }
 
 const shipTrialsListContainer = document.getElementById("ship-trials-list");
@@ -13628,6 +14298,15 @@ function shipTrialColumnContext(trial, component, statSet) {
 // that function's type-select/Select Components (a Trial's componentType
 // is always "chassis").
 function buildShipTrialElement(trial) {
+  // See buildComponentAnalyzerTableElement()'s own comment on this same
+  // block/wrapper split -- the share badge sits above the bordered box,
+  // not inside it.
+  const block = document.createElement("div");
+  block.className = "component-analyzer-table-block";
+
+  const shareBadge = buildShareBadgeRow(trial, resetShipTrialToShareOriginal, "proving_grounds.loaded_from_share");
+  if (shareBadge) block.appendChild(shareBadge);
+
   const wrapper = document.createElement("div");
   wrapper.className = "component-analyzer-table";
 
@@ -13711,7 +14390,8 @@ function buildShipTrialElement(trial) {
     }
   }
 
-  return wrapper;
+  block.appendChild(wrapper);
+  return block;
 }
 
 // A column's own chassis icon, with the exact same 4-corner "selection box"
@@ -14760,6 +15440,20 @@ function applyModColumnHighlight(cell, key, { standard, crossMock }) {
 }
 
 function buildComponentAnalyzerTableElement(table) {
+  // Plain, unstyled outer block -- see .component-analyzer-table-block's
+  // own comment in style.css for why the share badge (if any) lives here,
+  // a sibling ABOVE the real bordered box, instead of as that box's own
+  // first child (which used to just make the box itself taller).
+  const block = document.createElement("div");
+  block.className = "component-analyzer-table-block";
+
+  const shareBadge = buildShareBadgeRow(
+    table,
+    resetComponentAnalyzerTableToShareOriginal,
+    "component_analyzer.loaded_from_share",
+  );
+  if (shareBadge) block.appendChild(shareBadge);
+
   const wrapper = document.createElement("div");
   wrapper.className = "component-analyzer-table";
 
@@ -14978,7 +15672,8 @@ function buildComponentAnalyzerTableElement(table) {
     wrapper.appendChild(tableWrapper);
   }
 
-  return wrapper;
+  block.appendChild(wrapper);
+  return block;
 }
 
 // Missing values (null/undefined/"") count as the lowest possible value --
@@ -16424,9 +17119,14 @@ viewEquipmentInAnalyzerBtn.addEventListener("click", async () => {
 // table selection ("the json representation we use for the s3 save", per
 // the user's own spec). A deep clone (JSON round-trip), not a live
 // reference -- callers serialize/upload this immediately and it must not
-// change out from under them if a table is edited afterward.
+// change out from under them if a table is edited afterward. Strips the
+// two LOCAL-only share-tracking fields (shareSnapshot/shareIndex -- see
+// this file's own "Share provenance tracking" comment) so the uploaded
+// JSON carries only the real {..., shareId, edited} shape.
 function buildComponentAnalyzerTablesPayload(tableIds) {
-  return JSON.parse(JSON.stringify(componentAnalyzerTables.filter((table) => tableIds.has(table.id))));
+  return componentAnalyzerTables
+    .filter((table) => tableIds.has(table.id))
+    .map(({ shareSnapshot, shareIndex, ...rest }) => JSON.parse(JSON.stringify(rest)));
 }
 
 // One flattened {table_name, tab_name, headers, rows} sheet per (table,
@@ -16634,7 +17334,18 @@ componentAnalyzerExportConfirmBtn.addEventListener("click", async () => {
 // same session's own ids. Same backfill shape as restorePersistedState()'s
 // own (missing statSets/selectedStats/etc.), since an imported file could
 // just as easily predate a field that's since been added.
-function reviveImportedComponentAnalyzerTable(rawTable) {
+//
+// `shareContext` ({ shareId, index } | null): present only when this table
+// is being revived as part of a real share-link/prebuilt-band load (see
+// importComponentAnalyzerTables() below) -- sets shareId/edited/shareIndex
+// fresh, overriding whatever the raw payload itself happened to carry,
+// since what matters is THIS import. null (a local file upload) instead
+// preserves whatever shareId/edited the file's own JSON already had, same
+// "stays exactly as exported" spirit as every other field's own backfill.
+// Either way, a shareId that ends up present-and-unedited always gets a
+// freshly recomputed shareSnapshot (see this file's own "Share provenance
+// tracking" comment on why this is never carried forward verbatim).
+function reviveImportedComponentAnalyzerTable(rawTable, shareContext = null) {
   const table = JSON.parse(JSON.stringify(rawTable ?? {}));
   table.id = nextComponentAnalyzerTableId++;
   table.title = typeof table.title === "string" ? table.title : "";
@@ -16657,6 +17368,17 @@ function reviveImportedComponentAnalyzerTable(rawTable) {
       table.activeStatSetIndex = 0;
     }
   }
+
+  if (shareContext) {
+    table.shareId = shareContext.shareId;
+    table.edited = false;
+    table.shareIndex = shareContext.index;
+  } else {
+    table.shareId = typeof table.shareId === "string" ? table.shareId : null;
+    table.edited = !!table.edited;
+    table.shareIndex = Number.isInteger(table.shareIndex) ? table.shareIndex : 0;
+  }
+  if (table.shareId && !table.edited) table.shareSnapshot = componentAnalyzerTableShareSnapshot(table);
   return table;
 }
 
@@ -16665,6 +17387,17 @@ function reviveImportedComponentAnalyzerTable(rawTable) {
 // additive (unshift), same "never wipes what's already there" spirit as
 // "+ Add Table"/createFleetPlannerViewTable(), not a destructive replace,
 // since these are independent, freely-addable units like fleets are.
+//
+// `overrideShareId` is set only by the real share-link/prebuilt-band path
+// (applyShareLinksFromUrl()) -- every table in `data` gets tagged with
+// THIS one shareId. Left null for a local file upload, where each table's
+// own effective shareId is instead whatever it already carries in its own
+// JSON (possibly null, for a table that was never part of a real share).
+// Either way, before reviving anything, any table whose effective shareId
+// already has an UNEDITED local copy (findUneditedShareCopy()) is skipped
+// rather than added again -- see this file's own "Share provenance
+// tracking" comment -- with one combined alert afterward if anything was
+// actually skipped, not one alert per skipped table.
 // Warms componentListCache for every distinct componentType among the
 // imported tables, AND every type any of their own mocks reference (see
 // collectMockRelevantComponentTypes()'s own comment) -- not just each
@@ -16679,9 +17412,25 @@ function reviveImportedComponentAnalyzerTable(rawTable) {
 // collectMockRelevantComponentTypes() (which reads the live
 // componentAnalyzerTables array) already sees these new tables' own
 // mocks, not just whatever was configured before the import.
-async function importComponentAnalyzerTables(data) {
+async function importComponentAnalyzerTables(data, overrideShareId = null) {
   if (!Array.isArray(data) || data.length === 0) return false;
-  const tables = data.map(reviveImportedComponentAnalyzerTable);
+
+  let skippedCount = 0;
+  const toRevive = [];
+  data.forEach((raw, index) => {
+    const shareId = overrideShareId ?? (typeof raw?.shareId === "string" ? raw.shareId : null);
+    if (shareId && findUneditedShareCopy(componentAnalyzerTables, shareId)) {
+      skippedCount++;
+      return;
+    }
+    toRevive.push({ raw, shareContext: shareId ? { shareId, index } : null });
+  });
+
+  if (toRevive.length === 0) {
+    if (skippedCount > 0) alert(t("component_analyzer.share_already_loaded"));
+    return true;
+  }
+  const tables = toRevive.map(({ raw, shareContext }) => reviveImportedComponentAnalyzerTable(raw, shareContext));
 
   componentAnalyzerTables.unshift(...tables);
 
@@ -16694,6 +17443,7 @@ async function importComponentAnalyzerTables(data) {
 
   saveState();
   renderComponentAnalyzerTables();
+  if (skippedCount > 0) alert(t("component_analyzer.share_already_loaded"));
   return true;
 }
 
@@ -16715,6 +17465,45 @@ componentAnalyzerImportInput.addEventListener("change", async (event) => {
   event.target.value = ""; // allow re-selecting the same file later
 });
 
+// Restores `table` to exactly what its own share originally contained --
+// re-fetches /api/share/component_analyzer_tables/<shareId> fresh (never
+// trusts a locally-cached copy, since Reset's whole point is "exactly what
+// the share actually has"), picks out `table.shareIndex`'s own entry (the
+// one THIS table came from, among possibly several sharing one shareId),
+// and replaces this table in place -- same local `id`/position, `minimized`
+// state preserved (pure UI state, not part of what a share represents).
+// A no-op if `table` isn't actually from a share, or hasn't actually been
+// edited -- see the Reset button's own disabled state in
+// buildComponentAnalyzerTableElement().
+async function resetComponentAnalyzerTableToShareOriginal(table) {
+  if (!table.shareId || !table.edited) return;
+  try {
+    const response = await fetch(`/api/share/component_analyzer_tables/${table.shareId}?lang=${i18next.language}`);
+    const result = await response.json();
+    const original = Array.isArray(result.data) ? result.data[table.shareIndex] : null;
+    if (!original) {
+      alert(t("component_analyzer.share_reset_failed"));
+      return;
+    }
+    const revived = reviveImportedComponentAnalyzerTable(original, { shareId: table.shareId, index: table.shareIndex });
+    revived.id = table.id;
+    revived.minimized = table.minimized;
+    const index = componentAnalyzerTables.findIndex((t) => t.id === table.id);
+    if (index === -1) return;
+    componentAnalyzerTables[index] = revived;
+
+    const typesToWarm = new Set(
+      [revived.componentType, ...collectMockRelevantComponentTypes()].filter((type) => type && type !== "chassis"),
+    );
+    await Promise.all([...typesToWarm].map((type) => fetchComponentList(type)));
+
+    saveState();
+    renderComponentAnalyzerTables();
+  } catch {
+    alert(t("component_analyzer.share_reset_failed"));
+  }
+}
+
 // ---- "Load Prebuilt Tables" band's own per-category dropdowns ----
 // One .prebuilt-tables-dropdown per category (Ships/Engines/Shields/... --
 // see index.html, each identified by its own data-prebuilt-dropdown
@@ -16732,6 +17521,41 @@ componentAnalyzerImportInput.addEventListener("change", async (event) => {
 // since each one closes over its own `dropdown`/`btn`/`menu` -- fine at
 // this scale (a handful of categories), and keeps each dropdown's own
 // state fully independent.
+// Shared by every "Load Prebuilt Tables" band link -- both the ones
+// inside a .prebuilt-tables-dropdown-menu (Ships/Engines/Shields/Weapons/
+// Turrets/Thrusters, size-tiered) AND the two plain .prebuilt-tables-link-btn
+// links beside them (Missiles/Economy Wares, not size-tiered -- see
+// index.html, same band, just not nested in a dropdown at all). Originally
+// only wired onto the dropdown menus; Missiles/Economy Wares were missed
+// entirely on the first pass and kept doing a full page reload (user
+// report, 2026-11-03) -- extracted here so every band link, regardless of
+// its own markup shape, goes through the exact same in-page fast path.
+//
+// A modified click (new tab/window, middle-click, etc.) behaves exactly
+// like clicking any other link -- never intercepted, so "open in a new
+// tab" still works. Only a plain left click takes the in-page fast path:
+// this link's own share param is applied directly via applyShareParams(),
+// with no page navigation at all, instead of the old behavior (a full
+// browser reload -- re-fetching every asset/dataset from zero, ~140
+// requests, 2+ seconds measured) that a real `<a href>` click would
+// otherwise trigger every time, even though the app is already loaded and
+// warm right here almost every time this is actually clicked. A direct/
+// bookmarked/pasted share URL -- no page loaded yet to intercept a click
+// on -- still goes through the normal full load + applyShareLinksFromUrl()
+// path, unaffected by this.
+function handlePrebuiltTablesLinkClick(event, link) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const url = new URL(link.href);
+  applyShareParams(new URLSearchParams(url.search)).finally(() => {
+    if (url.hash) showPage(url.hash.slice(1));
+  });
+}
+
+for (const linkBtn of document.querySelectorAll(".prebuilt-tables-link-btn")) {
+  linkBtn.addEventListener("click", (event) => handlePrebuiltTablesLinkClick(event, linkBtn));
+}
+
 for (const dropdown of document.querySelectorAll(".prebuilt-tables-dropdown")) {
   const btn = dropdown.querySelector(".prebuilt-tables-dropdown-btn");
   const menu = dropdown.querySelector(".prebuilt-tables-dropdown-menu");
@@ -16743,7 +17567,10 @@ for (const dropdown of document.querySelectorAll(".prebuilt-tables-dropdown")) {
 
   btn.addEventListener("click", () => setOpen(menu.classList.contains("hidden")));
   menu.addEventListener("click", (event) => {
-    if (event.target.closest("a")) setOpen(false);
+    const link = event.target.closest("a");
+    if (!link) return;
+    setOpen(false);
+    handlePrebuiltTablesLinkClick(event, link);
   });
   document.addEventListener("click", (event) => {
     if (menu.classList.contains("hidden")) return;
@@ -20339,6 +21166,8 @@ let stateReady = false;
 // individual mutation -- see each call site's own comment.
 function saveState() {
   if (!stateReady) return;
+
+  refreshShareEditedFlags();
 
   const state = {
     version: PERSISTED_STATE_VERSION,

@@ -106,13 +106,16 @@
     "nothing_to_download": "没有可下载的内容 -- 所有舰队列表均为空。",
     "empty_nothing_to_download": "舰队列表为空 -- 没有可下载的内容。",
     "could_not_parse_file": "无法解析文件：{{error}}",
+    "share_already_loaded": "舰队已加载。",
     "invalid_file": "这似乎不是有效的舰队列表文件（缺少 \"wares\" 数组）。",
     "statistics_title": "舰船总统计",
     "total_s_capacity": "S 型舰船总容量：{{value}}",
     "total_m_capacity": "M 型舰船总容量：{{value}}",
     "type_count": "{{type}}数量：{{value}}",
     "type_s_capacity": "{{type}} S 型舰船总容量：{{value}}",
-    "type_m_capacity": "{{type}} M 型舰船总容量：{{value}}"
+    "type_m_capacity": "{{type}} M 型舰船总容量：{{value}}",
+    "loaded_from_share": "已从分享 ID 加载：{{id}}",
+    "share_reset_failed": "无法将此舰队重置为原始分享内容。"
   },
   "cost_analysis": {
     "section_title": "计算生产成本",
@@ -323,7 +326,9 @@
     "could_not_share": "无法分享{{label}}：{{error}}",
     "could_not_load_shared": "无法加载共享的{{label}}：{{error}}",
     "option_component_analyzer_tables": "组件分析器表格",
-    "option_ship_trials": "舰船试验"
+    "option_ship_trials": "舰船试验",
+    "reset_tooltip": "重置为原始分享内容",
+    "reset_tooltip_disabled": "没有可重置的内容——尚未进行任何更改"
   },
   "component_type": {
     "engine": "引擎",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "已跳过 {{name}}:其弹药不适用于此武器",
     "mock_trace_skipped_ship": "已跳过 {{name}}:无法装配到此{{componentType}}",
     "mock_trace_skipped_no_value": "已跳过 {{name}}:此统计项没有值",
-    "remove_table_confirm": "确定要删除表格“{{table}}”吗?"
+    "remove_table_confirm": "确定要删除表格“{{table}}”吗?",
+    "share_already_loaded": "表格已加载。",
+    "loaded_from_share": "已从分享 ID 加载：{{id}}",
+    "share_reset_failed": "无法将此表格重置为原始分享内容。"
   },
   "proving_grounds": {
     "section_title": "试验场",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "例如:护卫舰对比",
     "remove_trial": "移除试验",
     "remove_trial_confirm": "确定要删除试验\"{{trial}}\"吗?",
+    "share_already_loaded": "试验已加载。",
     "collapse_trial_tooltip": "最小化此试验",
     "expand_trial_tooltip": "最大化此试验",
     "no_ships_placeholder": "尚未添加舰船。",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "添加新舰船",
     "add_to_trial_btn": "添加到试验",
     "update_trial_btn": "更新试验",
-    "close": "关闭"
+    "close": "关闭",
+    "loaded_from_share": "已从分享 ID 加载：{{id}}",
+    "share_reset_failed": "无法将此试验重置为原始分享内容。"
   },
   "component_set_picker_modal": {
     "title": "选择组件",

@@ -106,13 +106,16 @@
     "nothing_to_download": "Немає чого скачувати -- усі списки флоту порожні.",
     "empty_nothing_to_download": "Список флоту порожній -- немає чого скачувати.",
     "could_not_parse_file": "Не вдалося обробити файл: {{error}}",
+    "share_already_loaded": "Флот вже завантажено.",
     "invalid_file": "Схоже, це не дійсний файл списку флоту (відсутній масив \"wares\").",
     "statistics_title": "Загальна Статистика Кораблів",
     "total_s_capacity": "Загальна Місткість Кораблів S: {{value}}",
     "total_m_capacity": "Загальна Місткість Кораблів M: {{value}}",
     "type_count": "Кількість ({{type}}): {{value}}",
     "type_s_capacity": "Загальна Місткість Кораблів S ({{type}}): {{value}}",
-    "type_m_capacity": "Загальна Місткість Кораблів M ({{type}}): {{value}}"
+    "type_m_capacity": "Загальна Місткість Кораблів M ({{type}}): {{value}}",
+    "loaded_from_share": "Завантажено зі спільного доступу id: {{id}}",
+    "share_reset_failed": "Не вдалося скинути цей флот до початкового спільного доступу."
   },
   "cost_analysis": {
     "section_title": "Розрахувати Виробництво",
@@ -323,7 +326,9 @@
     "could_not_share": "Не вдалося поділитися {{label}}: {{error}}",
     "could_not_load_shared": "Не вдалося завантажити спільні дані {{label}}: {{error}}",
     "option_component_analyzer_tables": "Таблиці Аналізатора Компонентів",
-    "option_ship_trials": "Випробування Кораблів"
+    "option_ship_trials": "Випробування Кораблів",
+    "reset_tooltip": "Скинути до початкового спільного доступу",
+    "reset_tooltip_disabled": "Нічого скидати -- це не було змінено"
   },
   "component_type": {
     "engine": "Двигуни",
@@ -824,7 +829,10 @@
     "mock_trace_skipped_ammo": "{{name}} пропущено: боєприпас не підходить до цієї зброї",
     "mock_trace_skipped_ship": "Пропущено {{name}}: не підходить для цього {{componentType}}",
     "mock_trace_skipped_no_value": "{{name}} пропущено: немає значення для цієї характеристики",
-    "remove_table_confirm": "Ви впевнені, що хочете видалити таблицю «{{table}}»?"
+    "remove_table_confirm": "Ви впевнені, що хочете видалити таблицю «{{table}}»?",
+    "share_already_loaded": "Таблицю вже завантажено.",
+    "loaded_from_share": "Завантажено зі спільного доступу id: {{id}}",
+    "share_reset_failed": "Не вдалося скинути цю таблицю до початкового спільного доступу."
   },
   "proving_grounds": {
     "section_title": "Випробувальний Полігон",
@@ -843,6 +851,7 @@
     "trial_title_placeholder": "напр. Порівняння Корветів",
     "remove_trial": "Видалити випробування",
     "remove_trial_confirm": "Ви впевнені, що хочете видалити випробування «{{trial}}»?",
+    "share_already_loaded": "Випробування вже завантажено.",
     "collapse_trial_tooltip": "Згорнути це випробування",
     "expand_trial_tooltip": "Розгорнути це випробування",
     "no_ships_placeholder": "Кораблі ще не додано.",
@@ -879,7 +888,9 @@
     "ship_builder_modal_title_new": "Додати Новий Корабель",
     "add_to_trial_btn": "Додати до Випробування",
     "update_trial_btn": "Оновити Випробування",
-    "close": "Закрити"
+    "close": "Закрити",
+    "loaded_from_share": "Завантажено зі спільного доступу id: {{id}}",
+    "share_reset_failed": "Не вдалося скинути це випробування до початкового спільного доступу."
   },
   "component_set_picker_modal": {
     "title": "Вибрати Компоненти",
