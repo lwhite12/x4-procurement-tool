@@ -6250,11 +6250,18 @@ function deleteFleet(fleetIndex) {
   }
   // A removed fleet can't go on being the comparison focus either -- same
   // "clear rather than reassign" reasoning as removeShipFromTrial()'s own
-  // baselineInstanceId handling.
+  // baselineInstanceId handling. Fleet Trials' own focus (see
+  // setFleetTrialFocusedFleet()) gets the exact same treatment, for the
+  // exact same reason.
   if (fleetIndex === wareCostListFocusedFleetIndex) {
     wareCostListFocusedFleetIndex = null;
   } else if (wareCostListFocusedFleetIndex !== null && fleetIndex < wareCostListFocusedFleetIndex) {
     wareCostListFocusedFleetIndex -= 1;
+  }
+  if (fleetIndex === fleetTrialFocusedFleetIndex) {
+    fleetTrialFocusedFleetIndex = null;
+  } else if (fleetTrialFocusedFleetIndex !== null && fleetIndex < fleetTrialFocusedFleetIndex) {
+    fleetTrialFocusedFleetIndex -= 1;
   }
   renderCart();
   renderWareCostList();
@@ -6313,14 +6320,17 @@ function buildFleetTabShipIcon(icon, isActive) {
 
 // One fleet's own tab button -- ship icon (see buildFleetTabShipIcon()),
 // name, an optional Build Method Priority line underneath the name (see
-// showBuildPriority below), and a delete "×" (unless only one fleet
-// remains). Clicking anywhere on the button runs `onClick` (default:
-// switch to that fleet via setActiveFleet()); the two sub-controls
-// (priority, "×") each stop that click from bubbling so they act
-// independently of it. Shared by both renderFleetListTabs() (the Fleet
-// Planner's own tab bar) and renderWareCostListHead() (the Ware Cost
-// List's column headers) so a fleet looks identical -- same icon/color/
-// box -- in both places; the Ware Cost List is the only one of the two
+// showBuildPriority below), and a delete "×" (showRemoveButton, default
+// "unless only one fleet remains" -- renderFleetTrials() overrides this
+// to always-off instead, since that view is a read-only aggregate with no
+// business deleting a fleet from its own column header). Clicking
+// anywhere on the button runs `onClick` (default: switch to that fleet
+// via setActiveFleet()); the two sub-controls (priority, "×") each stop
+// that click from bubbling so they act independently of it. Shared by
+// renderFleetListTabs() (the Fleet Planner's own tab bar),
+// renderWareCostListHead() (the Ware Cost List's column headers), and
+// renderFleetTrials() so a fleet looks identical -- same icon/color/box --
+// everywhere; the Ware Cost List is the only one of the three
 // that needs the priority line, since that's the only place it's
 // otherwise ever set (see openBuildMethodModal()).
 //
@@ -6344,6 +6354,7 @@ function buildFleetTabButton(
   fleetIndex,
   {
     showBuildPriority = false,
+    showRemoveButton = fleets.length > 1,
     onClick = () => setActiveFleet(fleetIndex),
     isSelected = fleetIndex === activeFleetIndex,
     selectedClassName = "active",
@@ -6384,7 +6395,7 @@ function buildFleetTabButton(
   }
   tab.appendChild(nameStack);
 
-  if (fleets.length > 1) {
+  if (showRemoveButton) {
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "fleet-list-tab-remove-btn";
@@ -14763,10 +14774,318 @@ function showProvingGroundsTab(tabId) {
   }
   provingGroundsActiveTab = tabId;
   saveState();
+  // Fleet Trials has no "Add"/edit flow of its own at all -- it's just a
+  // live read of `fleets` (see renderFleetTrials()'s own comment), so the
+  // only moment it actually NEEDS a fresh render is the moment it becomes
+  // visible, same as recomputeDirtyFleets() on navigating into Cost
+  // Analysis (see showPage()).
+  if (tabId === "fleet-trials") renderFleetTrials();
 }
 
 for (const btn of document.querySelectorAll(".proving-grounds-tab-btn")) {
   btn.addEventListener("click", () => showProvingGroundsTab(btn.dataset.provingGroundsTab));
+}
+
+// ---- Fleet Trials ----
+// The fleet-level half of Proving Grounds (GitHub issue #43) -- unlike
+// Ship Trials, there's no separate stored array, no "Add Trial" button,
+// and nothing editable here at all: it's always exactly one aggregate
+// comparison, one column per fleet in `fleets` (the same fleets the Fleet
+// Planner/Cost Analyzer already show), recomputed fresh from live data on
+// every render rather than snapshotted. The two sub-tabs (Composition/
+// Performance) are a fixed pair, not user-addable stat sets -- "we will
+// have static stats" (user's own spec) -- so there's no stat picker, no
+// per-column Edit/Remove, no title, nothing to persist per se beyond
+// which of the two sub-tabs was last open.
+let fleetTrialActiveSubTab = "composition";
+
+// Which fleet column is highlighted, independent of activeFleetIndex (the
+// Fleet Planner's own "currently editing this one") -- same separate-
+// state pattern as wareCostListFocusedFleetIndex (user call: Fleet Trials'
+// own selection should behave like the Cost Analyzer's, not the Fleet
+// Planner's). Purely a highlight for now -- unlike the Ware Cost List,
+// nothing here reads it to show a comparison diff (no stat here has an
+// obvious "difference" framing the way a cost total does); toggled by
+// setFleetTrialFocusedFleet() below, same click-again-to-clear UX.
+let fleetTrialFocusedFleetIndex = null;
+
+const fleetTrialTableWrapper = document.getElementById("fleet-trial-table-wrapper");
+
+function setFleetTrialFocusedFleet(fleetIndex) {
+  fleetTrialFocusedFleetIndex = fleetTrialFocusedFleetIndex === fleetIndex ? null : fleetIndex;
+  saveState();
+  renderFleetTrials();
+}
+
+// One cart entry's own resolution context, mirroring
+// shipTrialColumnContext() exactly (same synthetic-table/mock-from-
+// loadout trick, just built straight from a Fleet List cart entry via
+// cartEntryToLoadout() instead of a Ship Trial's own stored loadout) --
+// this is what lets burst/sustained damage (both weapon-mock-driven
+// formulas) resolve correctly for a cart entry's actual equipped
+// loadout, mods included, with zero new plumbing in the stat engine
+// itself.
+function fleetTrialEntryContext(entry) {
+  const loadout = cartEntryToLoadout(entry);
+  const syntheticTable = { componentType: "chassis", statMocks: buildShipMocksFromLoadout(loadout) };
+  const chassisMod = entry.appliedMods?.chassis;
+  const syntheticComponent = chassisMod ? { appliedMods: { standard: chassisMod } } : null;
+  return { componentType: "chassis", table: syntheticTable, statSet: null, component: syntheticComponent, resolving: new Set() };
+}
+
+// One fleet's own aggregate numbers, summed across every cart entry
+// weighted by its own count -- size/type counts are plain ship counts;
+// dock/storage capacity and burst/sustained damage are each entry's own
+// real per-ship value (resolved through the stat engine, mods and all)
+// times that entry's count. A cart entry whose chassis can't be found
+// (shouldn't happen) is skipped rather than throwing. Null/undefined
+// resolved values (e.g. a ship with literally no weapons mounted, so the
+// burst/sustained formulas have nothing to sum) count as a zero
+// contribution rather than being dropped or poisoning the whole fleet's
+// total -- consistent with this being a SUM across many ships, not a
+// single ship's own stat cell where a blank is meaningful.
+// Looked up fresh on every call (not cached at module scope) -- same
+// reasoning every other statCatalogForComponentType() call site in this
+// file already follows: custom/generated stats are only populated by
+// bootstrap's own async fetches, long after this script's top level has
+// finished running.
+function fleetTrialDamageStatDef(key) {
+  return statCatalogForComponentType("chassis")?.definitions.find((def) => def.key === key) ?? null;
+}
+
+function computeFleetTrialAggregates(fleet) {
+  const agg = {
+    sizeCounts: { s: 0, m: 0, l: 0, xl: 0 },
+    typeCounts: {},
+    sDocks: 0,
+    mDocks: 0,
+    sStorage: 0,
+    mStorage: 0,
+    burstTotal: 0,
+    burstBySize: { s: 0, m: 0, l: 0, xl: 0 },
+    burstByType: {},
+    sustainedTotal: 0,
+    sustainedBySize: { s: 0, m: 0, l: 0, xl: 0 },
+    sustainedByType: {},
+  };
+  const chassisSource = statSourceForComponentType("chassis");
+  const burstDamageDef = fleetTrialDamageStatDef("burst_weapon_damage_ship_test");
+  const sustainedDamageDef = fleetTrialDamageStatDef("ship_sustained_damage_total");
+  for (const entry of fleet.cart) {
+    const chassisRow = chassisSource.get(entry.shipWareId);
+    if (!chassisRow) continue;
+    const count = entry.count ?? 1;
+    const size = chassisRow.size;
+    const type = chassisRow.ship_type;
+
+    if (agg.sizeCounts[size] !== undefined) agg.sizeCounts[size] += count;
+    agg.typeCounts[type] = (agg.typeCounts[type] ?? 0) + count;
+    agg.sDocks += count * (chassisRow.s_docks ?? 0);
+    agg.mDocks += count * (chassisRow.m_docks ?? 0);
+    agg.sStorage += count * (chassisRow.s_ship_storage ?? 0);
+    agg.mStorage += count * (chassisRow.m_ship_storage ?? 0);
+
+    const context = fleetTrialEntryContext(entry);
+    const burst = Number(resolveStatValue(burstDamageDef, chassisRow, { ...context, missingMocks: new Set(), mockTrace: [] })) || 0;
+    const sustained =
+      Number(resolveStatValue(sustainedDamageDef, chassisRow, { ...context, missingMocks: new Set(), mockTrace: [] })) || 0;
+
+    agg.burstTotal += count * burst;
+    if (agg.burstBySize[size] !== undefined) agg.burstBySize[size] += count * burst;
+    agg.burstByType[type] = (agg.burstByType[type] ?? 0) + count * burst;
+
+    agg.sustainedTotal += count * sustained;
+    if (agg.sustainedBySize[size] !== undefined) agg.sustainedBySize[size] += count * sustained;
+    agg.sustainedByType[type] = (agg.sustainedByType[type] ?? 0) + count * sustained;
+  }
+  return agg;
+}
+
+// Union of ship_type values actually present across every fleet shown
+// (not the full ~21-value catalog) -- keeps a fleet that only ever flies
+// fighters and miners from showing 19 empty "0" rows for every other
+// type that exists in the game but nobody's built. Every fleet column
+// still shares this exact same row set (so they stay directly comparable
+// row-for-row), it's just computed fresh from current data instead of
+// hardcoded. Sorted the same way the Type filter already does
+// (compareShipTypes -- broad role category, then alphabetically).
+function presentShipTypes(aggregatesByFleet) {
+  const types = new Set();
+  for (const agg of aggregatesByFleet) {
+    for (const type of Object.keys(agg.typeCounts)) types.add(type);
+  }
+  return [...types].sort(compareShipTypes);
+}
+
+function appendFleetTrialGroupHeader(tbody, labelKey, columnCount) {
+  const tr = document.createElement("tr");
+  tr.className = "fleet-trial-group-header";
+  const td = document.createElement("td");
+  td.colSpan = 2 + columnCount;
+  td.textContent = t(labelKey);
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+
+// `columns`: [{fleet, fleetIndex, agg}] -- one per fleet, zipped once by
+// renderFleetTrials() and threaded through every row instead of each row
+// re-deriving a fleet's own aggregates (e.g. via Array.indexOf()) on every
+// single cell. Same column-highlight + value/percent diff comparison as
+// the Cost Analyzer's own Ware Cost List (appendComparisonCell()) --
+// column.fleetIndex === fleetTrialFocusedFleetIndex tints that whole
+// column (not just its header) and every OTHER column gets a diff line
+// against it; every cell gets that second line unconditionally (a real
+// diff when focused, an invisible placeholder otherwise -- same
+// .ware-cost-list-diff-placeholder reuse Ship Trials' own
+// appendStatComparisonDiff() already relies on) so a row's own height
+// never changes when a column is focused/defocused.
+function appendFleetTrialRow(tbody, label, columns, valueFn) {
+  const tr = document.createElement("tr");
+  const labelTd = document.createElement("td");
+  labelTd.className = "fleet-trial-stats-col";
+  labelTd.textContent = label;
+  tr.appendChild(labelTd);
+
+  const hasBaseline = fleetTrialFocusedFleetIndex !== null;
+  const baselineValue = hasBaseline ? valueFn(columns[fleetTrialFocusedFleetIndex].agg) : undefined;
+
+  for (const column of columns) {
+    const td = document.createElement("td");
+    td.className = "fleet-trial-fleet-col";
+    const isFocusedColumn = column.fleetIndex === fleetTrialFocusedFleetIndex;
+    if (isFocusedColumn) td.classList.add("ware-cost-list-focused-column-cell");
+    const value = valueFn(column.agg);
+    td.appendChild(document.createTextNode(value.toLocaleString(undefined, { maximumFractionDigits: 1 })));
+
+    const diffSpan = document.createElement("span");
+    diffSpan.className = "ware-cost-list-diff";
+    const showDiff = hasBaseline && !isFocusedColumn;
+    if (showDiff) {
+      const rawDiff = round2(value - baselineValue);
+      const sign = rawDiff > 0 ? "+" : "";
+      const rawText = `${sign}${rawDiff.toLocaleString(undefined, { maximumFractionDigits: 1 })}`;
+      const pctText = baselineValue === 0 ? "N/A" : `${sign}${((rawDiff / baselineValue) * 100).toFixed(1)}%`;
+      diffSpan.classList.add(
+        rawDiff > 0 ? "ware-cost-list-diff-up" : rawDiff < 0 ? "ware-cost-list-diff-down" : "ware-cost-list-diff-none",
+      );
+      diffSpan.textContent = `(${rawText}, ${pctText})`;
+    } else {
+      diffSpan.classList.add("ware-cost-list-diff-placeholder");
+      // A plain space collapses away entirely under CSS whitespace
+      // rules when it's a block's ONLY content, leaving this span at 0
+      // height -- undoing the whole point of a placeholder (reserve the
+      // line's height, show nothing). appendComparisonCell()/
+      // appendStatComparisonDiff() avoid this with a literal non-breaking
+      // space already;   here is the same character, just spelled
+      // as an escape instead of an invisible byte in source.
+      diffSpan.textContent = " ";
+    }
+    td.appendChild(diffSpan);
+    tr.appendChild(td);
+  }
+  tr.appendChild(document.createElement("td")).className = "fleet-trial-row-filler";
+  tbody.appendChild(tr);
+}
+
+function renderFleetTrials() {
+  if (!fleetTrialTableWrapper) return;
+  fleetTrialTableWrapper.innerHTML = "";
+
+  const columns = fleets.map((fleet, fleetIndex) => ({ fleet, fleetIndex, agg: computeFleetTrialAggregates(fleet) }));
+  const types = presentShipTypes(columns.map((column) => column.agg));
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headTr = document.createElement("tr");
+  const cornerTh = document.createElement("th");
+  cornerTh.className = "fleet-trial-stats-col";
+  cornerTh.textContent = t("proving_grounds.stats_column_header");
+  headTr.appendChild(cornerTh);
+  for (const column of columns) {
+    const th = document.createElement("th");
+    const isFocused = column.fleetIndex === fleetTrialFocusedFleetIndex;
+    // Same green-tinted ship-class icon + name as the Fleet Planner's own
+    // tabs and the Cost Analyzer's own Ware Cost List column headers (see
+    // buildFleetTabButton()'s own comment on why it's shared three ways
+    // now). Selection/highlight here follows fleetTrialFocusedFleetIndex,
+    // its own state completely independent of activeFleetIndex -- same
+    // "selection is its own thing" behavior the Ware Cost List's own
+    // focus already has (user call), not the Fleet Planner's "this is
+    // what I'm currently editing" one. ware-cost-list-focused-column tints
+    // the whole header cell (reused as-is, not scoped to #ware-cost-list-
+    // table), matching appendFleetTrialRow()'s own per-cell
+    // ware-cost-list-focused-column-cell below it, so the highlight runs
+    // the full height of the table, not just the header row.
+    th.className = isFocused ? "fleet-trial-fleet-col ware-cost-list-focused-column" : "fleet-trial-fleet-col";
+    th.appendChild(
+      buildFleetTabButton(column.fleet, column.fleetIndex, {
+        onClick: () => setFleetTrialFocusedFleet(column.fleetIndex),
+        isSelected: isFocused,
+        selectedClassName: "cost-analyzer-selected",
+        showRemoveButton: false,
+      }),
+    );
+    headTr.appendChild(th);
+  }
+  headTr.appendChild(document.createElement("th")).className = "fleet-trial-row-filler";
+  thead.appendChild(headTr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  const colCount = columns.length;
+
+  if (fleetTrialActiveSubTab === "composition") {
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_size_counts", colCount);
+    for (const size of SIZE_ORDER) {
+      appendFleetTrialRow(tbody, size.toUpperCase(), columns, (agg) => agg.sizeCounts[size]);
+    }
+
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_dock_capacity", colCount);
+    appendFleetTrialRow(tbody, "S", columns, (agg) => agg.sDocks);
+    appendFleetTrialRow(tbody, "M", columns, (agg) => agg.mDocks);
+
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_storage_capacity", colCount);
+    appendFleetTrialRow(tbody, "S", columns, (agg) => agg.sStorage);
+    appendFleetTrialRow(tbody, "M", columns, (agg) => agg.mStorage);
+
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_type_counts", colCount);
+    for (const type of types) {
+      appendFleetTrialRow(tbody, shipTypeNames[type] ?? type, columns, (agg) => agg.typeCounts[type] ?? 0);
+    }
+  } else {
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_burst_damage", colCount);
+    appendFleetTrialRow(tbody, t("proving_grounds.fleet_trial_total_row"), columns, (agg) => agg.burstTotal);
+    for (const size of SIZE_ORDER) {
+      appendFleetTrialRow(tbody, size.toUpperCase(), columns, (agg) => agg.burstBySize[size]);
+    }
+    for (const type of types) {
+      appendFleetTrialRow(tbody, shipTypeNames[type] ?? type, columns, (agg) => agg.burstByType[type] ?? 0);
+    }
+
+    appendFleetTrialGroupHeader(tbody, "proving_grounds.fleet_trial_group_sustained_damage", colCount);
+    appendFleetTrialRow(tbody, t("proving_grounds.fleet_trial_total_row"), columns, (agg) => agg.sustainedTotal);
+    for (const size of SIZE_ORDER) {
+      appendFleetTrialRow(tbody, size.toUpperCase(), columns, (agg) => agg.sustainedBySize[size]);
+    }
+    for (const type of types) {
+      appendFleetTrialRow(tbody, shipTypeNames[type] ?? type, columns, (agg) => agg.sustainedByType[type] ?? 0);
+    }
+  }
+  table.appendChild(tbody);
+  fleetTrialTableWrapper.appendChild(table);
+}
+
+function showFleetTrialSubTab(subTab) {
+  for (const btn of document.querySelectorAll(".fleet-trial-subtab-btn")) {
+    btn.classList.toggle("active", btn.dataset.fleetTrialSubtab === subTab);
+  }
+  fleetTrialActiveSubTab = subTab;
+  saveState();
+  renderFleetTrials();
+}
+
+for (const btn of document.querySelectorAll(".fleet-trial-subtab-btn")) {
+  btn.addEventListener("click", () => showFleetTrialSubTab(btn.dataset.fleetTrialSubtab));
 }
 
 // One stat-set tab -- same look/behavior as the Fleet Lists tab bar's own
@@ -21345,6 +21664,13 @@ function showPage(pageId) {
   // very first page shown at load -- see bootstrap()'s own trailing check,
   // since this runs before fleets are ever restored from localStorage.
   if (pageId === "cost-analysis") recomputeDirtyFleets();
+  // Fleet Trials has no "navigate in" hook of its own (see
+  // renderFleetTrials()'s own comment) -- re-render on every entry into
+  // Proving Grounds so edits made elsewhere (Fleet Planner cart changes)
+  // while Fleet Trials wasn't on screen show up immediately rather than
+  // needing a subtab click to refresh. Harmless no-op if Ship Trials is
+  // the active sub-tab or the page hasn't been bootstrapped yet.
+  if (pageId === "proving-grounds") renderFleetTrials();
 }
 
 for (const btn of document.querySelectorAll(".main-nav-btn")) {
@@ -21402,6 +21728,8 @@ function saveState() {
     componentAnalyzerTables,
     shipTrials,
     provingGroundsActiveTab,
+    fleetTrialActiveSubTab,
+    fleetTrialFocusedFleetIndex,
     // Statistics Lab (GitHub issue #26) -- persisted globally, independent
     // of componentAnalyzerTables (see customStatGroups' own comment), so a
     // custom stat/group survives even if every table that ever used it is
@@ -21496,6 +21824,12 @@ async function restorePersistedState(state) {
       typeof state.wareCostListFocusedFleetIndex === "number"
         ? Math.min(Math.max(state.wareCostListFocusedFleetIndex, 0), fleets.length - 1)
         : null;
+    // Same clamp/null-default reasoning as wareCostListFocusedFleetIndex
+    // immediately above, for Fleet Trials' own independent focus.
+    fleetTrialFocusedFleetIndex =
+      typeof state.fleetTrialFocusedFleetIndex === "number"
+        ? Math.min(Math.max(state.fleetTrialFocusedFleetIndex, 0), fleets.length - 1)
+        : null;
   }
   // priceOverrides is const (mutated in place elsewhere too, e.g. the
   // Configured Ware Price Overrides list's own "x" remove button) --
@@ -21562,6 +21896,12 @@ async function restorePersistedState(state) {
   }
   if (state.provingGroundsActiveTab === "ship-trials" || state.provingGroundsActiveTab === "fleet-trials") {
     provingGroundsActiveTab = state.provingGroundsActiveTab;
+  }
+  if (state.fleetTrialActiveSubTab === "composition" || state.fleetTrialActiveSubTab === "performance") {
+    fleetTrialActiveSubTab = state.fleetTrialActiveSubTab;
+    for (const btn of document.querySelectorAll(".fleet-trial-subtab-btn")) {
+      btn.classList.toggle("active", btn.dataset.fleetTrialSubtab === fleetTrialActiveSubTab);
+    }
   }
 
   // nextStatSetId is shared across componentAnalyzerTables AND shipTrials

@@ -15,6 +15,19 @@ it.
 
 ## [Unreleased] - Development
 
+## [0.9.0] - 2026-11-04 - Production
+
+### Added
+
+- Proving Grounds: Fleet Trials is no longer "Under Construction" -- it's a read-only, always-populated
+  aggregate comparison of every Fleet List, one column per fleet, with two fixed tabs. Composition shows
+  ship size counts, S/M dock capacity, S/M ship storage capacity, and ship type counts. Performance shows
+  Burst and Sustained Weapon Damage, each broken down by total, by size, and by ship type. Clicking a
+  fleet's own header highlights that whole column and shows a value/percent diff for every other fleet
+  against it, independent of whichever fleet is active in the Fleet Planner -- same selection behavior as
+  the Cost Analyzer's own Ware Cost List, including reusing its green fleet-icon/column-highlight/diff
+  styling.
+
 ## [0.8.0] - 2026-11-04 - Production
 
 ### Added

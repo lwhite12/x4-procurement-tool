@@ -2035,6 +2035,93 @@ input[type="checkbox"] {
   cursor: default;
 }
 
+/* Composition/Performance toggle, Fleet Trials' own equivalent of the
+   Ship/Fleet Trials legend tabs above -- same look (border-box active
+   state, no color swap), just one level down and not living in a
+   <legend> since Fleet Trials isn't its own <fieldset>. */
+.fleet-trial-subtabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.fleet-trial-subtab-btn {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.fleet-trial-subtab-btn:hover {
+  color: var(--text-primary);
+}
+
+.fleet-trial-subtab-btn.active {
+  color: var(--text-primary);
+  border-color: var(--border-blue);
+  cursor: default;
+}
+
+#fleet-trial-table-wrapper table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Same "shrink stats-label/entity columns to content, dump the rest into
+   a trailing filler cell" trick as #ship-trials-list's own stats-col/
+   ship-col/row-filler (see that CSS block's own long comment) --
+   reimplemented under this table's own id rather than reusing those
+   classes, since their width rule is itself scoped to #ship-trials-list
+   and wouldn't apply here. */
+#fleet-trial-table-wrapper th.fleet-trial-stats-col,
+#fleet-trial-table-wrapper td.fleet-trial-stats-col,
+#fleet-trial-table-wrapper th.fleet-trial-fleet-col,
+#fleet-trial-table-wrapper td.fleet-trial-fleet-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* <td>'s own default vertical-align is middle -- fine for the fleet value
+   columns (their own 2-line value+diff content already fills the row top
+   to bottom), but it left the stats-label column's single line of text
+   visibly centered within a now-taller row once the diff placeholder
+   line (see appendFleetTrialRow() in app.js) made every row 2 lines
+   tall -- user call. */
+#fleet-trial-table-wrapper td.fleet-trial-stats-col {
+  vertical-align: top;
+}
+
+/* Same lighter-blue panel background as Ship Trials'/Component Analyzer's
+   own frozen stat-label column (--bg-panel, vs. the plain --bg-section
+   every other cell gets -- see that rule's own comment) -- user call.
+   Not made sticky here (unlike that one) -- Fleet Trials was never asked
+   to freeze this column while scrolling, just to match its color. */
+#fleet-trial-table-wrapper th.fleet-trial-stats-col,
+#fleet-trial-table-wrapper td.fleet-trial-stats-col {
+  background: var(--bg-panel);
+}
+
+.fleet-trial-group-header td {
+  font-weight: 700;
+  background: var(--bg-tier);
+}
+
+/* Vertical divider between adjacent columns -- same convention as
+   #ware-cost-list-table's own (see that rule's comment); excluded from
+   the group-header rows (colspan, set via td.colSpan = ... in
+   appendFleetTrialGroupHeader()), which span every column as one cell
+   and shouldn't get a stray line through their middle. */
+#fleet-trial-table-wrapper th:not(:last-child):not([colspan]),
+#fleet-trial-table-wrapper td:not(:last-child):not([colspan]) {
+  border-right: 1px solid var(--border-blue-soft);
+}
+
 /* Ship Trials' own "no ships yet" placeholder body (see app.js's
    buildShipTrialElement()) -- shown until at least one ship is added, then
    replaced by the real transposed ship-column table (buildShipTrialBody()). */

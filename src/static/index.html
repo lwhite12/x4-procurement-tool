@@ -388,10 +388,25 @@
       </div>
 
       <div id="proving-grounds-fleet-trials" class="proving-grounds-tab-content hidden">
-        <div class="proving-grounds-under-construction">
-          <img src="/images/nav_icons/construction_site.png" alt="" class="proving-grounds-under-construction-icon" />
-          <span data-i18n="proving_grounds.under_construction">Under Construction</span>
+        <div class="fleet-trial-subtabs">
+          <button
+            type="button"
+            class="fleet-trial-subtab-btn active"
+            data-fleet-trial-subtab="composition"
+            data-i18n="proving_grounds.fleet_trial_composition_tab"
+          >
+            Composition
+          </button>
+          <button
+            type="button"
+            class="fleet-trial-subtab-btn"
+            data-fleet-trial-subtab="performance"
+            data-i18n="proving_grounds.fleet_trial_performance_tab"
+          >
+            Performance
+          </button>
         </div>
+        <div id="fleet-trial-table-wrapper" class="component-analyzer-table-wrapper"></div>
       </div>
     </fieldset>
   </div>
